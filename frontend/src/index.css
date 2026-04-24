@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans text-base text-gray-100 bg-gray-1000;
+  }
+}
+
+.adapt-card {
+  @apply bg-gray-900 border border-gray-800 rounded p-4 text-gray-100;
+}
+
+.adapt-btn {
+  @apply px-3 py-1.5 rounded transition-all cursor-pointer text-base font-normal inline-flex items-center gap-2 border border-transparent;
+}
+
+.adapt-btn-primary {
+  @apply bg-primary text-white hover:bg-primary-hover;
+}

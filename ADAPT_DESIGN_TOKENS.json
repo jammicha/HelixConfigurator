@@ -1,0 +1,47 @@
+{
+  "name": "ADAPT Design System Tokens",
+  "version": "1.0.0",
+  "tokens": {
+    "color": {
+      "primary": { "value": "#4040d9", "type": "color" },
+      "primaryHover": { "value": "#3006c2", "type": "color" },
+      "secondary": { "value": "#dde0ee", "type": "color" },
+      "active": { "value": "#3759d8", "type": "color" },
+      "success": { "value": "#11845b", "type": "color" },
+      "info": { "value": "#389be1", "type": "color" },
+      "warning": { "value": "#ffd200", "type": "color" },
+      "danger": { "value": "#b2001e", "type": "color" },
+      "white": { "value": "#ffffff", "type": "color" },
+      "black": { "value": "#000000", "type": "color" },
+      "gray": {
+        "100": { "value": "#f9fafa", "type": "color" },
+        "200": { "value": "#f1f1f4", "type": "color" },
+        "300": { "value": "#d5d6dd", "type": "color" },
+        "400": { "value": "#b3b6c1", "type": "color" },
+        "500": { "value": "#8c8fa1", "type": "color" },
+        "600": { "value": "#707589", "type": "color" },
+        "700": { "value": "#555868", "type": "color" },
+        "800": { "value": "#393b46", "type": "color" },
+        "900": { "value": "#22242a", "type": "color" },
+        "1000": { "value": "#1c1d22", "type": "color" }
+      }
+    },
+    "typography": {
+      "fontFamily": { "value": "\"Open Sans\", -apple-system, sans-serif", "type": "fontFamily" },
+      "fontSize": {
+        "base": { "value": "0.8125rem", "type": "dimension" },
+        "lg": { "value": "0.9375rem", "type": "dimension" },
+        "sm": { "value": "0.75rem", "type": "dimension" }
+      },
+      "fontWeight": {
+        "light": { "value": "200", "type": "fontWeight" },
+        "normal": { "value": "400", "type": "fontWeight" },
+        "bold": { "value": "600", "type": "fontWeight" }
+      }
+    },
+    "spacing": {
+      "borderRadius": { "value": "4px", "type": "dimension" },
+      "borderWidth": { "value": "1px", "type": "dimension" }
+    }
+  }
+}

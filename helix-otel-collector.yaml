@@ -1,0 +1,32 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+  resourcedetection:
+    detectors: [env, system]
+
+exporters:
+  otlphttp/bmchelix:
+    endpoint: ${HELIX_ENDPOINT}
+    headers:
+      Authorization: "Bearer ${HELIX_API_KEY}"
+      X-Source: "${X_SOURCE}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resourcedetection]
+      exporters: [otlphttp/bmchelix]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/bmchelix]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/bmchelix]

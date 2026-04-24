@@ -1,0 +1,183 @@
+/**
+ * ADAPT Design System - Core Tokens & Themes
+ * This file contains the foundational design tokens, theme definitions,
+ * and base styles for the ADAPT design system.
+ */
+
+:root,
+[data-theme="light"] {
+  /* --- Brand Colors --- */
+  --color-primary: #4040d9;
+  --color-primary-hover: #3006c2;
+  --color-primary-pressed: #4300d5;
+  --color-primary-text: #ffffff;
+  --color-primary-muted: #bcbcf5;
+
+  --color-secondary: #dde0ee;
+  --color-secondary-hover: #b8bcc9;
+  --color-secondary-pressed: #8f93a0;
+  --color-secondary-text: #22242a;
+
+  --color-active: #3759d8;
+  --color-active-hover: #1f37bd;
+  --color-active-text: #ffffff;
+
+  /* --- Status Colors --- */
+  --color-success: #11845b;
+  --color-success-hover: #006640;
+  --color-success-text: #ffffff;
+
+  --color-info: #389be1;
+  --color-info-hover: #007cc1;
+  --color-info-text: #22242a;
+
+  --color-warning: #ffd200;
+  --color-warning-hover: #d9ae00;
+  --color-warning-text: #22242a;
+
+  --color-danger: #b2001e;
+  --color-danger-hover: #890008;
+  --color-danger-text: #ffffff;
+
+  /* --- Grayscale --- */
+  --white: #ffffff;
+  --gray-100: #f9fafa;
+  --gray-200: #f1f1f4;
+  --gray-300: #d5d6dd;
+  --gray-400: #b3b6c1;
+  --gray-500: #8c8fa1;
+  --gray-600: #707589;
+  --gray-700: #555868;
+  --gray-800: #393b46;
+  --gray-900: #22242a;
+  --gray-1000: #1c1d22;
+  --black: #000000;
+
+  /* --- Typography --- */
+  --font-family: "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-size-base: .8125rem;
+  --font-size-lg: .9375rem;
+  --font-size-sm: .75rem;
+  --font-size-xs: .6875rem;
+  --font-size-xxs: .625rem;
+
+  --font-weight-light: 200;
+  --font-weight-normal: 400;
+  --font-weight-bold: 600;
+
+  --h1-font-size: 1.75rem;
+  --h2-font-size: 1.3125rem;
+
+  /* --- Spacing & Layout --- */
+  --border-radius: 4px;
+  --border-width: 1px;
+  --disabled-opacity: .6;
+
+  --en-space: .385em;
+  --em-space: .999em;
+  --thin-space: .2115em;
+  --hair-space: .082em;
+
+  /* --- Shadows --- */
+  --shadow-0: none;
+  --shadow-1: 0 1px 4px rgba(0, 0, 0, .17), 0 4px 12px 4px rgba(0, 0, 0, .06);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, .2), 0 8px 24px 8px rgba(0, 0, 0, .09);
+
+  /* --- Animation --- */
+  --animation-fast: .25s;
+  --animation-medium: .5s;
+  --ease-transition-in-out: cubic-bezier(.4, 0, .2, 1);
+  --transition-base: all var(--animation-fast) var(--ease-transition-in-out);
+
+  /* --- Component Specific --- */
+  --text-default: var(--gray-900);
+  --color-foreground: var(--white);
+  --color-background: var(--gray-200);
+  --border-color: var(--gray-300);
+}
+
+[data-theme="dark"] {
+  --dark-mode: true;
+  color-scheme: dark;
+
+  --color-primary: #4040d9;
+  --color-primary-hover: #515aee;
+  --color-primary-text: #ffffff;
+
+  --color-secondary: #434765;
+  --color-secondary-hover: #585c7b;
+  --color-secondary-text: #ffffff;
+
+  --color-active: #8ca1f3;
+  --color-active-hover: #a5baff;
+  --color-active-text: #22242a;
+
+  --white: #ffffff;
+  --gray-100: #2a2c34;
+  --gray-200: #323540;
+  --gray-300: #3f4251;
+  --gray-400: #555868;
+  --gray-500: #707589;
+  --gray-600: #8c8fa1;
+  --gray-700: #b3b6c1;
+  --gray-800: #d5d6dd;
+  --gray-900: #f1f1f4;
+  --gray-1000: #f9fafa;
+
+  --text-default: var(--gray-900);
+  --color-foreground: #22242a;
+  --color-background: #1c1d22;
+  --border-color: var(--gray-300);
+
+  --shadow-1: 0 1px 4px rgba(0, 0, 0, .38), 0 4px 12px 4px rgba(0, 0, 0, .18);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, .47), 0 8px 24px 8px rgba(0, 0, 0, .27);
+}
+
+/**
+ * Global Styles Helper
+ */
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  color: var(--text-default);
+  background-color: var(--color-background);
+  margin: 0;
+}
+
+h1 { font-size: var(--h1-font-size); font-weight: var(--font-weight-bold); }
+h2 { font-size: var(--h2-font-size); font-weight: var(--font-weight-bold); }
+
+.adapt-btn {
+  display: inline-block;
+  font-weight: var(--font-weight-normal);
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  user-select: none;
+  border: var(--border-width) solid transparent;
+  padding: .375rem .75rem;
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  border-radius: var(--border-radius);
+  transition: var(--transition-base);
+}
+
+.adapt-btn-primary {
+  color: var(--color-primary-text);
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.adapt-btn-primary:hover {
+  background-color: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.adapt-card {
+  background-color: var(--color-foreground);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 1rem;
+  box-shadow: var(--shadow-1);
+}
