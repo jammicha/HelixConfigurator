@@ -1,0 +1,22 @@
+[
+  {
+    "id": "default-sidecar",
+    "name": "Default Helix Sidecar",
+    "description": "Standard OTLP gRPC + HTTP receiver, batch processing, forwarded to Helix. Recommended starting point for most apps."
+  },
+  {
+    "id": "prometheus-scrape",
+    "name": "Prometheus Scrape + OTLP",
+    "description": "Adds a Prometheus receiver that scrapes a target endpoint, useful for legacy apps that already expose /metrics."
+  },
+  {
+    "id": "tail-sampling",
+    "name": "Tail Sampling for High-Volume Tracing",
+    "description": "Adds a tail_sampling processor that keeps errors and slow traces, drops the rest. Use when trace volume is overwhelming."
+  },
+  {
+    "id": "k8s-attributes",
+    "name": "Kubernetes Attribute Enrichment",
+    "description": "Adds k8sattributes processor to enrich telemetry with pod/namespace/node metadata. Use when running in Kubernetes."
+  }
+]

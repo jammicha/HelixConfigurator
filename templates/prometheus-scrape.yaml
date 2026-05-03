@@ -5,6 +5,15 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+  # Scrape an existing Prometheus endpoint exposed by your application.
+  # Update the targets list to point at your app's :PORT/metrics.
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'app-metrics'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['host.docker.internal:9090']
 
 processors:
   batch:
@@ -35,7 +44,7 @@ service:
       processors: [batch]
       exporters: [otlphttp/bmchelix]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, prometheus]
       processors: [batch]
       exporters: [otlphttp/bmchelix]
     logs:

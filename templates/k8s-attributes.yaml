@@ -10,6 +10,27 @@ processors:
   batch:
     timeout: 1s
     send_batch_size: 1024
+  # Enriches telemetry with Kubernetes pod / namespace / node metadata.
+  # Requires the collector pod to have RBAC permissions to list pods/namespaces.
+  k8sattributes:
+    auth_type: serviceAccount
+    extract:
+      metadata:
+        - k8s.namespace.name
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.node.name
+        - k8s.deployment.name
+      labels:
+        - tag_name: app
+          key: app.kubernetes.io/name
+          from: pod
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+      - sources:
+          - from: connection
 
 exporters:
   otlphttp/bmchelix:
@@ -32,13 +53,13 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [k8sattributes, batch]
       exporters: [otlphttp/bmchelix]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [k8sattributes, batch]
       exporters: [otlphttp/bmchelix]
     logs:
       receivers: [otlp]
-      processors: [batch]
+      processors: [k8sattributes, batch]
       exporters: [otlphttp/bmchelix]

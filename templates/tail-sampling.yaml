@@ -10,6 +10,25 @@ processors:
   batch:
     timeout: 1s
     send_batch_size: 1024
+  # Tail sampling: keep all errors + slow traces, sample the rest.
+  # Tune `decision_wait` and rate to your traffic volume.
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 1000
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 500
+      - name: probabilistic
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
 
 exporters:
   otlphttp/bmchelix:
@@ -32,7 +51,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [tail_sampling, batch]
       exporters: [otlphttp/bmchelix]
     metrics:
       receivers: [otlp]

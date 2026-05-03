@@ -9,8 +9,30 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./helix-otel-collector.yaml:/app/helix-otel-collector.yaml
       - ./.env:/app/.env
+    env_file:
+      - .env
     environment:
-      - HELIX_ENDPOINT=${HELIX_ENDPOINT}
-      - HELIX_API_KEY=${HELIX_API_KEY}
-      - X_SOURCE=${X_SOURCE}
-      - TARGET_CONTAINER_NAME=${TARGET_CONTAINER_NAME}
+      - TARGET_CONTAINER_NAME=helix-gateway
+    depends_on:
+      - helix-gateway
+    networks:
+      - helix-bridge
+
+  helix-gateway:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: helix-gateway
+    ports:
+      - '4317:4317'
+      - '4318:4318'
+      - '8888:8888'
+    env_file:
+      - .env
+    volumes:
+      - ./helix-otel-collector.yaml:/etc/otelcol-contrib/config.yaml
+    networks:
+      - helix-bridge
+
+networks:
+  helix-bridge:
+    name: helix-bridge
+    driver: bridge

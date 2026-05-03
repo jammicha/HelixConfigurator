@@ -1,82 +1,142 @@
 # Helix Configurator
 
-The Helix Configurator is a local diagnostic and management tool designed to simplify the onboarding of OpenTelemetry data to BMC Helix. It provides a secure, web-based UI to manage your OpenTelemetry collector, validate configurations, and ensure your telemetry is successfully reaching the cloud.
+The Helix Configurator is a local diagnostic and management tool that simplifies onboarding OpenTelemetry data to BMC Helix. It runs as a sidecar pair (a configurator UI + an OpenTelemetry Collector "gateway") and provides a web UI to:
+
+- Configure and edit the collector's YAML pipeline.
+- Validate configuration syntax, API key format, and tenant connectivity.
+- Bridge local application containers onto the same Docker network as the gateway so their telemetry can flow through.
+- Stream collector and per-service logs in real time.
+- Inject synthetic traces and verify telemetry is reaching Helix.
+- Deep-link into BMC Helix dashboards and AIOps for the configured business service.
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed on your system:
-* [Docker](https://docs.docker.com/get-docker/)
-* [Docker Compose](https://docs.docker.com/compose/install/)
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/install/)
 
 ## Getting Started
 
-Follow these steps to configure and run the application locally.
+### 1. Configure environment variables
 
-### 1. Configure Environment Variables
+Copy `.env.example` to `.env` and fill in the required values:
 
-The application relies on environment variables to securely connect to your BMC Helix instance.
+```bash
+cp .env.example .env
+```
 
-1. Open the `.env` file located in the root of this project directory (`dev/HelixConfigurator/.env`).
-2. Update the variables with your specific Helix credentials:
+```env
+# Required
+HELIX_ENDPOINT=https://your-tenant.onbmc.com
+HELIX_API_KEY=TenantID::AccessKey::SecretKey
+X_SOURCE=your-business-service-name
+APP_URL=http://localhost:8080
 
-   ```env
-   HELIX_ENDPOINT=https://your-helix-instance.com/otlp/v1/traces
-   HELIX_API_KEY=your-api-key-here
-   X_SOURCE=enter-your-xsource-here
-   ```
+# Optional: deep-link to AIOps Business Service. Paste the opaque key from
+# https://<tenant>/aiops/#/entities/service/<KEY>?type=key — you can also paste
+# the full URL and the UI will extract the key.
+BUSINESS_SERVICE_KEY=
 
-### 2. Start the Services
+# Optional: require sign-in to the configurator UI. Leave blank for open access.
+UI_AUTH_PASSWORD=
 
-The application is fully containerized. Use Docker Compose to build and start the backend, frontend, and the OpenTelemetry Collector simultaneously.
+# Internal: container the configurator manages. Leave as default unless renaming.
+TARGET_CONTAINER_NAME=helix-gateway
+```
 
-1. Open a terminal and navigate to the project directory:
-   ```bash
-   cd dev/HelixConfigurator
-   ```
-2. Build and run the containers in detached mode:
-   ```bash
-   docker-compose up --build -d
-   ```
+Notes:
+- `HELIX_ENDPOINT` is the bare tenant URL — do **not** append `/otlp/v1/traces`. The gateway adds the path itself.
+- `HELIX_API_KEY` is three parts joined by `::`. The configurator validates the structure and rejects single-token strings.
+- `X_SOURCE` becomes the `service.namespace` / Business Service identifier in Helix.
+- `APP_URL` is the URL of the application you intend to instrument; the configurator uses its hostname to bridge networks during onboarding.
+- `UI_AUTH_PASSWORD` enables shared-password sign-in to the configurator UI. Leave blank for open access. This is "prevent casual access" — anyone wanting real authentication should put an SSO proxy in front.
 
-### 3. Access the Application
+### 2. Start the services
 
-Once the containers are running, the Helix Configurator UI will be available on your host machine.
+```bash
+docker-compose up --build -d
+```
 
-* **Local Access:** Open your web browser and navigate to:
-  [http://localhost:3000](http://localhost:3000)
+This builds the configurator image, starts the OpenTelemetry Collector (`helix-gateway`) with your config mounted, and exposes the UI on `http://localhost:3000`.
 
-* **Remote Access (SSH Tunnel):** If you deployed the Configurator on a remote headless server, you can create a secure tunnel. Run this on your local workstation:
+### 3. Open the UI
+
+- **Local:** [http://localhost:3000](http://localhost:3000)
+- **Remote (SSH tunnel):**
   ```bash
-  ssh -L 3000:localhost:3000 <your-username>@<server-ip>
+  ssh -L 3000:localhost:3000 <user>@<server>
   ```
-  Then, navigate to `http://localhost:3000` in your local browser.
+  Then open `http://localhost:3000` locally.
+
+On first run, the UI walks you through a two-step onboarding wizard: capture credentials, restart the gateway, bridge to your application's network, then verify telemetry flow.
+
+## Features
+
+After onboarding, the dashboard provides:
+
+- **Helix Gateway Status** — start/stop/restart controls with live container state.
+- **Operation Shortcuts**
+  - **Run Diagnostic Health Check** — toggles a 5-minute deep-diagnostic session: 4 status cards (Collector Configuration, X-API Key Format, X-Source Format, Tenant URL Endpoint), live `received` / `sent` / `dropped` counters with rolling 3-minute trend sparklines, log streaming, and synthetic trace injection.
+  - **Discovered Services** — slide-out panel listing local Docker containers; click *Attach to Bridge* to wire an app's telemetry through the gateway.
+  - **Re-verify Telemetry Flow** — one-click check that data is reaching Helix, with a count snapshot in the toast.
+  - **Copy Support Bundle** — copies a sanitized snapshot (env with API key redacted, container status, diagnostic check results, live metrics, last 5 log lines) to the clipboard for support tickets.
+  - **Helix OTel Dashboard** — deep-link to the namespace overview dashboard.
+  - **AIOps Business Service** — deep-link to the configured business service in AIOps (requires `BUSINESS_SERVICE_KEY`).
+  - **Application UI** — opens `APP_URL`.
+- **Helix Connection Settings** — edit env vars in-place; saving triggers a gateway restart so changes take effect immediately. The Settings card also displays whether the UI is open access or password-required.
+- **Gateway Config (YAML)** — Monaco-based editor with syntax highlighting, save-time validation (line-precise parse errors plus structural-lint warnings for typos like `recievers`, undefined pipeline references, missing `service` block), and `Cmd+S` / `Ctrl+S` to save.
+  - **Load Template** — picker modal with built-in starting points: Default Sidecar, Prometheus Scrape, Tail Sampling for High-Volume Tracing, and Kubernetes Attribute Enrichment. Selecting a template loads its content into the editor with current env vars substituted; click Save Config to apply.
+- **Diagnostic Log Stream**
+  - Streams logs from whichever target is active: the attached service if one exists, otherwise the gateway.
+  - Filter toggle: *Helix Only* (default — keyword-filtered to ingestion-relevant lines) or *All Logs*.
+  - Smart auto-scroll (follows new lines only when you're at the bottom).
+  - **Show Raw Metrics** — opens the gateway's `:8888/metrics` endpoint in a modal with relevant-only filtering and copy-to-clipboard, useful for verifying counter values directly.
+
+## Container & Port Reference
+
+| Service | Container | Host Port | Purpose |
+|---|---|---|---|
+| `helix-configurator` | `helix-configurator` | 3000 → 3001 | Configurator UI + backend API |
+| `helix-gateway` | `helix-gateway` | 4317 | OTLP gRPC receiver |
+| `helix-gateway` | `helix-gateway` | 4318 | OTLP HTTP receiver |
+| `helix-gateway` | `helix-gateway` | 8888 | Prometheus metrics endpoint (used by the diagnostic counters) |
+
+Both containers attach to the `helix-bridge` Docker network. Application containers can be attached to the same network at runtime via the *Discovered Services* panel — once attached, point your app's OTel exporter at `helix-gateway:4317` and `X-Api-Key` / `X-Source` headers will be injected by the gateway.
+
+The configurator also exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes — bypasses the auth gate so it works in unauthenticated orchestrator checks.
 
 ## Troubleshooting & Management
 
-* **View Logs:** To view the logs for the Configurator application:
+- View configurator logs:
   ```bash
   docker logs helix-configurator
   ```
-  To view the logs for the OpenTelemetry Collector:
+- View gateway (OTel Collector) logs:
   ```bash
-  docker logs helix-otel-collector
+  docker logs helix-gateway
   ```
-
-* **Stop the Services:** When you are finished, you can gracefully stop and remove the containers by running:
+- Stop and remove containers:
   ```bash
   docker-compose down
   ```
+- Reset the gateway to a fresh state without losing settings:
+  Use the **Restart** button in the UI's *Helix Gateway Status* card.
 
 ## Development
 
-If you wish to run the application components locally without Docker for development purposes:
+To run the components outside Docker:
 
 ### Backend
-1. Navigate to the `backend` directory.
-2. Install dependencies: `npm install`
-3. Start the server (runs on port 3001): `npm run dev`
+```bash
+cd backend
+npm install
+npm run dev   # starts on :3001
+```
 
 ### Frontend
-1. Navigate to the `frontend` directory.
-2. Install dependencies: `npm install`
-3. Start the Vite dev server (runs on port 3000): `npm run dev`
+```bash
+cd frontend
+npm install
+npm run dev   # starts Vite dev server on :3000
+```
+
+The frontend dev server proxies `/api/*` to `http://localhost:3001`. Both halves can run concurrently while developing.

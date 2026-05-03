@@ -1,21 +1,48 @@
+@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Source+Code+Pro:wght@400;600&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  html { font-size: 16px; }
   body {
-    @apply font-sans text-base text-gray-100 bg-gray-1000;
+    font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    @apply text-gray-100 bg-gray-1000;
   }
 }
 
 .adapt-card {
-  @apply bg-gray-900 border border-gray-800 rounded p-4 text-gray-100;
+  @apply bg-gray-900 border border-gray-800 rounded-lg p-4 text-gray-100 shadow-1;
 }
 
 .adapt-btn {
-  @apply px-3 py-1.5 rounded transition-all cursor-pointer text-base font-normal inline-flex items-center gap-2 border border-transparent;
+  @apply px-3 py-1.5 rounded transition-all duration-[150ms] cursor-pointer text-base font-semibold inline-flex items-center gap-2 border border-transparent leading-snug;
 }
 
 .adapt-btn-primary {
-  @apply bg-primary text-white hover:bg-primary-hover;
+  @apply bg-primary text-white hover:bg-[#3006c2];
+}
+
+.adapt-input {
+  @apply w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-base;
+}
+
+.adapt-badge-success {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-tiny font-semibold bg-[#bcf5e1] text-[#0e6d4b];
+}
+
+.adapt-badge-danger {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-tiny font-semibold bg-[#f5bcc6] text-[#b2001e];
+}
+
+.adapt-badge-warning {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-tiny font-semibold bg-[#f5ebbc] text-[#826900];
+}
+
+.adapt-badge-info {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-tiny font-semibold bg-[#bcdef5] text-[#00579c];
 }
