@@ -4,7 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3001"
+      # 8765 matches the bundled install template — avoids colliding with
+      # the Vite dev server on 3000.
+      - "8765:3001"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./helix-otel-collector.yaml:/app/helix-otel-collector.yaml
