@@ -2209,6 +2209,38 @@ app.post('/api/lifecycle/bridge-network', async (req, res) => {
   }
 });
 
+// POST restart an OTel collector container by name. Used by the "stream
+// stalled" affordance on /otel-data when the upstream collector's
+// memory_limiter has tripped (common after the OTel demo runs for hours).
+// Safety: the target must show up in /api/discovery/collectors — we won't
+// restart arbitrary infra by name.
+app.post('/api/lifecycle/restart-container', async (req, res) => {
+  const { name } = req.body || {};
+  if (!name || typeof name !== 'string' || !/^[a-zA-Z0-9_.-]+$/.test(name)) {
+    return res.status(400).json({ error: 'Invalid container name' });
+  }
+  try {
+    const containers = await docker.listContainers();
+    const isCollector = containers.some(c => {
+      const cName = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
+      if (cName !== name) return false;
+      const image = c.Image || '';
+      const command = c.Command || '';
+      return /opentelemetry-collector/i.test(image) || /otelcol/i.test(image) || /otelcol/i.test(command);
+    });
+    if (!isCollector) {
+      return res.status(403).json({ error: `Container "${name}" is not a recognized OTel collector` });
+    }
+    await docker.getContainer(name).restart();
+    res.json({ message: `Restarted ${name}`, name });
+  } catch (e) {
+    if (e.statusCode === 404) {
+      return res.status(404).json({ error: `Container "${name}" not found` });
+    }
+    res.status(500).json({ error: 'Failed to restart container', details: e.message });
+  }
+});
+
 // GET candidate OTel collectors running on this host. Used by Step 2
 // onboarding to surface a "we found a collector — here's how to plug it in"
 // path, instead of asking the user to choose between YAML and env-var

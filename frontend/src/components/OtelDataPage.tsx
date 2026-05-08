@@ -9,8 +9,10 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  RefreshCw,
   Repeat,
   Server,
+  Wrench,
   X,
 } from 'lucide-react';
 
@@ -181,7 +183,7 @@ const LogoutLink: React.FC = () => {
   );
 };
 
-type TraceStatus = 'error' | 'slow' | 'ok';
+type TraceStatus = 'error' | 'slow' | 'ok' | 'outlier';
 
 const traceStatus = (trace: TraceSummary): TraceStatus => {
   if (trace.has_error) return 'error';
@@ -205,7 +207,7 @@ const readUrlState = () => {
   const range = (p.get('range') as TimeRange) || '1h';
   const validRange = TIME_RANGES.some(r => r.value === range) ? range : '1h';
   const status = p.get('status') as '' | TraceStatus;
-  const validStatus = (['', 'error', 'slow', 'ok'].includes(status) ? status : '') as '' | TraceStatus;
+  const validStatus = (['', 'error', 'slow', 'ok', 'outlier'].includes(status) ? status : '') as '' | TraceStatus;
   const minMsRaw = parseInt(p.get('minMs') || '0', 10);
   return {
     service: p.get('service') || '',
@@ -278,6 +280,57 @@ export const OtelDataPage: React.FC = () => {
   const [tracesPaused, setTracesPaused] = useState<boolean>(false);
   const [logsPaused, setLogsPaused] = useState<boolean>(false);
   const [helixEnv, setHelixEnv] = useState<HelixEnv | null>(null);
+  // Detected upstream OTel collectors and the "stream stalled? restart it"
+  // affordance. Populated on mount + every 60s so the menu always reflects
+  // current host state.
+  const [detectedCollectors, setDetectedCollectors] = useState<Array<{ name: string; image: string }>>([]);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [restartingName, setRestartingName] = useState<string | null>(null);
+  const [restartResult, setRestartResult] = useState<{ name: string; ok: boolean; message: string } | null>(null);
+  const diagRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const refresh = async () => {
+      try {
+        const res = await fetch('/api/discovery/collectors');
+        if (!res.ok) return;
+        const data = await res.json();
+        setDetectedCollectors((data.collectors || []).map((c: any) => ({ name: c.name, image: c.image })));
+      } catch { /* non-fatal */ }
+    };
+    refresh();
+    const id = setInterval(refresh, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Click outside the diagnostics popover closes it.
+  useEffect(() => {
+    if (!diagOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (diagRef.current && !diagRef.current.contains(e.target as Node)) setDiagOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [diagOpen]);
+
+  const restartCollector = async (name: string) => {
+    if (restartingName) return;
+    setRestartingName(name);
+    setRestartResult(null);
+    try {
+      const res = await fetch('/api/lifecycle/restart-container', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setRestartResult({ name, ok: res.ok, message: data.message || data.error || 'Done' });
+    } catch (e: any) {
+      setRestartResult({ name, ok: false, message: e.message || 'Request failed' });
+    } finally {
+      setRestartingName(null);
+    }
+  };
 
   // Fetch Helix endpoint + tenant id (first ::-segment of HELIX_API_KEY) +
   // source so trace rows can deep-link to Helix's OTelTraceDetails dashboard.
@@ -311,7 +364,18 @@ export const OtelDataPage: React.FC = () => {
 
   const visibleTraces = useMemo(() => {
     let out = showInternal ? traces : traces.filter(t => !INTERNAL_SERVICES.has(t.service_name));
-    if (statusFilter) out = out.filter(t => traceStatus(t) === statusFilter);
+    if (statusFilter === 'outlier') {
+      // Outlier = trace's duration > 2× its operation's p95. Build the map
+      // only when the filter is active; depends on the same operations data
+      // the inline badge uses, so the dropdown and the badge agree.
+      const p95Map = new Map(operations.map(o => [`${o.service_name}|${o.root_operation}`, o.p95_ms]));
+      out = out.filter(t => {
+        const p95 = p95Map.get(`${t.service_name}|${t.root_operation}`) || 0;
+        return p95 > 0 && t.duration_ms > p95 * 2;
+      });
+    } else if (statusFilter) {
+      out = out.filter(t => traceStatus(t) === statusFilter);
+    }
     if (minMs > 0) out = out.filter(t => t.duration_ms >= minMs);
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -322,7 +386,7 @@ export const OtelDataPage: React.FC = () => {
       );
     }
     return out;
-  }, [traces, showInternal, statusFilter, minMs, searchQuery]);
+  }, [traces, showInternal, statusFilter, minMs, searchQuery, operations]);
   const visibleServices = useMemo(
     () => showInternal ? services : services.filter(s => !INTERNAL_SERVICES.has(s.name)),
     [services, showInternal],
@@ -639,6 +703,56 @@ export const OtelDataPage: React.FC = () => {
               />
               Show internal{internalCount > 0 && !showInternal ? ` (${internalCount})` : ''}
             </label>
+            <div ref={diagRef} className="relative">
+              <button
+                onClick={() => setDiagOpen(o => !o)}
+                title="Diagnostics — restart upstream OTel collectors when the stream stalls"
+                className={`inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold transition-colors ${diagOpen ? 'text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                <Wrench className="w-3.5 h-3.5" />
+                Diagnostics
+              </button>
+              {diagOpen && (
+                <div className="absolute right-0 top-full mt-2 w-80 z-50 bg-gray-1000 border border-gray-800 rounded shadow-4">
+                  <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between">
+                    <span className="text-tiny font-semibold text-gray-300 uppercase tracking-wider">Upstream collectors</span>
+                    <span className="text-tiny text-gray-500">{detectedCollectors.length} detected</span>
+                  </div>
+                  {detectedCollectors.length === 0 ? (
+                    <div className="px-3 py-3 text-tiny text-gray-500">
+                      No upstream OTel collectors detected on this host.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-800">
+                      {detectedCollectors.map(c => (
+                        <div key={c.name} className="flex items-center justify-between gap-3 px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="text-gray-200 font-mono text-tiny truncate">{c.name}</div>
+                            <div className="text-tiny text-gray-500 truncate" title={c.image}>{c.image}</div>
+                          </div>
+                          <button
+                            onClick={() => restartCollector(c.name)}
+                            disabled={restartingName === c.name}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-tiny rounded bg-warning/20 hover:bg-warning/30 text-warning font-semibold uppercase tracking-wider disabled:opacity-60"
+                          >
+                            {restartingName === c.name ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                            {restartingName === c.name ? 'Restarting' : 'Restart'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {restartResult && (
+                    <div className={`px-3 py-2 border-t border-gray-800 text-tiny ${restartResult.ok ? 'text-[#5eead4]' : 'text-danger'}`}>
+                      {restartResult.ok ? '✓' : '×'} {restartResult.message}
+                    </div>
+                  )}
+                  <div className="px-3 py-2 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">
+                    Use when traces stop arriving despite the Stream pill showing Live — common when the OTel demo collector's <code className="font-mono text-gray-400">memory_limiter</code> trips after long runs.
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -812,6 +926,7 @@ const TracesTab: React.FC<{
             <option value="error">Error</option>
             <option value="slow">Slow (&gt;{SLOW_THRESHOLD_MS}ms)</option>
             <option value="ok">OK</option>
+            <option value="outlier">Outlier (&gt;2× p95)</option>
           </select>
         </div>
         <div className="flex flex-col gap-1">
@@ -973,7 +1088,7 @@ const TracesTab: React.FC<{
                             title="Open this trace in Helix"
                             className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200"
                           >
-                            <img src="/bmc-chevron.svg" alt="" aria-hidden="true" className="h-3.5 w-auto" />
+                            <BmcChevron className="h-3.5 w-auto" />
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
                         );
@@ -1069,24 +1184,6 @@ const LogsAndErrorsTab: React.FC<{
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
-        <div className="flex border-b border-gray-800 -mb-px">
-          <button
-            onClick={() => setSubTab('logs')}
-            className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-              subTab === 'logs' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            Logs <span className="ml-1.5 text-tiny font-mono px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{logs.length}</span>
-          </button>
-          <button
-            onClick={() => setSubTab('errors')}
-            className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-              subTab === 'errors' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            Errors <span className={`ml-1.5 text-tiny font-mono px-1.5 py-0.5 rounded ${errors.length ? 'bg-danger/20 text-[#ff8a8a]' : 'bg-gray-800 text-gray-400'}`}>{errors.length}</span>
-          </button>
-        </div>
         <div className="flex items-end gap-3 flex-wrap">
           <div className="flex flex-col gap-1">
             <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Stream</label>
@@ -1107,6 +1204,26 @@ const LogsAndErrorsTab: React.FC<{
               {paused ? 'Paused' : streamConnected ? 'Live' : 'Reconnecting…'}
             </button>
           </div>
+          <div className="flex border-b border-gray-800 -mb-px">
+            <button
+              onClick={() => setSubTab('logs')}
+              className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                subTab === 'logs' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Logs <span className="ml-1.5 text-tiny font-mono px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{logs.length}</span>
+            </button>
+            <button
+              onClick={() => setSubTab('errors')}
+              className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                subTab === 'errors' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Errors <span className={`ml-1.5 text-tiny font-mono px-1.5 py-0.5 rounded ${errors.length ? 'bg-danger/20 text-[#ff8a8a]' : 'bg-gray-800 text-gray-400'}`}>{errors.length}</span>
+            </button>
+          </div>
+        </div>
+        <div className="flex items-end gap-3 flex-wrap">
           {subTab === 'logs' && (
             <>
               <div className="flex flex-col gap-1">
@@ -1225,7 +1342,7 @@ const LogsView: React.FC<{
                           title="Open in Helix"
                           className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200"
                         >
-                          <img src="/bmc-chevron.svg" alt="" aria-hidden="true" className="h-3.5 w-auto" />
+                          <BmcChevron className="h-3.5 w-auto" />
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       );
@@ -1473,7 +1590,7 @@ const ErrorsView: React.FC<{
                           title="Open in Helix"
                           className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200"
                         >
-                          <img src="/bmc-chevron.svg" alt="" aria-hidden="true" className="h-3.5 w-auto" />
+                          <BmcChevron className="h-3.5 w-auto" />
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       );
@@ -1527,7 +1644,7 @@ const ErrorGroupRow: React.FC<{
                   if (!url) return null;
                   return (
                     <a href={url} target="_blank" rel="noopener noreferrer" title="Open in Helix" className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200">
-                      <img src="/bmc-chevron.svg" alt="" aria-hidden="true" className="h-3.5 w-auto" />
+                      <BmcChevron className="h-3.5 w-auto" />
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   );
@@ -1587,9 +1704,9 @@ const TraceDetailDrawer: React.FC<{
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-gray-800 hover:border-[#FF5A4D] text-tiny uppercase tracking-wider font-semibold text-gray-300 hover:text-white transition-colors"
                 >
-                  <img src="/bmc-chevron.svg" alt="" aria-hidden="true" className="h-4 w-auto" />
+                  <BmcChevron className="h-4 w-auto" />
                   View in Helix
-                  <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+                  <ExternalLink className="w-4 h-4 opacity-70" />
                 </a>
               );
             })()}
@@ -2021,6 +2138,16 @@ const RollupPanel: React.FC<{
     </div>
   );
 };
+
+// Inline BMC chevron — kept alongside the Lucide icons so it inherits
+// Tailwind sizing the same way (browser was rendering the standalone .svg
+// file at its intrinsic 20×32 viewBox dimensions instead of honoring
+// h-3.5 / h-4 from className, making it tower over the trailing link icon).
+const BmcChevron: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 32" className={className} aria-hidden="true">
+    <path fill="#FF5A4D" d="M2.61,31.91c-1.29,0-2.61-1-2.61-2.92V24.5c0-1.78,1.16-3.81,2.69-4.71l6.27-3.71l-6.27-3.73c-1.53-0.91-2.67-2.93-2.67-4.71V3.09c0-1.89,1.31-2.9,2.59-2.9c0.55,0,1.12,0.17,1.67,0.49l14.16,8.43C19.43,9.69,20,10.6,20,11.59s-0.57,1.89-1.55,2.48l-3.39,2.01l3.39,2.01c0.98,0.59,1.55,1.5,1.55,2.48s-0.57,1.89-1.55,2.48L4.28,31.43C3.71,31.73,3.16,31.91,2.61,31.91z M12,17.86l-7.73,4.58c-0.59,0.34-1.16,1.36-1.16,2.04v4.01l13.41-7.95L12,17.86z M3.12,3.6v4.05c0,0.68,0.57,1.69,1.16,2.04L12,14.28l4.53-2.69L3.12,3.6z"/>
+  </svg>
+);
 
 // Stable color for a service name across renders. Hash → palette index. Same
 // service always gets the same swatch so the breakdown bar matches the
