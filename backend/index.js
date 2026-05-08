@@ -8,6 +8,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const Docker = require('dockerode');
 const archiver = require('archiver');
+const tarStream = require('tar-stream');
 const zlib = require('zlib');
 const { OtelStore, extractSpans, extractLogRecords } = require('./otelStore');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
@@ -2244,6 +2245,187 @@ app.post('/api/lifecycle/bridge-network', async (req, res) => {
       return res.status(404).json({ error: `Network "${network}" not found` });
     }
     res.status(500).json({ error: 'Failed to attach network', details: e.message });
+  }
+});
+
+// --- Smart-add: read/write the customer's collector config ---------------
+//
+// Powers the "Apply automatically" path on Step 2 of the wizard. We read the
+// customer's collector YAML out of its container, propose a merge that wires
+// helix-gateway in as an exporter on every existing pipeline, and (on
+// confirm) write it back with a .helix-bak. The customer's collector then
+// restarts to pick up the change.
+//
+// POC scope: targets the *first* --config= path discovered in the
+// container's command line. Doesn't merge across multiple --config= overlays.
+// dump() loses YAML comments — the original is preserved as a backup.
+
+const readFileFromContainer = (container, filePath) => new Promise(async (resolve, reject) => {
+  try {
+    const archiveStream = await container.getArchive({ path: filePath });
+    const extract = tarStream.extract();
+    let content = '';
+    extract.on('entry', (header, stream, next) => {
+      const chunks = [];
+      stream.on('data', c => chunks.push(c));
+      stream.on('end', () => {
+        content = Buffer.concat(chunks).toString('utf8');
+        next();
+      });
+      stream.resume();
+    });
+    extract.on('finish', () => resolve(content));
+    extract.on('error', reject);
+    archiveStream.pipe(extract);
+  } catch (e) { reject(e); }
+});
+
+const writeFileToContainer = async (container, filePath, content) => {
+  const dir = path.posix.dirname(filePath);
+  const fileName = path.posix.basename(filePath);
+  const pack = tarStream.pack();
+  pack.entry({ name: fileName, mode: 0o644 }, content);
+  pack.finalize();
+  await container.putArchive(pack, { path: dir });
+};
+
+const detectCollectorConfigPath = (inspect) => {
+  const cmd = (inspect.Config && inspect.Config.Cmd) || [];
+  const args = inspect.Args || [];
+  const all = [...cmd, ...args];
+  for (let i = 0; i < all.length; i++) {
+    const a = all[i];
+    if (typeof a !== 'string') continue;
+    if (a.startsWith('--config=')) {
+      return a.substring('--config='.length).replace(/^file:/, '');
+    }
+    if (a === '--config' && i + 1 < all.length) {
+      return String(all[i + 1]).replace(/^file:/, '');
+    }
+  }
+  return '/etc/otelcol-contrib/config.yaml';
+};
+
+const proposeCollectorMerge = (yamlText) => {
+  const parsed = yaml.load(yamlText);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Could not parse collector YAML');
+  }
+  const exporters = parsed.exporters || {};
+
+  // Already pointing at helix-gateway:4318? Skip.
+  for (const [name, def] of Object.entries(exporters)) {
+    if (def && typeof def === 'object' && /helix-gateway:4318/.test(def.endpoint || '')) {
+      return { alreadyConfigured: true, existingExporterName: name };
+    }
+  }
+
+  // Pick a non-colliding exporter name. Common case: customer has no
+  // helix_sidecar exporter, so we land on the canonical name.
+  const baseName = 'otlphttp/helix_sidecar';
+  let exporterName = baseName;
+  let n = 2;
+  while (exporters[exporterName]) {
+    exporterName = `${baseName}_${n++}`;
+  }
+
+  const newConfig = JSON.parse(JSON.stringify(parsed)); // deep clone
+  newConfig.exporters = newConfig.exporters || {};
+  newConfig.exporters[exporterName] = {
+    endpoint: 'http://helix-gateway:4318',
+    tls: { insecure: true },
+  };
+
+  const pipelines = (newConfig.service && newConfig.service.pipelines) || {};
+  const addedToPipelines = [];
+  for (const [pname, pipeline] of Object.entries(pipelines)) {
+    if (!pipeline || typeof pipeline !== 'object') continue;
+    if (!Array.isArray(pipeline.exporters)) pipeline.exporters = [];
+    if (!pipeline.exporters.includes(exporterName)) {
+      pipeline.exporters.push(exporterName);
+      addedToPipelines.push(pname);
+    }
+  }
+
+  const proposedYaml = yaml.dump(newConfig, { lineWidth: 120, noRefs: true });
+  return {
+    alreadyConfigured: false,
+    exporterName,
+    addedToPipelines,
+    existingExporters: Object.keys(exporters),
+    existingPipelines: Object.keys(pipelines),
+    proposedYaml,
+  };
+};
+
+const isRecognizedCollectorContainer = async (name) => {
+  const containers = await docker.listContainers();
+  return containers.some(c => {
+    const cName = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
+    if (cName !== name) return false;
+    const image = c.Image || '';
+    const command = c.Command || '';
+    return /opentelemetry-collector/i.test(image) || /otelcol/i.test(image) || /otelcol/i.test(command);
+  });
+};
+
+// GET — read the collector's config, return the proposed merge. No side effects.
+app.get('/api/discovery/collector-config/:name', async (req, res) => {
+  const name = req.params.name;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(name)) {
+    return res.status(400).json({ error: 'Invalid container name' });
+  }
+  if (!(await isRecognizedCollectorContainer(name))) {
+    return res.status(403).json({ error: `Container "${name}" is not a recognized OTel collector` });
+  }
+  try {
+    const container = docker.getContainer(name);
+    const inspect = await container.inspect();
+    const configPath = detectCollectorConfigPath(inspect);
+    const configText = await readFileFromContainer(container, configPath);
+    const proposal = proposeCollectorMerge(configText);
+    res.json({ name, configPath, configText, ...proposal });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to read collector config', details: e.message });
+  }
+});
+
+// POST — apply the merge: write a .helix-bak, write the new config, restart.
+app.post('/api/discovery/collector-apply/:name', async (req, res) => {
+  const name = req.params.name;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(name)) {
+    return res.status(400).json({ error: 'Invalid container name' });
+  }
+  if (!(await isRecognizedCollectorContainer(name))) {
+    return res.status(403).json({ error: `Container "${name}" is not a recognized OTel collector` });
+  }
+  try {
+    const container = docker.getContainer(name);
+    const inspect = await container.inspect();
+    const configPath = detectCollectorConfigPath(inspect);
+    const configText = await readFileFromContainer(container, configPath);
+    const proposal = proposeCollectorMerge(configText);
+    if (proposal.alreadyConfigured) {
+      return res.json({
+        success: true,
+        alreadyConfigured: true,
+        existingExporterName: proposal.existingExporterName,
+        configPath,
+      });
+    }
+    const backupPath = `${configPath}.helix-bak`;
+    await writeFileToContainer(container, backupPath, configText);
+    await writeFileToContainer(container, configPath, proposal.proposedYaml);
+    await container.restart();
+    res.json({
+      success: true,
+      configPath,
+      backupPath,
+      exporterName: proposal.exporterName,
+      addedToPipelines: proposal.addedToPipelines,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to apply collector config', details: e.message });
   }
 });
 

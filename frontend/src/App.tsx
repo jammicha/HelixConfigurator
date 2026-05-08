@@ -139,6 +139,23 @@ const App = () => {
   const [k8sApplying, setK8sApplying] = useState<boolean>(false);
   const [k8sApplyResult, setK8sApplyResult] = useState<'applied' | 'failed' | null>(null);
   const [recentServices, setRecentServices] = useState<string[]>([]);
+  // Step 2 smart-add — read the customer collector's config and propose a
+  // merge that wires helix-gateway in as an exporter on every existing
+  // pipeline. Confirmation-guarded apply writes it back with a .helix-bak.
+  const [smartAddProposal, setSmartAddProposal] = useState<{
+    name: string;
+    configPath: string;
+    alreadyConfigured?: boolean;
+    existingExporterName?: string;
+    exporterName?: string;
+    addedToPipelines?: string[];
+    existingPipelines?: string[];
+    proposedYaml?: string;
+    error?: string;
+  } | null>(null);
+  const [smartAddLoading, setSmartAddLoading] = useState<boolean>(false);
+  const [smartAddApplying, setSmartAddApplying] = useState<boolean>(false);
+  const [smartAddResult, setSmartAddResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // App → Gateway verifier: poll the gateway's receiver counters and show
   // deltas since Step 2 was opened. Lets the user see real spans/metrics/logs
@@ -448,11 +465,11 @@ const App = () => {
     return () => { cancelled = true; clearInterval(interval); clearInterval(errInterval); };
   }, [setupStep, isSetupComplete]);
 
-  // Wizard Step 3 — refresh detected collectors on entry and every 8s while
-  // visible (a fresh `docker compose up` between Step 1 and Step 3 should
-  // show new candidates without a full reload).
+  // Wizard Steps 2 + 3 — refresh detected collectors on entry and every 8s
+  // while visible. Step 2 needs the list for the smart-add ("Apply
+  // automatically") panel; Step 3 needs it for the network-attach widget.
   useEffect(() => {
-    if (isSetupComplete || setupStep !== 3) return;
+    if (isSetupComplete || (setupStep !== 2 && setupStep !== 3)) return;
     refreshDetectedCollectors();
     const id = setInterval(refreshDetectedCollectors, 8000);
     return () => clearInterval(id);
@@ -1027,6 +1044,87 @@ const App = () => {
       },
     });
   };
+
+  // Step 2 smart-add — fetch the proposed merge for a single detected
+  // collector. Re-fetches when detectedCollectors changes; only fires when
+  // exactly one collector is on the host. (Multi-collector apply could be
+  // a follow-up; for now we keep the auto-flow conservative.)
+  const refreshSmartAddProposal = async (collectorName: string) => {
+    setSmartAddLoading(true);
+    setSmartAddProposal(null);
+    try {
+      const res = await fetch(`/api/discovery/collector-config/${encodeURIComponent(collectorName)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSmartAddProposal({ name: collectorName, configPath: '', error: data.error || data.details || 'Could not read collector config' });
+        return;
+      }
+      setSmartAddProposal({
+        name: data.name,
+        configPath: data.configPath,
+        alreadyConfigured: data.alreadyConfigured,
+        existingExporterName: data.existingExporterName,
+        exporterName: data.exporterName,
+        addedToPipelines: data.addedToPipelines,
+        existingPipelines: data.existingPipelines,
+        proposedYaml: data.proposedYaml,
+      });
+    } catch (e: any) {
+      setSmartAddProposal({ name: collectorName, configPath: '', error: e?.message || 'Network error' });
+    } finally {
+      setSmartAddLoading(false);
+    }
+  };
+
+  const requestSmartAddApply = (collectorName: string) => {
+    if (smartAddApplying) return;
+    setConfirmDialog({
+      title: `Update ${collectorName} automatically?`,
+      message: `The configurator will write a backup of the current collector config (as <path>.helix-bak inside the container), apply the merged config that adds helix_sidecar to your existing pipelines, and restart the container so the new exporter takes effect. The original is preserved as the .helix-bak file. Proceed?`,
+      confirmLabel: 'Apply & restart',
+      onConfirm: async () => {
+        setSmartAddApplying(true);
+        setSmartAddResult(null);
+        try {
+          const res = await fetch(`/api/discovery/collector-apply/${encodeURIComponent(collectorName)}`, { method: 'POST' });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setSmartAddResult({ ok: false, message: data.error || data.details || 'Apply failed' });
+            return;
+          }
+          if (data.alreadyConfigured) {
+            setSmartAddResult({ ok: true, message: `Already configured — ${data.existingExporterName} already points at helix-gateway:4318. No changes needed.` });
+          } else {
+            setSmartAddResult({
+              ok: true,
+              message: `Applied. ${data.exporterName} added to ${(data.addedToPipelines || []).join(', ') || '(no pipelines)'} on ${collectorName}. Original saved as ${data.backupPath}. Container restarting.`,
+            });
+          }
+          // Refresh detection so Step 3's reachability badges update.
+          refreshDetectedCollectors();
+        } catch (e: any) {
+          setSmartAddResult({ ok: false, message: e?.message || 'Network error' });
+        } finally {
+          setSmartAddApplying(false);
+        }
+      },
+    });
+  };
+
+  // Auto-fetch proposal when entering Step 2 with exactly one detected
+  // collector. Re-fetch when detectedCollectors changes shape.
+  useEffect(() => {
+    if (isSetupComplete || setupStep !== 2) return;
+    if (detectedCollectors.length === 1) {
+      const name = detectedCollectors[0].name;
+      if (!smartAddProposal || smartAddProposal.name !== name) {
+        refreshSmartAddProposal(name);
+      }
+    } else {
+      setSmartAddProposal(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setupStep, isSetupComplete, detectedCollectors.length, detectedCollectors[0]?.name]);
 
   // Step 4 — service.name detection. Uses the existing /api/traces/services
   // (which now counts every span, not just root services) so even downstream
@@ -1719,6 +1817,57 @@ ${logsData.logs || '(no logs available)'}
                     <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
                     <span className="text-gray-200"><span className="font-semibold">helix-gateway is already configured.</span> Just add it as an exporter in your collector config.</span>
                   </div>
+
+                  {/* Smart-add — when exactly one OTel collector is detected
+                      on this host, the configurator can read its config,
+                      compute the merge, and apply it (with a backup +
+                      restart) for the user. POC scope. */}
+                  {smartAddResult && (
+                    <div className={`mb-4 flex items-start gap-3 p-3 rounded text-sm ${smartAddResult.ok ? 'bg-success/10 border border-success/40' : 'bg-danger/10 border border-danger/40'}`}>
+                      {smartAddResult.ok ? <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />}
+                      <span className="text-gray-200">{smartAddResult.message}</span>
+                    </div>
+                  )}
+                  {!smartAddResult && smartAddProposal && (
+                    <div className="mb-5 p-4 bg-gray-1000 border border-active/40 rounded">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Container className="w-4 h-4 text-active" />
+                        <span className="text-sm font-semibold text-gray-100">Smart-add — apply automatically</span>
+                        <span className="ml-auto text-tiny text-gray-500">POC</span>
+                      </div>
+                      {smartAddProposal.error ? (
+                        <p className="text-tiny text-warning">⚠ {smartAddProposal.error} You can still apply the snippet below manually.</p>
+                      ) : smartAddProposal.alreadyConfigured ? (
+                        <p className="text-tiny text-gray-300">
+                          Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
+                          <span className="text-success font-semibold">Already configured</span> — <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-tiny text-gray-300 mb-3">
+                            Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
+                            We'll add <code className="font-mono text-gray-100">{smartAddProposal.exporterName}</code> as an exporter and wire it into{' '}
+                            <strong className="text-gray-200">{(smartAddProposal.addedToPipelines || []).join(', ')}</strong> pipelines.
+                            The original is preserved as <code className="font-mono">.helix-bak</code> in the container.
+                          </p>
+                          <button
+                            onClick={() => requestSmartAddApply(smartAddProposal.name)}
+                            disabled={smartAddApplying}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover disabled:opacity-60 text-white"
+                          >
+                            {smartAddApplying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                            {smartAddApplying ? 'Applying…' : 'Apply automatically'}
+                          </button>
+                          <span className="text-tiny text-gray-500 ml-3">Or copy the snippets below to apply manually.</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {!smartAddResult && smartAddLoading && (
+                    <div className="mb-4 flex items-center gap-2 text-tiny text-gray-500">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading detected collector config…
+                    </div>
+                  )}
 
                   <div className="mb-2 flex items-baseline justify-between gap-3">
                     <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Exporter</span>
