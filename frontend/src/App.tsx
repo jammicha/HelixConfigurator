@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor, { useMonaco } from '@monaco-editor/react';
-import { Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown } from 'lucide-react';
+import { Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown, Hexagon, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack, Toast } from './components/ToastStack';
@@ -130,10 +130,17 @@ const App = () => {
   // Step 2 mounts; surfaced in the network callout so users with their own
   // collector can one-click attach helix-gateway to that collector's network.
   const [detectedCollectors, setDetectedCollectors] = useState<
-    Array<{ name: string; image: string; networks: string[]; sharesNetworkWithSidecar: boolean }>
+    Array<{ name: string; image: string; networks: string[]; sharesNetworkWithSidecar: boolean; isKubernetes?: boolean }>
   >([]);
   const [attachingNetwork, setAttachingNetwork] = useState<string | null>(null);
   const [attachResult, setAttachResult] = useState<{ network: string; ok: boolean; message: string } | null>(null);
+  // Wizard redesign — Step 3 + Step 4 state.
+  const [gatewayConfigOpen, setGatewayConfigOpen] = useState(false);
+  const [gatewayConfigText, setGatewayConfigText] = useState<string>('');
+  const [step3Tab, setStep3Tab] = useState<'detected' | 'manual'>('detected');
+  const [k8sApplying, setK8sApplying] = useState<boolean>(false);
+  const [k8sApplyResult, setK8sApplyResult] = useState<'applied' | 'failed' | null>(null);
+  const [recentServices, setRecentServices] = useState<string[]>([]);
 
   // App → Gateway verifier: poll the gateway's receiver counters and show
   // deltas since Step 2 was opened. Lets the user see real spans/metrics/logs
@@ -390,12 +397,13 @@ const App = () => {
     };
   }, []);
 
-  // Poll the gateway's receiver counters while Step 2 is showing. Sets a
-  // baseline on entry; the UI shows current - baseline as the "since you
-  // opened Step 2" delta — the most legible signal that the user's app is
-  // actually sending data through the bridge.
+  // Poll the gateway's receiver counters while Step 4 is showing (the
+  // verify step in the redesigned wizard). Sets a baseline on entry; the
+  // UI shows current - baseline as the "since you opened Step 4" delta —
+  // the most legible signal that the user's app is actually sending data
+  // through the bridge.
   useEffect(() => {
-    if (isSetupComplete || setupStep !== 2) {
+    if (isSetupComplete || setupStep !== 4) {
       setReceiverBaseline(null);
       setReceiverNow(null);
       setReceiverError('');
@@ -440,6 +448,24 @@ const App = () => {
     scanErrors();
     const errInterval = setInterval(scanErrors, 8000);
     return () => { cancelled = true; clearInterval(interval); clearInterval(errInterval); };
+  }, [setupStep, isSetupComplete]);
+
+  // Wizard Step 3 — refresh detected collectors on entry and every 8s while
+  // visible (a fresh `docker compose up` between Step 1 and Step 3 should
+  // show new candidates without a full reload).
+  useEffect(() => {
+    if (isSetupComplete || setupStep !== 3) return;
+    refreshDetectedCollectors();
+    const id = setInterval(refreshDetectedCollectors, 8000);
+    return () => clearInterval(id);
+  }, [setupStep, isSetupComplete]);
+
+  // Wizard Step 4 — refresh recent service.name list on entry and every 5s.
+  useEffect(() => {
+    if (isSetupComplete || setupStep !== 4) return;
+    refreshRecentServices();
+    const id = setInterval(refreshRecentServices, 5000);
+    return () => clearInterval(id);
   }, [setupStep, isSetupComplete]);
 
   useEffect(() => {
@@ -970,6 +996,62 @@ const App = () => {
     }
   };
 
+  // Step 2 / Step 4 — fetch the live gateway config for the read-only modal.
+  // Lazy-load: only hit the endpoint the first time the modal opens.
+  const openGatewayConfigModal = async () => {
+    setGatewayConfigOpen(true);
+    if (gatewayConfigText) return;
+    try {
+      const res = await fetch('/api/config');
+      if (res.ok) {
+        const data = await res.json();
+        setGatewayConfigText(data.config || '');
+      }
+    } catch { /* non-fatal */ }
+  };
+
+  // Step 3 — apply the K8s Attribute Enrichment template via the existing
+  // /api/templates and /api/config endpoints. No new backend route needed.
+  const applyK8sTemplate = async () => {
+    if (k8sApplying) return;
+    setK8sApplying(true);
+    setK8sApplyResult(null);
+    try {
+      const tplRes = await fetch('/api/templates/k8s-attributes');
+      if (!tplRes.ok) throw new Error('Could not load template');
+      const { content } = await tplRes.json();
+      const saveRes = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (!saveRes.ok) throw new Error('Could not save config');
+      setK8sApplyResult('applied');
+      // Refresh local copy so the gateway-config modal reflects the change.
+      setGatewayConfigText(content);
+    } catch {
+      setK8sApplyResult('failed');
+    } finally {
+      setK8sApplying(false);
+    }
+  };
+
+  // Step 4 — service.name detection. Uses the existing /api/traces/services
+  // (which now counts every span, not just root services) so even downstream
+  // services in a chained-collector setup show up here.
+  const refreshRecentServices = async () => {
+    try {
+      const res = await fetch('/api/traces/services');
+      if (!res.ok) return;
+      const data = await res.json();
+      const internal = new Set(['helix-gateway', 'helix-configurator', 'helix-configurator-verify', 'otelcol-contrib']);
+      const services = (data.services || [])
+        .map((s: any) => s.name)
+        .filter((n: string) => n && !internal.has(n));
+      setRecentServices(services);
+    } catch { /* non-fatal */ }
+  };
+
   // Step 2 verification: inject a synthetic trace through the gateway and watch
   // for the sent counter to move. Proves gateway→Helix independent of whether
   // the user's app is instrumented yet.
@@ -1467,13 +1549,56 @@ ${logsData.logs || '(no logs available)'}
             <div className="max-w-3xl mx-auto mt-12 space-y-6">
               <h1 className="text-2xl font-bold text-center text-gray-100">Welcome to Helix Configurator</h1>
 
+              {/* Stepper — clickable for completed steps. setupStep is 1-4. */}
+              <div className="flex items-center justify-between gap-2 px-1">
+                {[
+                  { n: 1, label: 'Configure' },
+                  { n: 2, label: 'Exporter' },
+                  { n: 3, label: 'Connect' },
+                  { n: 4, label: 'Verify' },
+                ].map((s, idx, arr) => {
+                  const isCurrent = setupStep === s.n;
+                  const isCompleted = setupStep > s.n;
+                  const clickable = s.n <= setupStep;
+                  return (
+                    <React.Fragment key={s.n}>
+                      <button
+                        onClick={() => clickable && setSetupStep(s.n)}
+                        disabled={!clickable}
+                        className={`flex items-center gap-2 ${clickable ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                        aria-current={isCurrent ? 'step' : undefined}
+                      >
+                        <span
+                          className={`w-7 h-7 rounded-full inline-flex items-center justify-center text-tiny font-semibold border ${
+                            isCurrent
+                              ? 'bg-primary border-primary text-white'
+                              : isCompleted
+                                ? 'bg-success border-success text-white'
+                                : 'bg-gray-1000 border-gray-700 text-gray-400'
+                          }`}
+                        >
+                          {isCompleted ? '✓' : s.n}
+                        </span>
+                        <span className={`text-tiny font-semibold uppercase tracking-wider ${isCurrent ? 'text-gray-100' : isCompleted ? 'text-gray-300' : 'text-gray-500'}`}>
+                          {s.label}
+                        </span>
+                      </button>
+                      {idx < arr.length - 1 && (
+                        <span className={`flex-1 h-px ${setupStep > s.n ? 'bg-success/60' : 'bg-gray-800'}`} />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+
               {setupStep === 1 && (
                 <div className="adapt-card">
-                  <h2 className="text-lg font-bold mb-6 text-gray-200">Step 1: Configure & Initialize Gateway</h2>
-                  <div className="grid grid-cols-2 gap-4 mb-6">
+                  <h2 className="text-lg font-bold mb-2 text-gray-200">Step 1: Configure helix-gateway</h2>
+                  <p className="text-sm text-gray-400 mb-6">Tell the sidecar where Helix lives and what to call your service. The gateway restarts on save.</p>
+                  <div className="space-y-4 mb-6">
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                        Ingest Endpoint
+                        Helix Endpoint
                         {!wizardFieldErrors.HELIX_ENDPOINT && envVars.HELIX_ENDPOINT && <span className="text-success normal-case tracking-normal">✓</span>}
                       </label>
                       <input
@@ -1486,16 +1611,19 @@ ${logsData.logs || '(no logs available)'}
                         value={envVars.HELIX_ENDPOINT}
                         onChange={(e) => setEnvVars({ ...envVars, HELIX_ENDPOINT: e.target.value })}
                         className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.HELIX_ENDPOINT && wizardFieldErrors.HELIX_ENDPOINT ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-                        placeholder="https://otel-itom.onbmc.com"
+                        placeholder="https://your-tenant.onbmc.com"
                       />
                       {envVars.HELIX_ENDPOINT && wizardFieldErrors.HELIX_ENDPOINT && (
                         <p className="text-tiny text-danger">{wizardFieldErrors.HELIX_ENDPOINT}</p>
                       )}
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                        X-Source (Business Service)
-                        {!wizardFieldErrors.X_SOURCE && envVars.X_SOURCE && <span className="text-success normal-case tracking-normal">✓</span>}
+                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2 flex-wrap">
+                        <span className="flex items-center gap-2">
+                          X-Source
+                          {!wizardFieldErrors.X_SOURCE && envVars.X_SOURCE && <span className="text-success normal-case tracking-normal">✓</span>}
+                        </span>
+                        <span className="normal-case tracking-normal text-gray-500 font-normal">— Business Service name in Helix topology &amp; AIOps</span>
                       </label>
                       <input
                         type="text"
@@ -1507,23 +1635,20 @@ ${logsData.logs || '(no logs available)'}
                         value={envVars.X_SOURCE}
                         onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value.replace(/[^a-zA-Z0-9\-_]/g, '') })}
                         className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.X_SOURCE && wizardFieldErrors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-                        placeholder="Source Name"
+                        placeholder="e.g. payment-service"
                       />
+                      <p className="text-tiny text-gray-500">Choose a name that maps to a real service your team owns.</p>
                       {envVars.X_SOURCE && wizardFieldErrors.X_SOURCE && (
                         <p className="text-tiny text-danger">{wizardFieldErrors.X_SOURCE}</p>
                       )}
                     </div>
-                    <div className="space-y-1 col-span-2">
+                    <div className="space-y-1">
                       <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                        X-Api-Key (TenantID::AccessKey::SecretKey)
+                        X-API Key
                         {!wizardFieldErrors.HELIX_API_KEY && envVars.HELIX_API_KEY && <span className="text-success normal-case tracking-normal">✓</span>}
                       </label>
                       <div className="relative">
                         <input
-                          // type=text + CSS masking instead of type=password —
-                          // password-typed inputs trigger Chrome's credential
-                          // autofill heuristics (offering the saved UI password
-                          // for this field AND the surrounding ones).
                           type="text"
                           name="helix-x-api-key"
                           autoComplete="off"
@@ -1537,7 +1662,7 @@ ${logsData.logs || '(no logs available)'}
                           }}
                           style={!showApiKey ? { WebkitTextSecurity: 'disc', textSecurity: 'disc' } as React.CSSProperties : undefined}
                           className={`w-full bg-gray-1000 border rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm ${envVars.HELIX_API_KEY && wizardFieldErrors.HELIX_API_KEY ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-                          placeholder="123456789::ABCDE12345::FGHIJ67890... — or paste 'Key details:... Tenant ID:...'"
+                          placeholder="Paste your API key from the Helix portal"
                         />
                         <button
                           type="button"
@@ -1547,18 +1672,16 @@ ${logsData.logs || '(no logs available)'}
                           {showApiKey ? 'Hide' : 'Show'}
                         </button>
                       </div>
-                      <p className="text-tiny text-gray-500">Tip: paste the full <em>Key details:... Tenant ID:...</em> blob from Helix and we'll reformat it for you.</p>
+                      <p className="text-tiny text-gray-500">Paste the full key — the format is parsed automatically.</p>
                       {envVars.HELIX_API_KEY && wizardFieldErrors.HELIX_API_KEY && (
                         <p className="text-tiny text-danger">{wizardFieldErrors.HELIX_API_KEY}</p>
                       )}
                     </div>
-                  </div>
-
-                  <details className="mb-4 group">
-                    <summary className="text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 select-none">
-                      Optional: App URL
-                    </summary>
-                    <div className="mt-3 space-y-1">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
+                        <span>App URL</span>
+                        <span className="normal-case tracking-normal text-gray-500 font-normal">— optional</span>
+                      </label>
                       <input
                         type="url"
                         name="helix-app-url"
@@ -1571,40 +1694,14 @@ ${logsData.logs || '(no logs available)'}
                         className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.APP_URL && wizardFieldErrors.APP_URL ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
                         placeholder="http://localhost:8080"
                       />
-                      <p className="text-tiny text-gray-500 mt-1">
-                        Used for the "Open application" deep-link on the dashboard. If the hostname is a Docker container name on this host (e.g. <code className="font-mono">frontend-proxy</code>), the gateway also auto-bridges to that container's network. <code className="font-mono">localhost</code>, an IP, or a public URL is fine — it just means auto-bridge will skip and you'll use the network controls in Step 2 instead.
-                      </p>
                       {envVars.APP_URL && wizardFieldErrors.APP_URL && (
                         <p className="text-tiny text-danger">{wizardFieldErrors.APP_URL}</p>
                       )}
                     </div>
-                  </details>
-
-                  <details className="mb-6 group">
-                    <summary className="text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 select-none">
-                      Optional: AIOps Business Service Key
-                    </summary>
-                    <div className="mt-3 space-y-1">
-                      <input
-                        type="text"
-                        name="helix-business-service-key"
-                        autoComplete="off"
-                        spellCheck={false}
-                        data-1p-ignore
-                        data-lpignore="true"
-                        value={envVars.BUSINESS_SERVICE_KEY}
-                        onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
-                        className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
-                        placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS — or paste the full AIOps service URL"
-                      />
-                      <p className="text-tiny text-gray-500 mt-1">
-                        Enables the AIOps Business Service deep-link button. You can also add this later from Settings.
-                      </p>
-                    </div>
-                  </details>
+                  </div>
 
                   {setupError && (
-                    <div className="mb-4 flex gap-3 p-3 bg-[#f5bcc6]/20 border border-danger/40 rounded text-sm items-start">
+                    <div className="mb-4 flex gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm items-start">
                       <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
                       <div><span className="text-danger font-semibold">Verification failed:</span> <span className="text-gray-300">{setupError}</span></div>
                     </div>
@@ -1614,103 +1711,40 @@ ${logsData.logs || '(no logs available)'}
                     onClick={handleInitialize}
                     disabled={isVerifying || !wizardCanSubmit}
                     title={!wizardCanSubmit ? 'Fix the field errors above before continuing' : ''}
-                    className="w-full bg-primary hover:bg-[#3006c2] disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 py-3 rounded font-semibold transition-all"
+                    className="w-full bg-primary hover:bg-primary-hover disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 py-3 rounded font-semibold transition-all"
                   >
-                    {isVerifying ? 'Verifying...' : 'Initialize & Verify Connection'}
+                    {isVerifying ? 'Saving…' : 'Save & initialize →'}
                   </button>
                 </div>
               )}
 
               {setupStep === 2 && (
                 <div className="adapt-card">
-                  <h2 className="text-lg font-bold mb-4 text-gray-200">Step 2: Route Your Telemetry</h2>
+                  <h2 className="text-lg font-bold mb-4 text-gray-200">Step 2: Add helix-gateway as an exporter</h2>
 
-                  {/* Bridge outcome from Step 1. Surface it explicitly so the
-                      user knows whether helix-gateway was attached to their
-                      app's network, skipped, or failed — and what to do
-                      next. */}
-                  {bridgeStatus?.kind === 'success' && (
-                    <div className="mb-4 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
-                      <span className="text-[#5eead4] font-semibold">✓ Auto-bridged.</span>{' '}
-                      <code className="font-mono text-gray-200">helix-gateway</code> is now on the{' '}
-                      <code className="font-mono text-gray-200">{bridgeStatus.network}</code> network (matched container <code className="font-mono text-gray-200">{bridgeStatus.targetContainer}</code>).
-                    </div>
-                  )}
-                  {bridgeStatus?.kind === 'skipped' && (
-                    <div className="mb-4 p-2.5 bg-warning/10 border border-warning/40 rounded text-tiny text-gray-300">
-                      <span className="text-warning font-semibold">⚠ Auto-bridge skipped.</span>{' '}
-                      {bridgeStatus.reason} If your app or collector runs in a Docker network on this host, attach <code className="font-mono text-gray-200">helix-gateway</code> from the network controls below before you'll see traces.
-                    </div>
-                  )}
-                  {bridgeStatus?.kind === 'error' && (
-                    <div className="mb-4 p-2.5 bg-danger/10 border border-danger/40 rounded text-tiny text-gray-300">
-                      <span className="text-danger font-semibold">× Auto-bridge failed:</span>{' '}
-                      {bridgeStatus.reason}. Use the network controls below to attach <code className="font-mono text-gray-200">helix-gateway</code> manually.
-                    </div>
-                  )}
+                  {/* Step 2 context banner — green check on a blue field. */}
+                  <div className="mb-4 flex items-start gap-3 p-3 bg-active/10 border border-active/40 rounded text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+                    <span className="text-gray-200"><span className="font-semibold">helix-gateway is already configured.</span> Just add it as an exporter in your collector config.</span>
+                  </div>
 
-                  <p className="text-gray-300 mb-4 text-sm">Tell your app (or its collector) to send telemetry to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-gateway:4318</code>. The sidecar must share a Docker network with whatever sends OTLP to it — see the network note below the snippet.</p>
-
-                  {/* Detection-driven path selection. If exactly one signal is
-                      detected (env vars OR a collector config mount), hide the
-                      picker and show only that path. If both or neither, show
-                      the picker with a helpful banner. */}
-                  {(() => {
-                    const hasEnv = !!targetEnvInfo?.hasOtelEnv;
-                    const hasCollector = !!targetEnvInfo?.hasCollectorConfig;
-                    const ambiguous = (hasEnv && hasCollector) || (!hasEnv && !hasCollector);
-                    return (
-                      <>
-                        {hasEnv && !hasCollector && (
-                          <div className="mb-4 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
-                            <span className="text-[#5eead4] font-semibold">✓ OpenTelemetry SDK detected.</span>{' '}
-                            Found {targetEnvInfo!.otelVars.length} <code className="font-mono">OTEL_*</code> env var{targetEnvInfo!.otelVars.length === 1 ? '' : 's'} on the target — showing env-var instrumentation.
-                          </div>
-                        )}
-                        {hasCollector && !hasEnv && (
-                          <div className="mb-4 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
-                            <span className="text-[#5eead4] font-semibold">✓ Collector config detected.</span>{' '}
-                            Found a YAML config at <code className="font-mono break-all">{targetEnvInfo!.collectorConfigPath}</code> — showing collector instrumentation.
-                          </div>
-                        )}
-                        {ambiguous && (
-                          <div className="mb-4 p-2.5 bg-gray-1000 border border-gray-800 rounded text-tiny text-gray-400">
-                            {hasEnv && hasCollector
-                              ? 'We see both an OpenTelemetry SDK and a collector config on this container. Pick the one your app actually uses to send telemetry.'
-                              : <>How is your app instrumented? Pick <strong className="text-gray-300">Collector YAML</strong> if your app runs an OpenTelemetry Collector with its own config. Pick <strong className="text-gray-300">OTEL Env Vars</strong> if your app uses an OTel SDK directly.</>}
-                          </div>
-                        )}
-                        {ambiguous && (
-                          <div className="flex items-center gap-2 mb-3">
-                            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Instrumentation:</span>
-                            <button
-                              onClick={() => setSnippetMode('yaml')}
-                              className={`px-3 py-1 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${snippetMode === 'yaml' ? 'bg-primary text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-                            >
-                              Collector YAML
-                            </button>
-                            <button
-                              onClick={() => setSnippetMode('env')}
-                              className={`px-3 py-1 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${snippetMode === 'env' ? 'bg-primary text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-                            >
-                              OTEL Env Vars
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-
-                  {snippetMode === 'yaml' ? (
-                    <>
-                      <p className="text-gray-300 mb-2 text-sm">In your collector's main config file (typically <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">otelcol-config.yml</code>, <em>not</em> an extras override), add this exporter:</p>
-                      <SnippetBlock text={`exporters:
+                  <div className="mb-2 flex items-baseline justify-between gap-3">
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Exporter</span>
+                  </div>
+                  <SnippetBlock text={`exporters:
   otlphttp/helix_sidecar:
     endpoint: "http://helix-gateway:4318"
     tls:
       insecure: true`} />
-                      <p className="text-gray-300 mb-2 text-sm">Then add it to your service pipelines:</p>
-                      <SnippetBlock text={`service:
+                  <p className="text-tiny text-gray-500 -mt-4 mb-6">
+                    In your main collector config (e.g. <code className="font-mono">otelcol-config.yaml</code>). No API key needed here —{' '}
+                    <button onClick={openGatewayConfigModal} className="text-active hover:underline font-semibold">view gateway config to see where it's set</button>.
+                  </p>
+
+                  <div className="mb-2 flex items-baseline justify-between gap-3">
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pipelines</span>
+                  </div>
+                  <SnippetBlock text={`service:
   pipelines:
     traces:
       exporters: [..., otlphttp/helix_sidecar]
@@ -1718,74 +1752,164 @@ ${logsData.logs || '(no logs available)'}
       exporters: [..., otlphttp/helix_sidecar]
     logs:
       exporters: [..., otlphttp/helix_sidecar]`} />
-                      <p className="text-tiny text-gray-500 mb-2">
-                        No <code className="font-mono">X-Api-Key</code>/<code className="font-mono">X-Source</code> needed on this hop — <code className="font-mono text-gray-300">helix-gateway</code> is already configured with them from your <code className="font-mono">.env</code> and adds them when forwarding to Helix.
-                      </p>
-                      <p className="text-tiny text-gray-500 mb-6">After saving the config, restart your collector container so it re-reads the file (and so gRPC/HTTP re-resolves the <code className="font-mono">helix-gateway</code> hostname).</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-gray-300 mb-2 text-sm">Set these env vars on your application container (works with most OTel auto-instrumentation libraries):</p>
-                      <SnippetBlock text={`OTEL_EXPORTER_OTLP_ENDPOINT=http://helix-gateway:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`} />
-                      <p className="text-tiny text-gray-500 mb-2">
-                        No <code className="font-mono">OTEL_EXPORTER_OTLP_HEADERS</code> needed — <code className="font-mono text-gray-300">helix-gateway</code> already holds the API key and adds the auth headers when forwarding to Helix.
-                      </p>
-                      <p className="text-tiny text-gray-500 mb-6">After updating, restart your application container so the new env values take effect.</p>
-                    </>
+                  <p className="text-tiny text-gray-500 -mt-4 mb-6">Wire into whichever pipelines your collector uses. Restart your collector after saving.</p>
+
+                  <div className="border-t border-gray-800 pt-4 mb-4">
+                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                      Required resource attributes <span className="normal-case tracking-normal text-gray-500 font-normal">— validated automatically in Step 4</span>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 bg-gray-1000 border border-gray-800 rounded">
+                      <span className="text-tiny font-mono text-gray-200 flex-shrink-0 pt-0.5"><code>service.name</code></span>
+                      <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/20 text-warning flex-shrink-0">required</span>
+                      <span className="text-tiny text-gray-400 flex-1">Your service in Helix topology &amp; dashboards.</span>
+                    </div>
+                  </div>
+
+                  <div className="mb-3 flex items-start gap-2.5 p-3 rounded border border-warning/40 bg-warning/10 text-tiny text-gray-300">
+                    <span className="text-warning font-bold flex-shrink-0 leading-tight" aria-hidden="true">!</span>
+                    <span>After saving, restart your collector container so the new exporter takes effect.</span>
+                  </div>
+                  <div className="mb-6 flex items-start gap-2.5 p-3 rounded border border-active/30 bg-active/10 text-tiny text-gray-300">
+                    <Activity className="w-3.5 h-3.5 text-info flex-shrink-0 mt-0.5" />
+                    <span>Traces will also appear locally in <a href="/otel-data" className="text-active hover:underline font-semibold">View OTel Data</a> — no extra config needed.</span>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() => setSetupStep(1)}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-6 py-3 rounded font-semibold transition-colors text-sm"
+                    >Back</button>
+                    <button
+                      onClick={() => setSetupStep(3)}
+                      className="flex-1 bg-primary hover:bg-primary-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm"
+                    >Next: Connect →</button>
+                  </div>
+                </div>
+              )}
+
+              {setupStep === 3 && (
+                <div className="adapt-card">
+                  <h2 className="text-lg font-bold mb-2 text-gray-200">Step 3: Connect your collector to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-bridge</code></h2>
+                  <p className="text-sm text-gray-400 mb-4">helix-gateway and your collector need to share a Docker network. We tried to wire it up automatically — finish the job here if needed.</p>
+
+                  {/* Auto-bridge result from Step 1's /api/lifecycle/bridge call. */}
+                  {bridgeStatus?.kind === 'success' && (
+                    <div className="mb-4 flex items-start gap-3 p-3 bg-success/10 border border-success/40 rounded text-sm">
+                      <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-200"><span className="font-semibold">helix-gateway was automatically attached to your app's network.</span> It joined <code className="font-mono">{bridgeStatus.network}</code> (matched container <code className="font-mono">{bridgeStatus.targetContainer}</code>).</span>
+                    </div>
+                  )}
+                  {bridgeStatus?.kind === 'skipped' && (
+                    <div className="mb-4 flex items-start gap-3 p-3 bg-active/10 border border-active/40 rounded text-sm">
+                      <Activity className="w-4 h-4 text-active flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-200"><span className="font-semibold">APP_URL is a localhost or IP address — auto-attach skipped.</span> Use the controls below to connect manually.</span>
+                    </div>
+                  )}
+                  {bridgeStatus?.kind === 'error' && (
+                    <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
+                      <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-200"><span className="font-semibold">Auto-attach failed: </span>{bridgeStatus.reason}. Use the controls below to connect manually.</span>
+                    </div>
                   )}
 
-                  {/* Network controls: attach helix-gateway to whichever
-                      Docker network the user's app or collector lives on.
-                      Driven by /api/discovery/collectors so the user can
-                      one-click attach instead of typing a network name. */}
-                  <div className="mb-6 p-3 bg-warning/10 border border-warning/40 rounded text-tiny text-gray-300">
-                    <div className="font-semibold text-gray-100 mb-1 flex items-center gap-2">
-                      <span className="text-warning font-bold leading-tight" aria-hidden="true">!</span>
-                      Shared-network requirement
-                    </div>
-                    <p className="mb-2">
-                      Whichever container sends OTLP to <code className="font-mono text-gray-200">helix-gateway</code> (your app directly, or your own collector) must share a Docker network with it — otherwise the hostname won't resolve. If app and collector live on different networks, helix-gateway needs to be attached to <em>both</em>.
-                    </p>
+                  {/* Step 3 tabs: Detected on this host | Manual */}
+                  <div className="flex border-b border-gray-800 mb-4 -mb-px">
+                    <button
+                      onClick={() => setStep3Tab('detected')}
+                      className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                        step3Tab === 'detected' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
+                      }`}
+                    >Detected on this host</button>
+                    <button
+                      onClick={() => setStep3Tab('manual')}
+                      className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                        step3Tab === 'manual' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
+                      }`}
+                    >Manual</button>
+                  </div>
 
-                    {detectedCollectors.length > 0 && (
-                      <div className="mt-3 mb-3 rounded border border-gray-800 bg-gray-1000 p-2.5">
-                        <div className="text-tiny font-semibold text-gray-300 uppercase tracking-wider mb-2">
-                          Detected collectors on this host
+                  {step3Tab === 'detected' && (
+                    <div className="mt-2">
+                      {(() => {
+                        const k8sDetected = detectedCollectors.some(c => c.isKubernetes);
+                        return k8sDetected && (
+                          <div className="mb-4 flex items-start gap-3 p-3 bg-primary/10 border border-primary/40 rounded text-sm">
+                            <Hexagon className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                              <div className="font-semibold text-gray-100 mb-1">Kubernetes detected</div>
+                              <p className="text-tiny text-gray-300">
+                                Apply the K8s Attribute Enrichment template to auto-enrich telemetry with pod, namespace &amp; node metadata.
+                              </p>
+                            </div>
+                            <button
+                              onClick={applyK8sTemplate}
+                              disabled={k8sApplying || k8sApplyResult === 'applied'}
+                              className={`flex-shrink-0 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${
+                                k8sApplyResult === 'applied'
+                                  ? 'bg-success/20 text-success border border-success/40 cursor-default'
+                                  : 'bg-primary hover:bg-primary-hover text-white disabled:opacity-60'
+                              }`}
+                            >
+                              {k8sApplying ? 'Applying…' : k8sApplyResult === 'applied' ? '✓ Applied' : 'Apply template'}
+                            </button>
+                          </div>
+                        );
+                      })()}
+                      {k8sApplyResult === 'failed' && (
+                        <div className="mb-3 text-tiny text-danger">× Could not apply template — retry or apply it from the YAML editor on the dashboard.</div>
+                      )}
+
+                      {detectedCollectors.length === 0 ? (
+                        <div className="p-4 text-center text-tiny text-gray-500 border border-gray-800 rounded bg-gray-1000">
+                          No OTel collector containers detected on this host yet. Switch to the <button onClick={() => setStep3Tab('manual')} className="text-active hover:underline font-semibold">Manual</button> tab to attach by network name.
                         </div>
+                      ) : (
                         <div className="space-y-2">
                           {detectedCollectors.map(c => {
                             const attachable = c.networks.filter(n => n !== 'helix-bridge');
+                            const reachable = c.sharesNetworkWithSidecar;
                             return (
-                              <div key={c.name} className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-gray-200 font-mono text-tiny truncate">{c.name}</div>
-                                  <div className="text-tiny text-gray-500 truncate">
+                              <div key={c.name} className="flex items-start justify-between gap-3 p-3 bg-gray-1000 border border-gray-800 rounded">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <span className="text-gray-200 font-mono text-sm truncate">{c.name}</span>
+                                    {c.isKubernetes && (
+                                      <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/20 text-primary inline-flex items-center gap-1">
+                                        <Hexagon className="w-2.5 h-2.5" />k8s
+                                      </span>
+                                    )}
+                                    {reachable ? (
+                                      <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/20 text-success">reachable</span>
+                                    ) : (
+                                      <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/20 text-warning">not reachable</span>
+                                    )}
+                                  </div>
+                                  <div className="text-tiny text-gray-500 truncate" title={c.image}>
                                     {c.image}{attachable.length ? ` • on ${attachable.join(', ')}` : ''}
                                   </div>
                                 </div>
-                                {c.sharesNetworkWithSidecar ? (
-                                  <span className="text-tiny text-[#5eead4] font-semibold flex-shrink-0">✓ reachable</span>
+                                {reachable ? (
+                                  <span className="px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-success/20 text-success border border-success/40">Attached</span>
                                 ) : attachable.length === 0 ? (
-                                  <span className="text-tiny text-gray-500 flex-shrink-0">no user networks</span>
+                                  <span className="text-tiny text-gray-500 self-center">no user networks</span>
                                 ) : attachable.length === 1 ? (
                                   <button
                                     onClick={() => attachSidecarToNetwork(attachable[0])}
                                     disabled={attachingNetwork === attachable[0]}
-                                    className="px-2 py-0.5 text-tiny rounded bg-primary hover:bg-[#3006c2] disabled:opacity-60 text-white font-semibold flex-shrink-0"
+                                    className="px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover disabled:opacity-60 text-white"
                                   >
-                                    {attachingNetwork === attachable[0] ? 'Attaching…' : `Attach to ${attachable[0]}`}
+                                    {attachingNetwork === attachable[0] ? 'Attaching…' : 'Attach'}
                                   </button>
                                 ) : (
-                                  <div className="flex gap-1 flex-wrap justify-end">
+                                  <div className="flex flex-col gap-1">
                                     {attachable.map(n => (
                                       <button
                                         key={n}
                                         onClick={() => attachSidecarToNetwork(n)}
                                         disabled={attachingNetwork === n}
-                                        className="px-2 py-0.5 text-tiny rounded bg-primary hover:bg-[#3006c2] disabled:opacity-60 text-white font-semibold"
+                                        className="px-2 py-1 text-tiny rounded bg-primary hover:bg-primary-hover disabled:opacity-60 text-white font-semibold"
                                       >
-                                        {attachingNetwork === n ? '…' : n}
+                                        {attachingNetwork === n ? '…' : `Attach to ${n}`}
                                       </button>
                                     ))}
                                   </div>
@@ -1793,103 +1917,78 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`} />
                               </div>
                             );
                           })}
+                          {attachResult && (
+                            <div className={`text-tiny ${attachResult.ok ? 'text-success' : 'text-danger'}`}>
+                              {attachResult.ok ? '✓' : '×'} {attachResult.message}
+                            </div>
+                          )}
                         </div>
-                        {attachResult && (
-                          <div className={`mt-2 text-tiny ${attachResult.ok ? 'text-[#5eead4]' : 'text-danger'}`}>
-                            {attachResult.ok ? '✓' : '×'} {attachResult.message}
-                          </div>
-                        )}
-                        <p className="text-tiny text-gray-500 mt-2">
-                          After attaching, restart the collector container — gRPC/HTTP caches "no such host" until then.
+                      )}
+                      <p className="text-tiny text-gray-500 mt-3">After attaching, restart your collector so helix-gateway resolves.</p>
+                    </div>
+                  )}
+
+                  {step3Tab === 'manual' && (
+                    <div className="mt-2 space-y-4">
+                      <div>
+                        <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option A — attach helix-gateway to your app's network</p>
+                        <SnippetBlock text="docker network connect <your-network> helix-gateway" />
+                        <p className="text-tiny text-gray-500 -mt-4">
+                          Replace <code className="font-mono">&lt;your-network&gt;</code> with your compose network name.
                         </p>
                       </div>
-                    )}
-
-                    <p className="mb-1 mt-2">
-                      Or attach manually (replace with your app's compose network name, e.g. <code className="font-mono text-gray-200">opentelemetry-demo</code>):
-                    </p>
-                    <SnippetBlock text={`docker network connect <your-app-network> helix-gateway`} />
-                    <p className="text-tiny text-gray-500 -mt-4 mb-2">
-                      Or open <button
-                        onClick={() => setIsServicesOpen(true)}
-                        className="text-active hover:underline font-semibold"
-                      >Discovered Services</button> to attach a container the other way (its network → helix-bridge).
-                    </p>
-                  </div>
-
-                  <div className="mb-6 p-2.5 bg-info/10 border border-info/40 rounded text-tiny text-gray-300 flex gap-2 items-start">
-                    <Activity className="w-3.5 h-3.5 text-info flex-shrink-0 mt-0.5" />
-                    <span>
-                      Traces sent to <code className="font-mono text-gray-200">helix-gateway</code> will also be visible locally in{' '}
-                      <a href="/otel-data" className="text-active hover:underline font-semibold">View OTel Data</a> —
-                      the gateway fans trace data to the configurator alongside the existing Helix export. No change to your app is needed.
-                    </span>
-                  </div>
-
-                  {/* Passive heads-up about the local trace store. The user's
-                      app config is unchanged — the gateway fans traces out
-                      to the configurator backend in addition to Helix. */}
-                  <div className="mb-6 flex items-start gap-2.5 p-3 rounded border border-active/30 bg-active/10 text-tiny text-gray-300">
-                    <span className="text-[#8ca1f3] font-bold flex-shrink-0 leading-tight" aria-hidden="true">i</span>
-                    <div>
-                      Traces will also be visible locally in <span className="font-semibold text-gray-100">View OTel Data</span> — the gateway fans trace data to a local store in addition to Helix. Your app config above does not change.
+                      <div>
+                        <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option B — attach your container to helix-bridge</p>
+                        <SnippetBlock text="docker network connect helix-bridge <your-container>" />
+                      </div>
+                      <p className="text-tiny text-gray-500">Then restart your container.</p>
                     </div>
-                  </div>
+                  )}
 
-                  {/* Live App → Gateway verifier. Polls /api/diagnostics/receiver-counters
-                      every 2s. Deltas vs. the baseline taken when Step 2 opened
-                      tell the user whether THEIR app is sending data — distinct
-                      from the synthetic Gateway → Helix check below. */}
+                  <div className="mt-6 flex gap-4">
+                    <button
+                      onClick={() => setSetupStep(2)}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-6 py-3 rounded font-semibold transition-colors text-sm"
+                    >Back</button>
+                    <button
+                      onClick={() => setSetupStep(4)}
+                      className="flex-1 bg-primary hover:bg-primary-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm"
+                    >Next: Verify →</button>
+                  </div>
+                </div>
+              )}
+
+              {setupStep === 4 && (
+                <div className="adapt-card">
+                  <h2 className="text-lg font-bold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
+                  <p className="text-sm text-gray-400 mb-5">Three quick checks. Restart your app or collector first if you just changed config.</p>
+
+                  {/* Live counters — three cards. Reuse the existing
+                      receiver-counters polling (re-keyed on step 4). */}
                   {(() => {
                     const delta = (now: number | undefined, base: number | undefined) =>
                       typeof now === 'number' && typeof base === 'number' ? Math.max(0, now - base) : 0;
                     const dSpans = delta(receiverNow?.acceptedSpans, receiverBaseline?.acceptedSpans);
                     const dMetrics = delta(receiverNow?.acceptedMetricPoints, receiverBaseline?.acceptedMetricPoints);
                     const dLogs = delta(receiverNow?.acceptedLogRecords, receiverBaseline?.acceptedLogRecords);
-                    const total = dSpans + dMetrics + dLogs;
-                    const ready = !!receiverBaseline && !receiverError;
+                    const Card = ({ label, value }: { label: string; value: number }) => (
+                      <div className="bg-gray-1000 border border-gray-800 rounded px-3 py-2.5">
+                        <div className="text-tiny text-gray-500 uppercase tracking-wider">{label}</div>
+                        <div className={`font-mono text-xl mt-1 ${value > 0 ? 'text-success' : 'text-gray-300'}`}>{value > 0 ? '+' : ''}{value}</div>
+                      </div>
+                    );
                     return (
-                      <div className="mb-6 p-3 rounded border border-gray-800 bg-gray-1000">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">App → Gateway (live)</span>
-                          {receiverError ? (
-                            <span className="text-tiny text-warning">⚠ {receiverError}</span>
-                          ) : !ready ? (
-                            <span className="text-tiny text-gray-500">connecting…</span>
-                          ) : total > 0 ? (
-                            <span className="text-tiny text-[#5eead4]">✓ Telemetry reaching the gateway</span>
-                          ) : (
-                            <span className="text-tiny text-gray-400">no telemetry received yet</span>
-                          )}
+                      <div className="mb-5">
+                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Live counters <span className="normal-case tracking-normal text-gray-500 font-normal">— since you opened this step</span></div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <Card label="Spans" value={dSpans} />
+                          <Card label="Metric points" value={dMetrics} />
+                          <Card label="Log records" value={dLogs} />
                         </div>
-                        <div className="grid grid-cols-3 gap-3 text-sm">
-                          <div className="bg-gray-900 rounded px-3 py-2">
-                            <div className="text-tiny text-gray-500 uppercase tracking-wider">Spans</div>
-                            <div className={`font-mono text-lg ${dSpans > 0 ? 'text-[#5eead4]' : 'text-gray-300'}`}>+{dSpans}</div>
-                          </div>
-                          <div className="bg-gray-900 rounded px-3 py-2">
-                            <div className="text-tiny text-gray-500 uppercase tracking-wider">Metric points</div>
-                            <div className={`font-mono text-lg ${dMetrics > 0 ? 'text-[#5eead4]' : 'text-gray-300'}`}>+{dMetrics}</div>
-                          </div>
-                          <div className="bg-gray-900 rounded px-3 py-2">
-                            <div className="text-tiny text-gray-500 uppercase tracking-wider">Log records</div>
-                            <div className={`font-mono text-lg ${dLogs > 0 ? 'text-[#5eead4]' : 'text-gray-300'}`}>+{dLogs}</div>
-                          </div>
-                        </div>
-                        <div className="text-tiny text-gray-500 mt-2">
-                          Counts how much telemetry the gateway has accepted while you've been on this step. Apply the snippet above and restart your app — these numbers should start climbing within a few seconds.
-                        </div>
-                        {/* Surface OTel export errors logged by the user's
-                            own collector / SDK. We see these by scanning
-                            recent log lines of non-helix containers on the
-                            helix-bridge network. Common case: the user's
-                            collector is using gRPC instead of HTTP, or its
-                            container can't resolve helix-gateway. */}
+                        {receiverError && <div className="mt-2 text-tiny text-warning">⚠ {receiverError}</div>}
                         {appExportErrors.length > 0 && (
                           <div className="mt-3 p-2.5 rounded border border-warning/40 bg-warning/10">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-tiny text-warning font-semibold uppercase tracking-wider">⚠ Errors detected on your side</span>
-                            </div>
+                            <div className="text-tiny text-warning font-semibold uppercase tracking-wider mb-1">⚠ Errors detected on your side</div>
                             {appExportErrors.map(err => (
                               <div key={err.container} className="mb-2 last:mb-0">
                                 <div className="text-tiny text-gray-300 font-mono mb-0.5">{err.container}</div>
@@ -1905,88 +2004,186 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`} />
                     );
                   })()}
 
+                  {/* Resource attributes — service.name detection. */}
+                  {(() => {
+                    const detected = recentServices[0];
+                    return (
+                      <div className="mb-5">
+                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Resource attributes</div>
+                        <div className={`flex items-start gap-3 p-3 rounded border ${detected ? 'bg-success/10 border-success/40' : 'bg-warning/10 border-warning/40'}`}>
+                          {detected ? (
+                            <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+                          )}
+                          <div className="flex-1">
+                            <code className="font-mono text-sm text-gray-200">service.name</code>
+                            {detected ? (
+                              <span className="ml-2 text-sm text-gray-200">= <code className="font-mono">{detected}</code></span>
+                            ) : (
+                              <span className="ml-2 text-sm text-gray-300">— not detected — make sure your collector sets <code className="font-mono">service.name</code></span>
+                            )}
+                            {detected && recentServices.length > 1 && (
+                              <div className="text-tiny text-gray-500 mt-1">Also seeing: {recentServices.slice(1, 4).map(s => <code key={s} className="font-mono text-gray-400 mr-2">{s}</code>)}</div>
+                            )}
+                          </div>
+                        </div>
+                        {detectedCollectors.some(c => c.isKubernetes) && (
+                          <div className="mt-2 flex items-start gap-3 p-2.5 rounded border border-primary/40 bg-primary/10 text-tiny text-gray-300">
+                            <Hexagon className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
+                            <span>Kubernetes detected — <code className="font-mono">k8s.namespace.name</code> and <code className="font-mono">k8s.cluster.name</code> are being enriched automatically via the K8s Attribute Enrichment template.</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Gateway → Helix synthetic verify */}
+                  <div className="mb-5">
+                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Gateway → Helix</div>
+                    {traceVerifyResult && traceVerifyResult.status === 'exported' ? (
+                      <div className="flex items-start gap-3 p-3 bg-success/10 border border-success/40 rounded text-sm">
+                        <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <span className="text-gray-200 font-semibold">Synthetic trace reached Helix.</span>
+                          <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
+                          <div className="text-tiny text-gray-500 mt-1">Run <button onClick={handleVerifyTelemetry} disabled={verifyingTrace} className="text-active hover:underline font-semibold disabled:opacity-60">again</button> any time.</div>
+                          {envVars.HELIX_API_KEY && envVars.HELIX_API_KEY.startsWith('FAKE-') && (
+                            <div className="mt-2 text-tiny text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1.5">
+                              <span className="font-semibold">Heads up:</span> your <code className="font-mono">HELIX_API_KEY</code> is a placeholder — Helix returns 200 for any request. Replace it with a real tenant key.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : traceVerifyResult && traceVerifyResult.status === 'rejected' ? (
+                      <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
+                        <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
+                        <div>
+                          <span className="text-gray-200 font-semibold">Helix rejected the trace.</span>
+                          <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
+                          {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
+                        </div>
+                      </div>
+                    ) : traceVerifyResult && traceVerifyResult.status === 'pending' ? (
+                      <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
+                        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-gray-200 font-semibold">Trace queued but not yet exported.</span>
+                          <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
+                          {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
+                        </div>
+                      </div>
+                    ) : traceVerifyResult && traceVerifyResult.status === 'error' ? (
+                      <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
+                        <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
+                        <div>
+                          <span className="text-gray-200 font-semibold">Verification failed.</span>
+                          <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
+                          {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
+                        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+                        <span className="text-gray-200">Not yet verified. Run the synthetic check below.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Blueprint prerequisite banner */}
+                  <div className="mb-5 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
+                    <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+                    <div>
+                      <span className="text-gray-200">Before topology appears in Helix, the <span className="font-semibold">Default Blueprint for OTel Service</span> must be enabled in AIOps.</span>{' '}
+                      {envVars.HELIX_ENDPOINT && (
+                        <a
+                          href={`${envVars.HELIX_ENDPOINT.replace(/\/+$/, '')}/aiops/#/configurations/manageOpentelemetry`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-active hover:underline font-semibold inline-flex items-center gap-1"
+                        >
+                          Open Manage OpenTelemetry <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="flex gap-4">
                     <button
-                      onClick={() => setSetupStep(1)}
+                      onClick={() => setSetupStep(3)}
                       className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-6 py-3 rounded font-semibold transition-colors text-sm"
-                    >
-                      Back
-                    </button>
+                    >Back</button>
                     <button
                       onClick={handleVerifyTelemetry}
                       disabled={verifyingTrace}
-                      className="flex-1 bg-warning hover:bg-[#d9ae00] text-gray-900 px-6 py-3 rounded font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                      className="flex-1 bg-warning hover:bg-warning-hover text-gray-900 px-6 py-3 rounded font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                       title="Inject a synthetic trace and confirm it reaches Helix — independent of your app"
                     >
                       {verifyingTrace && <Loader2 className="w-4 h-4 animate-spin" />}
-                      {verifyingTrace ? 'Verifying...' : 'Verify Gateway → Helix'}
+                      {verifyingTrace ? 'Verifying…' : 'Verify Gateway → Helix'}
                     </button>
                     <button
                       onClick={() => {
                         localStorage.setItem('helix-configurator.onboarded', '1');
                         setIsSetupComplete(true);
                       }}
-                      className="flex-1 bg-success hover:bg-[#006640] text-white px-6 py-3 rounded font-semibold transition-all text-sm"
-                    >
-                      Launch Dashboard
-                    </button>
+                      className="flex-1 bg-success hover:bg-success-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm"
+                    >Launch Dashboard</button>
                   </div>
-                  {traceVerifyResult && traceVerifyResult.status === 'exported' && (
-                    <div className="mt-4 flex gap-3 p-3 bg-[#11845b]/15 border border-success/40 rounded text-sm items-start">
-                      <span className="text-[#5eead4] font-bold flex-shrink-0">✓</span>
-                      <div className="space-y-1.5">
-                        <div>
-                          <span className="text-[#5eead4] font-semibold">Gateway → Helix path verified.</span>{' '}
-                          <span className="text-gray-300">{traceVerifyResult.message}. This only tests the collector → Helix hop, not your application.</span>
-                        </div>
-                        <div className="text-tiny text-gray-400">
-                          To verify end-to-end, point your app's OpenTelemetry SDK at <code className="font-mono text-gray-300">localhost:4317</code> (gRPC) or <code className="font-mono text-gray-300">localhost:4318</code> (HTTP), then watch the Live Metrics tab for spans tagged with your <code className="font-mono text-gray-300">service.name</code>.
-                        </div>
-                        {envVars.HELIX_API_KEY && envVars.HELIX_API_KEY.startsWith('FAKE-') && (
-                          <div className="text-tiny text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1.5">
-                            <span className="font-semibold">Heads up:</span> your <code className="font-mono">HELIX_API_KEY</code> is a placeholder generated by the AIOps demo. Helix's endpoint returns <code className="font-mono">200&nbsp;OK</code> for any request, so the gateway shows "sent" even though Helix won't actually store the data. Replace it with a real tenant key before relying on this.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {traceVerifyResult && traceVerifyResult.status === 'rejected' && (
-                    <div className="mt-4 flex gap-3 p-3 bg-[#b2001e]/15 border border-danger/40 rounded text-sm items-start">
-                      <span className="text-[#ff8a8a] font-bold flex-shrink-0">×</span>
-                      <div>
-                        <span className="text-[#ff8a8a] font-semibold">Helix rejected the trace.</span>{' '}
-                        <span className="text-gray-300">{traceVerifyResult.message}.</span>
-                        {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-                      </div>
-                    </div>
-                  )}
-                  {traceVerifyResult && traceVerifyResult.status === 'pending' && (
-                    <div className="mt-4 flex gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm items-start">
-                      <span className="text-warning font-bold flex-shrink-0">!</span>
-                      <div>
-                        <span className="text-warning font-semibold">Trace queued but not yet exported.</span>{' '}
-                        <span className="text-gray-300">{traceVerifyResult.message}.</span>
-                        {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-                      </div>
-                    </div>
-                  )}
-                  {traceVerifyResult && traceVerifyResult.status === 'error' && (
-                    <div className="mt-4 flex gap-3 p-3 bg-[#b2001e]/15 border border-danger/40 rounded text-sm items-start">
-                      <span className="text-[#ff8a8a] font-bold flex-shrink-0">×</span>
-                      <div>
-                        <span className="text-[#ff8a8a] font-semibold">Verification failed.</span>{' '}
-                        <span className="text-gray-300">{traceVerifyResult.message}.</span>
-                        {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-                      </div>
-                    </div>
-                  )}
+
                   <div className="mt-6 pt-4 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">
                     <span className="font-semibold text-gray-400 uppercase tracking-wider">After launch:</span>
                     <ul className="mt-2 space-y-1 list-disc list-inside">
                       <li>Run a <span className="text-gray-300">Diagnostic Health Check</span> to validate config, API key, and tenant reachability.</li>
                       <li>Use <span className="text-gray-300">Load Template</span> in the YAML editor to switch to a tail-sampling, Prometheus, or Kubernetes-attribute starter.</li>
-                      <li>Add an <span className="text-gray-300">AIOps Business Service Key</span> from Settings to enable the deep-link button (skip this step earlier? add it any time).</li>
+                      <li>Add an <span className="text-gray-300">AIOps Business Service Key</span> from Settings to enable the deep-link button.</li>
                     </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* Gateway config modal — opened from Step 2's "view gateway
+                  config" link. Read-only — full editing happens on the
+                  dashboard's YAML editor card. */}
+              {gatewayConfigOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60" onClick={() => setGatewayConfigOpen(false)}>
+                  <div
+                    className="adapt-card !p-0 max-w-3xl w-full max-h-[80vh] flex flex-col overflow-hidden"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <header className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-800 bg-gray-900">
+                      <div>
+                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Gateway config</div>
+                        <div className="text-sm text-gray-200">Where the auth headers live</div>
+                      </div>
+                      <button onClick={() => setGatewayConfigOpen(false)} className="text-gray-400 hover:text-gray-200 p-1 rounded hover:bg-gray-800">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </header>
+                    <div className="px-5 py-3 text-tiny text-gray-400 border-b border-gray-800 bg-gray-1000">
+                      Written automatically in Step 1. Your collector routes to the gateway receiver; the gateway authenticates to Helix via the highlighted headers.
+                    </div>
+                    <div className="flex-1 overflow-auto p-4 bg-gray-1000">
+                      <pre className="font-mono text-tiny text-gray-300 whitespace-pre" style={{ fontFamily: "'Source Code Pro', monospace" }}>
+                        {gatewayConfigText
+                          ? gatewayConfigText.split('\n').map((line, i) => {
+                              const highlight = /(X-Api-Key|X-Source|endpoint:)/.test(line);
+                              return (
+                                <div key={i} className={highlight ? 'bg-warning/15 border-l-2 border-warning pl-2 -ml-2' : ''}>{line || ' '}</div>
+                              );
+                            })
+                          : <span className="text-gray-500">Loading…</span>}
+                      </pre>
+                    </div>
+                    <footer className="px-5 py-3 border-t border-gray-800 bg-gray-900 flex justify-between items-center">
+                      <span className="text-tiny text-gray-500">Read-only here.</span>
+                      <button
+                        onClick={() => { setGatewayConfigOpen(false); localStorage.setItem('helix-configurator.onboarded', '1'); setIsSetupComplete(true); setIsYamlOpen(true); }}
+                        className="text-tiny font-semibold text-active hover:underline inline-flex items-center gap-1"
+                      >
+                        Open full gateway config editor <ExternalLink className="w-3 h-3" />
+                      </button>
+                    </footer>
                   </div>
                 </div>
               )}

@@ -182,6 +182,21 @@ const validateConfig = (yamlString) => {
   const definedProcessors = Object.keys(parsed.processors || {});
   const definedExporters = Object.keys(parsed.exporters || {});
 
+  // BMC Helix AIOps doesn't support the OTel transform processor; flag it as
+  // a structural-lint warning so users know it'll be silently ignored or hurt
+  // collector throughput.
+  const transformProcessors = definedProcessors.filter(
+    name => name === 'transform' || name.startsWith('transform/')
+  );
+  if (transformProcessors.length > 0) {
+    transformProcessors.forEach(name => {
+      warnings.push({
+        line: findLineForKey(yamlString, name),
+        message: 'The Transform processor is not supported by BMC Helix AIOps and may impact collector performance.',
+      });
+    });
+  }
+
   if (definedReceivers.length === 0) {
     warnings.push({ line: 1, message: 'No receivers defined — gateway has no telemetry input' });
   }
@@ -2277,7 +2292,14 @@ app.get('/api/discovery/collectors', async (req, res) => {
         const networks = Object.keys((c.NetworkSettings && c.NetworkSettings.Networks) || {})
           .filter(n => n !== 'host' && n !== 'none' && n !== 'ingress');
         const sharesNetworkWithSidecar = networks.some(n => sidecarNetSet.has(n));
-        return { name, image, networks, sharesNetworkWithSidecar };
+        // K8s containers carry well-known kubelet labels. Detect via labels
+        // first (most reliable) then fall back to image / command hints.
+        const labels = c.Labels || {};
+        const isKubernetes =
+          Object.keys(labels).some(k => k.startsWith('io.kubernetes.')) ||
+          /\b(kubelet|k8s|kubernetes)\b/i.test(image) ||
+          /\b(kubelet|k8s|kubernetes)\b/i.test(c.Command || '');
+        return { name, image, networks, sharesNetworkWithSidecar, isKubernetes };
       });
     res.json({ sidecar: sidecarName, sidecarNetworks, collectors: candidates });
   } catch (e) {
