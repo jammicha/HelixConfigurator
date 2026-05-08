@@ -17,7 +17,7 @@ exporters:
       X-Source: ${env:X_SOURCE}
     sending_queue:
       enabled: true
-  otlphttp/local_store:
+  otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs
     encoding: json
@@ -45,7 +45,7 @@ service:
         - batch
       exporters:
         - otlphttp/bmchelix
-        - otlphttp/local_store
+        - otlphttp/helix_local_viewer
     metrics:
       receivers:
         - otlp
@@ -60,4 +60,4 @@ service:
         - batch
       exporters:
         - otlphttp/bmchelix
-        - otlphttp/local_store
+        - otlphttp/helix_local_viewer

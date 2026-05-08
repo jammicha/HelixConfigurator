@@ -45,7 +45,7 @@ exporters:
   # Fan-out: traces and logs also flow to the configurator backend so the
   # local "View OTel Data" page can render waterfalls, errors, and DB insight.
   # Don't remove this — /otel-data depends on it.
-  otlphttp/local_store:
+  otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs
     encoding: json
@@ -70,7 +70,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [k8sattributes, batch]
-      exporters: [otlphttp/bmchelix, otlphttp/local_store]
+      exporters: [otlphttp/bmchelix, otlphttp/helix_local_viewer]
     metrics:
       receivers: [otlp]
       processors: [k8sattributes, batch]
@@ -78,4 +78,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [k8sattributes, batch]
-      exporters: [otlphttp/bmchelix, otlphttp/local_store]
+      exporters: [otlphttp/bmchelix, otlphttp/helix_local_viewer]
