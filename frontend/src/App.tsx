@@ -115,8 +115,6 @@ const App = () => {
   const [confirmDialog, setConfirmDialog] = useState<ConfirmRequest | null>(null);
   const [verifyingTrace, setVerifyingTrace] = useState(false);
   const [traceVerifyResult, setTraceVerifyResult] = useState<{ status: string; message: string; remediation?: string } | null>(null);
-  const [targetEnvInfo, setTargetEnvInfo] = useState<{ hasOtelEnv: boolean; hasEndpoint: boolean; otelVars: string[]; hasCollectorConfig?: boolean; collectorConfigPath?: string | null } | null>(null);
-  const [snippetMode, setSnippetMode] = useState<'yaml' | 'env'>('yaml');
   // Bridge outcome from Step 1's /api/lifecycle/bridge call. Drives the
   // banner at the top of Step 2 so the user knows whether the auto-bridge
   // succeeded, was skipped, or failed — and what to do about it.
@@ -928,23 +926,9 @@ const App = () => {
         setBridgeStatus({ kind: 'error', reason });
       }
 
-      // Inspect the target container for OTEL env vars AND a collector config
-      // mount, so Step 2 can pick the single relevant instrumentation path
-      // instead of asking the user to choose. If both are detected we leave
-      // snippetMode where it is and let the user toggle.
-      setTargetEnvInfo(null);
-      setSnippetMode('yaml');
-      if (bridgedTarget) {
-        try {
-          const envRes = await fetch(`/api/containers/inspect/${encodeURIComponent(bridgedTarget)}`);
-          if (envRes.ok) {
-            const envInfo = await envRes.json();
-            setTargetEnvInfo(envInfo);
-            if (envInfo.hasOtelEnv && !envInfo.hasCollectorConfig) setSnippetMode('env');
-            else if (envInfo.hasCollectorConfig && !envInfo.hasOtelEnv) setSnippetMode('yaml');
-          }
-        } catch { /* non-fatal — defaults to yaml snippet */ }
-      }
+      // Helix only supports the collector-routed path now, so the wizard
+      // doesn't branch on instrumentation style — Step 2 just shows the
+      // exporter/pipelines snippets unconditionally.
 
       // Verify auth
       const diagRes = await fetch('/api/diagnostics/network');
@@ -1012,28 +996,36 @@ const App = () => {
 
   // Step 3 — apply the K8s Attribute Enrichment template via the existing
   // /api/templates and /api/config endpoints. No new backend route needed.
-  const applyK8sTemplate = async () => {
-    if (k8sApplying) return;
-    setK8sApplying(true);
-    setK8sApplyResult(null);
-    try {
-      const tplRes = await fetch('/api/templates/k8s-attributes');
-      if (!tplRes.ok) throw new Error('Could not load template');
-      const { content } = await tplRes.json();
-      const saveRes = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      });
-      if (!saveRes.ok) throw new Error('Could not save config');
-      setK8sApplyResult('applied');
-      // Refresh local copy so the gateway-config modal reflects the change.
-      setGatewayConfigText(content);
-    } catch {
-      setK8sApplyResult('failed');
-    } finally {
-      setK8sApplying(false);
-    }
+  // Confirmation guarded: this overwrites the entire gateway YAML, including
+  // anything the user may have already customized.
+  const requestApplyK8sTemplate = () => {
+    if (k8sApplying || k8sApplyResult === 'applied') return;
+    setConfirmDialog({
+      title: 'Apply K8s Attribute Enrichment template?',
+      message: 'This replaces the entire helix-gateway YAML with the K8s Attribute Enrichment template. Any custom processors, exporters, or pipeline edits in the current config will be lost. The gateway will restart on save.',
+      confirmLabel: 'Apply template',
+      onConfirm: async () => {
+        setK8sApplying(true);
+        setK8sApplyResult(null);
+        try {
+          const tplRes = await fetch('/api/templates/k8s-attributes');
+          if (!tplRes.ok) throw new Error('Could not load template');
+          const { content } = await tplRes.json();
+          const saveRes = await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content }),
+          });
+          if (!saveRes.ok) throw new Error('Could not save config');
+          setK8sApplyResult('applied');
+          setGatewayConfigText(content);
+        } catch {
+          setK8sApplyResult('failed');
+        } finally {
+          setK8sApplying(false);
+        }
+      },
+    });
   };
 
   // Step 4 — service.name detection. Uses the existing /api/traces/services
@@ -1842,7 +1834,7 @@ ${logsData.logs || '(no logs available)'}
                               </p>
                             </div>
                             <button
-                              onClick={applyK8sTemplate}
+                              onClick={requestApplyK8sTemplate}
                               disabled={k8sApplying || k8sApplyResult === 'applied'}
                               className={`flex-shrink-0 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${
                                 k8sApplyResult === 'applied'
@@ -1945,6 +1937,18 @@ ${logsData.logs || '(no logs available)'}
                     </div>
                   )}
 
+                  {/* When helix-gateway is already on a user network with a
+                      detected collector, surface a "you're done — skip ahead"
+                      hint so re-entering users don't have to re-read Step 3. */}
+                  {detectedCollectors.some(c => c.sharesNetworkWithSidecar) && (
+                    <div className="mt-4 flex items-start gap-3 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0 mt-0.5" />
+                      <span>
+                        <span className="font-semibold text-gray-100">helix-gateway is already on a network with a detected collector.</span>{' '}
+                        You can continue to Verify — no further attach needed.
+                      </span>
+                    </div>
+                  )}
                   <div className="mt-6 flex gap-4">
                     <button
                       onClick={() => setSetupStep(2)}
@@ -1952,8 +1956,12 @@ ${logsData.logs || '(no logs available)'}
                     >Back</button>
                     <button
                       onClick={() => setSetupStep(4)}
-                      className="flex-1 bg-primary hover:bg-primary-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm"
-                    >Next: Verify →</button>
+                      className={`flex-1 px-6 py-3 rounded font-semibold transition-all text-sm text-white ${
+                        detectedCollectors.some(c => c.sharesNetworkWithSidecar)
+                          ? 'bg-success hover:bg-success-hover'
+                          : 'bg-primary hover:bg-primary-hover'
+                      }`}
+                    >{detectedCollectors.some(c => c.sharesNetworkWithSidecar) ? 'Continue to Verify →' : 'Next: Verify →'}</button>
                   </div>
                 </div>
               )}
@@ -1962,6 +1970,36 @@ ${logsData.logs || '(no logs available)'}
                 <div className="adapt-card">
                   <h2 className="text-lg font-bold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
                   <p className="text-sm text-gray-400 mb-5">Three quick checks. Restart your app or collector first if you just changed config.</p>
+
+                  {/* Mirror the Step 3 bridge banner here too — users can land
+                      on Step 4 directly via the stepper without seeing Step 3,
+                      and a "skipped" or "failed" bridge is the most common
+                      reason live counters stay at zero. */}
+                  {bridgeStatus?.kind === 'skipped' && (() => {
+                    const noUserNetwork = !detectedCollectors.some(c => c.sharesNetworkWithSidecar);
+                    if (!noUserNetwork) return null;
+                    return (
+                      <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
+                        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+                        <span className="text-gray-200">
+                          <span className="font-semibold">Auto-attach was skipped and helix-gateway isn't sharing a network with any detected collector.</span>{' '}
+                          Live counters will stay at zero until you{' '}
+                          <button onClick={() => setSetupStep(3)} className="text-active hover:underline font-semibold">go back to Step 3</button>{' '}
+                          and attach.
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  {bridgeStatus?.kind === 'error' && (
+                    <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
+                      <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-200">
+                        <span className="font-semibold">Auto-attach failed in Step 1: </span>{bridgeStatus.reason}.{' '}
+                        <button onClick={() => setSetupStep(3)} className="text-active hover:underline font-semibold">Go back to Step 3</button>{' '}
+                        to connect manually if you haven't already.
+                      </span>
+                    </div>
+                  )}
 
                   {/* Live counters — three cards. Reuse the existing
                       receiver-counters polling (re-keyed on step 4). */}
@@ -2176,12 +2214,12 @@ ${logsData.logs || '(no logs available)'}
                       </pre>
                     </div>
                     <footer className="px-5 py-3 border-t border-gray-800 bg-gray-900 flex justify-between items-center">
-                      <span className="text-tiny text-gray-500">Read-only here.</span>
+                      <span className="text-tiny text-gray-500">Read-only here. Full editor available on the dashboard after launch.</span>
                       <button
-                        onClick={() => { setGatewayConfigOpen(false); localStorage.setItem('helix-configurator.onboarded', '1'); setIsSetupComplete(true); setIsYamlOpen(true); }}
-                        className="text-tiny font-semibold text-active hover:underline inline-flex items-center gap-1"
+                        onClick={() => setGatewayConfigOpen(false)}
+                        className="text-tiny font-semibold text-gray-300 hover:text-gray-100"
                       >
-                        Open full gateway config editor <ExternalLink className="w-3 h-3" />
+                        Close
                       </button>
                     </footer>
                   </div>
