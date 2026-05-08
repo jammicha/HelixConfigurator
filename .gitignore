@@ -10,3 +10,7 @@ frontend-dist/
 helix auth
 dummy-config.yaml
 .claude/
+data/
+backend/data/
+docs/
+prompt.txt

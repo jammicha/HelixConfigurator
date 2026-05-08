@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Stable hostname so the gateway can fan trace data out to
+    # http://helix-configurator:3001 over the helix-bridge network.
+    container_name: helix-configurator
     ports:
       # 8765 matches the bundled install template — avoids colliding with
       # the Vite dev server on 3000.
@@ -11,6 +14,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./helix-otel-collector.yaml:/app/helix-otel-collector.yaml
       - ./.env:/app/.env
+      # Persist the local OTel trace store across container restarts.
+      - ./data:/app/data
     env_file:
       - .env
     environment:

@@ -117,6 +117,23 @@ const App = () => {
   const [traceVerifyResult, setTraceVerifyResult] = useState<{ status: string; message: string; remediation?: string } | null>(null);
   const [targetEnvInfo, setTargetEnvInfo] = useState<{ hasOtelEnv: boolean; hasEndpoint: boolean; otelVars: string[]; hasCollectorConfig?: boolean; collectorConfigPath?: string | null } | null>(null);
   const [snippetMode, setSnippetMode] = useState<'yaml' | 'env'>('yaml');
+  // Bridge outcome from Step 1's /api/lifecycle/bridge call. Drives the
+  // banner at the top of Step 2 so the user knows whether the auto-bridge
+  // succeeded, was skipped, or failed — and what to do about it.
+  const [bridgeStatus, setBridgeStatus] = useState<
+    | { kind: 'success'; network: string; targetContainer: string }
+    | { kind: 'skipped'; reason: string }
+    | { kind: 'error'; reason: string }
+    | null
+  >(null);
+  // Detected OTel collector containers running on this host. Populated when
+  // Step 2 mounts; surfaced in the network callout so users with their own
+  // collector can one-click attach helix-gateway to that collector's network.
+  const [detectedCollectors, setDetectedCollectors] = useState<
+    Array<{ name: string; image: string; networks: string[]; sharesNetworkWithSidecar: boolean }>
+  >([]);
+  const [attachingNetwork, setAttachingNetwork] = useState<string | null>(null);
+  const [attachResult, setAttachResult] = useState<{ network: string; ok: boolean; message: string } | null>(null);
 
   // App → Gateway verifier: poll the gateway's receiver counters and show
   // deltas since Step 2 was opened. Lets the user see real spans/metrics/logs
@@ -188,10 +205,14 @@ const App = () => {
   };
 
   useEffect(() => {
-    // Tail-style follow: only auto-scroll if the user is already pinned to the bottom.
-    // Instant scroll (not smooth) so rapid log arrival doesn't queue up animations.
-    if (shouldAutoScrollRef.current && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+    // Tail-style follow: only auto-scroll if the user is already pinned to the
+    // bottom. Setting scrollTop on the container directly — using
+    // scrollIntoView() bubbles up and yanks the entire page when the log pane
+    // isn't fully in the viewport, causing the layout to jitter on every log
+    // line.
+    if (shouldAutoScrollRef.current && logContainerRef.current) {
+      const el = logContainerRef.current;
+      el.scrollTop = el.scrollHeight;
     }
   }, [logs]);
 
@@ -245,7 +266,12 @@ const App = () => {
         // to the dashboard if the user has explicitly clicked through
         // onboarding before — tracked via localStorage.
         const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
-        if (onboardedBefore && data.HELIX_ENDPOINT && data.HELIX_API_KEY) {
+        // ?view=onboarding lets the nav force the wizard view from any page
+        // (e.g., clicking "Onboarding" while on /otel-data). Without this
+        // signal, the user would land on the dashboard when previously onboarded.
+        const params = new URLSearchParams(window.location.search);
+        const forceOnboarding = params.get('view') === 'onboarding';
+        if (onboardedBefore && data.HELIX_ENDPOINT && data.HELIX_API_KEY && !forceOnboarding) {
           setIsSetupComplete(true);
           fetchDiscoveredData(); // Get tokens if already setup
         }
@@ -862,11 +888,18 @@ const App = () => {
         body: JSON.stringify({ APP_URL: envVars.APP_URL })
       });
       let bridgedTarget = '';
+      const bridgeData = await bridgeRes.json().catch(() => ({}));
       if (bridgeRes.ok) {
-        const bridgeData = await bridgeRes.json().catch(() => ({}));
-        bridgedTarget = bridgeData.targetContainer || '';
+        if (bridgeData.skipped) {
+          setBridgeStatus({ kind: 'skipped', reason: bridgeData.reason || 'No Application URL provided.' });
+        } else if (bridgeData.network) {
+          bridgedTarget = bridgeData.targetContainer || '';
+          setBridgeStatus({ kind: 'success', network: bridgeData.network, targetContainer: bridgedTarget });
+        }
       } else {
-        console.warn('Automated network bridging failed');
+        const reason = bridgeData.error || bridgeData.details || 'Unknown error';
+        console.warn('Automated network bridging failed:', reason);
+        setBridgeStatus({ kind: 'error', reason });
       }
 
       // Inspect the target container for OTEL env vars AND a collector config
@@ -896,10 +929,44 @@ const App = () => {
 
       setSetupStep(2);
       fetchDiscoveredData(); // Refresh tokens after setup
+      refreshDetectedCollectors();
     } catch (err: any) {
       setSetupError(err.message || 'Verification failed');
     } finally {
       setIsVerifying(false);
+    }
+  };
+
+  // Scan the host for OTel collector containers. Used to drive the
+  // "Detected collectors" widget in Step 2 — surfaces which network
+  // helix-gateway needs to attach to so the user's chained collector
+  // can reach helix-gateway:4317.
+  const refreshDetectedCollectors = async () => {
+    try {
+      const res = await fetch('/api/discovery/collectors');
+      if (!res.ok) return;
+      const data = await res.json();
+      setDetectedCollectors(Array.isArray(data.collectors) ? data.collectors : []);
+    } catch { /* non-fatal */ }
+  };
+
+  const attachSidecarToNetwork = async (network: string) => {
+    if (attachingNetwork) return;
+    setAttachingNetwork(network);
+    setAttachResult(null);
+    try {
+      const res = await fetch('/api/lifecycle/bridge-network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ network }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setAttachResult({ network, ok: res.ok, message: data.message || data.error || 'Done' });
+      if (res.ok) refreshDetectedCollectors();
+    } catch (e: any) {
+      setAttachResult({ network, ok: false, message: e.message || 'Request failed' });
+    } finally {
+      setAttachingNetwork(null);
     }
   };
 
@@ -1315,46 +1382,75 @@ ${logsData.logs || '(no logs available)'}
             <img src="/bmc-logo.svg" alt="BMC" className="h-8 w-auto" />
             <div className="h-8 w-px bg-helixDivider mx-4"></div>
             <h1 className="text-white font-light text-[1.3125rem] m-0 ml-[15px] tracking-wide">Helix OTel Configurator</h1>
+            <div className="h-8 w-px bg-helixDivider mx-5"></div>
+            <nav className="flex items-center space-x-5 text-sm text-[#cfd3da]">
+              <button
+                onClick={() => {
+                  const goBack = () => {
+                    // Tear down any active diagnostic session before returning to onboarding
+                    if (showDiagnostics) {
+                      if (eventSourceRef.current) eventSourceRef.current.close();
+                      if ((eventSourceRef as any).currentApp) (eventSourceRef as any).currentApp.close();
+                      if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
+                      fetch('/api/diagnostics/toggle-debug', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enable: false })
+                      }).catch(() => {});
+                    }
+                    setShowDiagnostics(false);
+                    setTraceInjectionStatus('');
+                    setLogs([]);
+                    setLiveMetrics({ received: 0, sent: 0, failed: 0 });
+                    setDiagAlert(false);
+                    setTelemetryStatus('idle');
+                    setIsSetupComplete(false);
+                    setSetupStep(1);
+                  };
+                  if (isSetupComplete) {
+                    setConfirmDialog({
+                      title: 'Return to onboarding wizard?',
+                      message: 'Your saved settings stay intact, but the dashboard will close. You can re-launch from Step 2 once you re-initialize.',
+                      confirmLabel: 'Return to Onboarding',
+                      onConfirm: goBack,
+                    });
+                  } else {
+                    goBack();
+                  }
+                }}
+                className={!isSetupComplete
+                  ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
+                  : 'hover:text-white transition-colors'}
+              >
+                Onboarding
+              </button>
+              <a
+                href="/"
+                onClick={(e) => {
+                  // Already on / — short-circuit the navigation. If we're on
+                  // the wizard but already onboarded, just flip to dashboard
+                  // view without a full reload.
+                  e.preventDefault();
+                  const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
+                  if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {
+                    setIsSetupComplete(true);
+                  }
+                }}
+                className={isSetupComplete
+                  ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
+                  : 'hover:text-white transition-colors'}
+              >
+                Gateway Dashboard
+              </a>
+              <a
+                href="/otel-data"
+                className="hover:text-white transition-colors"
+              >
+                View OTel Data
+              </a>
+            </nav>
           </div>
           <nav className="flex items-center space-x-5 text-sm text-[#cfd3da]">
-            <button
-              onClick={() => {
-                const goBack = () => {
-                  // Tear down any active diagnostic session before returning to onboarding
-                  if (showDiagnostics) {
-                    if (eventSourceRef.current) eventSourceRef.current.close();
-                    if ((eventSourceRef as any).currentApp) (eventSourceRef as any).currentApp.close();
-                    if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
-                    fetch('/api/diagnostics/toggle-debug', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ enable: false })
-                    }).catch(() => {});
-                  }
-                  setShowDiagnostics(false);
-                  setTraceInjectionStatus('');
-                  setLogs([]);
-                  setLiveMetrics({ received: 0, sent: 0, failed: 0 });
-                  setDiagAlert(false);
-                  setTelemetryStatus('idle');
-                  setIsSetupComplete(false);
-                  setSetupStep(1);
-                };
-                if (isSetupComplete) {
-                  setConfirmDialog({
-                    title: 'Return to onboarding wizard?',
-                    message: 'Your saved settings stay intact, but the dashboard will close. You can re-launch from Step 2 once you re-initialize.',
-                    confirmLabel: 'Return to Onboarding',
-                    onConfirm: goBack,
-                  });
-                } else {
-                  goBack();
-                }
-              }}
-              className="hover:text-white transition-colors"
-            >
-              Onboarding
-            </button>
             {authStatus.required && (
               <button
                 onClick={handleLogout}
@@ -1476,7 +1572,7 @@ ${logsData.logs || '(no logs available)'}
                         placeholder="http://localhost:8080"
                       />
                       <p className="text-tiny text-gray-500 mt-1">
-                        Auto-bridges the gateway to your application's Docker network. Skip to attach manually from Discovered Services.
+                        Used for the "Open application" deep-link on the dashboard. If the hostname is a Docker container name on this host (e.g. <code className="font-mono">frontend-proxy</code>), the gateway also auto-bridges to that container's network. <code className="font-mono">localhost</code>, an IP, or a public URL is fine — it just means auto-bridge will skip and you'll use the network controls in Step 2 instead.
                       </p>
                       {envVars.APP_URL && wizardFieldErrors.APP_URL && (
                         <p className="text-tiny text-danger">{wizardFieldErrors.APP_URL}</p>
@@ -1528,7 +1624,32 @@ ${logsData.logs || '(no logs available)'}
               {setupStep === 2 && (
                 <div className="adapt-card">
                   <h2 className="text-lg font-bold mb-4 text-gray-200">Step 2: Route Your Telemetry</h2>
-                  <p className="text-gray-300 mb-4 text-sm">The sidecar is now bridged to your application's network. Tell your app to send its telemetry to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-gateway:4318</code>.</p>
+
+                  {/* Bridge outcome from Step 1. Surface it explicitly so the
+                      user knows whether helix-gateway was attached to their
+                      app's network, skipped, or failed — and what to do
+                      next. */}
+                  {bridgeStatus?.kind === 'success' && (
+                    <div className="mb-4 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
+                      <span className="text-[#5eead4] font-semibold">✓ Auto-bridged.</span>{' '}
+                      <code className="font-mono text-gray-200">helix-gateway</code> is now on the{' '}
+                      <code className="font-mono text-gray-200">{bridgeStatus.network}</code> network (matched container <code className="font-mono text-gray-200">{bridgeStatus.targetContainer}</code>).
+                    </div>
+                  )}
+                  {bridgeStatus?.kind === 'skipped' && (
+                    <div className="mb-4 p-2.5 bg-warning/10 border border-warning/40 rounded text-tiny text-gray-300">
+                      <span className="text-warning font-semibold">⚠ Auto-bridge skipped.</span>{' '}
+                      {bridgeStatus.reason} If your app or collector runs in a Docker network on this host, attach <code className="font-mono text-gray-200">helix-gateway</code> from the network controls below before you'll see traces.
+                    </div>
+                  )}
+                  {bridgeStatus?.kind === 'error' && (
+                    <div className="mb-4 p-2.5 bg-danger/10 border border-danger/40 rounded text-tiny text-gray-300">
+                      <span className="text-danger font-semibold">× Auto-bridge failed:</span>{' '}
+                      {bridgeStatus.reason}. Use the network controls below to attach <code className="font-mono text-gray-200">helix-gateway</code> manually.
+                    </div>
+                  )}
+
+                  <p className="text-gray-300 mb-4 text-sm">Tell your app (or its collector) to send telemetry to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-gateway:4318</code>. The sidecar must share a Docker network with whatever sends OTLP to it — see the network note below the snippet.</p>
 
                   {/* Detection-driven path selection. If exactly one signal is
                       detected (env vars OR a collector config mount), hide the
@@ -1582,13 +1703,12 @@ ${logsData.logs || '(no logs available)'}
 
                   {snippetMode === 'yaml' ? (
                     <>
-                      <p className="text-gray-300 mb-2 text-sm">Add this exporter to your application's collector config:</p>
+                      <p className="text-gray-300 mb-2 text-sm">In your collector's main config file (typically <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">otelcol-config.yml</code>, <em>not</em> an extras override), add this exporter:</p>
                       <SnippetBlock text={`exporters:
   otlphttp/helix_sidecar:
     endpoint: "http://helix-gateway:4318"
-    headers:
-      X-Api-Key: "${envVars.HELIX_API_KEY}"
-      X-Source: "${envVars.X_SOURCE}"`} />
+    tls:
+      insecure: true`} />
                       <p className="text-gray-300 mb-2 text-sm">Then add it to your service pipelines:</p>
                       <SnippetBlock text={`service:
   pipelines:
@@ -1598,16 +1718,123 @@ ${logsData.logs || '(no logs available)'}
       exporters: [..., otlphttp/helix_sidecar]
     logs:
       exporters: [..., otlphttp/helix_sidecar]`} />
+                      <p className="text-tiny text-gray-500 mb-2">
+                        No <code className="font-mono">X-Api-Key</code>/<code className="font-mono">X-Source</code> needed on this hop — <code className="font-mono text-gray-300">helix-gateway</code> is already configured with them from your <code className="font-mono">.env</code> and adds them when forwarding to Helix.
+                      </p>
+                      <p className="text-tiny text-gray-500 mb-6">After saving the config, restart your collector container so it re-reads the file (and so gRPC/HTTP re-resolves the <code className="font-mono">helix-gateway</code> hostname).</p>
                     </>
                   ) : (
                     <>
                       <p className="text-gray-300 mb-2 text-sm">Set these env vars on your application container (works with most OTel auto-instrumentation libraries):</p>
                       <SnippetBlock text={`OTEL_EXPORTER_OTLP_ENDPOINT=http://helix-gateway:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-OTEL_EXPORTER_OTLP_HEADERS=X-Api-Key=${envVars.HELIX_API_KEY},X-Source=${envVars.X_SOURCE}`} />
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`} />
+                      <p className="text-tiny text-gray-500 mb-2">
+                        No <code className="font-mono">OTEL_EXPORTER_OTLP_HEADERS</code> needed — <code className="font-mono text-gray-300">helix-gateway</code> already holds the API key and adds the auth headers when forwarding to Helix.
+                      </p>
                       <p className="text-tiny text-gray-500 mb-6">After updating, restart your application container so the new env values take effect.</p>
                     </>
                   )}
+
+                  {/* Network controls: attach helix-gateway to whichever
+                      Docker network the user's app or collector lives on.
+                      Driven by /api/discovery/collectors so the user can
+                      one-click attach instead of typing a network name. */}
+                  <div className="mb-6 p-3 bg-warning/10 border border-warning/40 rounded text-tiny text-gray-300">
+                    <div className="font-semibold text-gray-100 mb-1 flex items-center gap-2">
+                      <span className="text-warning font-bold leading-tight" aria-hidden="true">!</span>
+                      Shared-network requirement
+                    </div>
+                    <p className="mb-2">
+                      Whichever container sends OTLP to <code className="font-mono text-gray-200">helix-gateway</code> (your app directly, or your own collector) must share a Docker network with it — otherwise the hostname won't resolve. If app and collector live on different networks, helix-gateway needs to be attached to <em>both</em>.
+                    </p>
+
+                    {detectedCollectors.length > 0 && (
+                      <div className="mt-3 mb-3 rounded border border-gray-800 bg-gray-1000 p-2.5">
+                        <div className="text-tiny font-semibold text-gray-300 uppercase tracking-wider mb-2">
+                          Detected collectors on this host
+                        </div>
+                        <div className="space-y-2">
+                          {detectedCollectors.map(c => {
+                            const attachable = c.networks.filter(n => n !== 'helix-bridge');
+                            return (
+                              <div key={c.name} className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-gray-200 font-mono text-tiny truncate">{c.name}</div>
+                                  <div className="text-tiny text-gray-500 truncate">
+                                    {c.image}{attachable.length ? ` • on ${attachable.join(', ')}` : ''}
+                                  </div>
+                                </div>
+                                {c.sharesNetworkWithSidecar ? (
+                                  <span className="text-tiny text-[#5eead4] font-semibold flex-shrink-0">✓ reachable</span>
+                                ) : attachable.length === 0 ? (
+                                  <span className="text-tiny text-gray-500 flex-shrink-0">no user networks</span>
+                                ) : attachable.length === 1 ? (
+                                  <button
+                                    onClick={() => attachSidecarToNetwork(attachable[0])}
+                                    disabled={attachingNetwork === attachable[0]}
+                                    className="px-2 py-0.5 text-tiny rounded bg-primary hover:bg-[#3006c2] disabled:opacity-60 text-white font-semibold flex-shrink-0"
+                                  >
+                                    {attachingNetwork === attachable[0] ? 'Attaching…' : `Attach to ${attachable[0]}`}
+                                  </button>
+                                ) : (
+                                  <div className="flex gap-1 flex-wrap justify-end">
+                                    {attachable.map(n => (
+                                      <button
+                                        key={n}
+                                        onClick={() => attachSidecarToNetwork(n)}
+                                        disabled={attachingNetwork === n}
+                                        className="px-2 py-0.5 text-tiny rounded bg-primary hover:bg-[#3006c2] disabled:opacity-60 text-white font-semibold"
+                                      >
+                                        {attachingNetwork === n ? '…' : n}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {attachResult && (
+                          <div className={`mt-2 text-tiny ${attachResult.ok ? 'text-[#5eead4]' : 'text-danger'}`}>
+                            {attachResult.ok ? '✓' : '×'} {attachResult.message}
+                          </div>
+                        )}
+                        <p className="text-tiny text-gray-500 mt-2">
+                          After attaching, restart the collector container — gRPC/HTTP caches "no such host" until then.
+                        </p>
+                      </div>
+                    )}
+
+                    <p className="mb-1 mt-2">
+                      Or attach manually (replace with your app's compose network name, e.g. <code className="font-mono text-gray-200">opentelemetry-demo</code>):
+                    </p>
+                    <SnippetBlock text={`docker network connect <your-app-network> helix-gateway`} />
+                    <p className="text-tiny text-gray-500 -mt-4 mb-2">
+                      Or open <button
+                        onClick={() => setIsServicesOpen(true)}
+                        className="text-active hover:underline font-semibold"
+                      >Discovered Services</button> to attach a container the other way (its network → helix-bridge).
+                    </p>
+                  </div>
+
+                  <div className="mb-6 p-2.5 bg-info/10 border border-info/40 rounded text-tiny text-gray-300 flex gap-2 items-start">
+                    <Activity className="w-3.5 h-3.5 text-info flex-shrink-0 mt-0.5" />
+                    <span>
+                      Traces sent to <code className="font-mono text-gray-200">helix-gateway</code> will also be visible locally in{' '}
+                      <a href="/otel-data" className="text-active hover:underline font-semibold">View OTel Data</a> —
+                      the gateway fans trace data to the configurator alongside the existing Helix export. No change to your app is needed.
+                    </span>
+                  </div>
+
+                  {/* Passive heads-up about the local trace store. The user's
+                      app config is unchanged — the gateway fans traces out
+                      to the configurator backend in addition to Helix. */}
+                  <div className="mb-6 flex items-start gap-2.5 p-3 rounded border border-active/30 bg-active/10 text-tiny text-gray-300">
+                    <span className="text-[#8ca1f3] font-bold flex-shrink-0 leading-tight" aria-hidden="true">i</span>
+                    <div>
+                      Traces will also be visible locally in <span className="font-semibold text-gray-100">View OTel Data</span> — the gateway fans trace data to a local store in addition to Helix. Your app config above does not change.
+                    </div>
+                  </div>
 
                   {/* Live App → Gateway verifier. Polls /api/diagnostics/receiver-counters
                       every 2s. Deltas vs. the baseline taken when Step 2 opened
@@ -2110,8 +2337,11 @@ OTEL_EXPORTER_OTLP_HEADERS=X-Api-Key=${envVars.HELIX_API_KEY},X-Source=${envVars
                           </button>
                         )}
                         {diagAlert && (
-                          <span className="flex items-center gap-2 bg-[#f5bcc6]/20 border border-danger/40 text-danger px-3 py-1 rounded text-tiny font-semibold uppercase tracking-wide">
-                            <span className="font-bold">!</span> Telemetry drop detected — check network or queue limits
+                          <span
+                            className="flex items-center gap-2 bg-[#f5bcc6]/20 border border-danger/40 text-danger px-3 py-1 rounded text-tiny font-semibold uppercase tracking-wide"
+                            title="Counted from log lines containing 'sending queue is full', 'exporting failed', 'connection refused', or 'deadline exceeded' in the streamed container."
+                          >
+                            <span className="font-bold">!</span> Drop events in logs — check network or queue limits
                             {diagAlertCount > 1 && (
                               <span className="bg-danger text-white px-1.5 rounded-full text-[10px]">{diagAlertCount}</span>
                             )}
@@ -2155,11 +2385,32 @@ OTEL_EXPORTER_OTLP_HEADERS=X-Api-Key=${envVars.HELIX_API_KEY},X-Source=${envVars
                                 <div className="text-lg font-bold text-success leading-tight">{liveMetrics.sent}</div>
                                 {renderSpark(ratesFor('sent'), '#11845b')}
                               </div>
-                              <div className="bg-gray-800 border-l-2 border-danger px-3 py-1.5 rounded-r min-w-[88px]">
-                                <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Dropped</div>
-                                <div className="text-lg font-bold text-danger leading-tight">{liveMetrics.failed}</div>
-                                {renderSpark(ratesFor('failed'), '#b2001e')}
-                              </div>
+                              {(() => {
+                                // The "DROPPED" card needs to reflect both
+                                // gateway-side send failures (otelcol_exporter_
+                                // send_failed_*) and log-pattern alerts
+                                // captured from the streamed container. Show
+                                // the larger of the two so users don't see "0"
+                                // while a 196-event alert is screaming. Hover
+                                // breaks down where it came from.
+                                const droppedHeadline = Math.max(liveMetrics.failed, diagAlertCount);
+                                const breakdown = `Gateway send-failures (otelcol_exporter_send_failed_*): ${liveMetrics.failed}\nDrop events in streamed logs: ${diagAlertCount}`;
+                                return (
+                                  <div
+                                    className="bg-gray-800 border-l-2 border-danger px-3 py-1.5 rounded-r min-w-[88px]"
+                                    title={breakdown}
+                                  >
+                                    <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Dropped</div>
+                                    <div className="text-lg font-bold text-danger leading-tight">{droppedHeadline}</div>
+                                    {liveMetrics.failed !== diagAlertCount && (
+                                      <div className="text-[9px] text-gray-500 leading-tight">
+                                        {diagAlertCount} log · {liveMetrics.failed} metric
+                                      </div>
+                                    )}
+                                    {renderSpark(ratesFor('failed'), '#b2001e')}
+                                  </div>
+                                );
+                              })()}
                             </>
                           );
                         })()}
