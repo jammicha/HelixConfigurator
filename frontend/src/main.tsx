@@ -9,10 +9,8 @@ const path = window.location.pathname
 const isAiops = path.startsWith('/aiops')
 const isOtelData = path.startsWith('/otel-data')
 
-const goHome = () => { window.location.href = '/' }
-
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {isAiops ? <AiopsPage /> : isOtelData ? <OtelDataPage onExit={goHome} /> : <App />}
+    {isAiops ? <AiopsPage /> : isOtelData ? <OtelDataPage /> : <App />}
   </React.StrictMode>,
 )

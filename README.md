@@ -56,16 +56,16 @@ Notes:
 docker-compose up --build -d
 ```
 
-This builds the configurator image, starts the OpenTelemetry Collector (`helix-gateway`) with your config mounted, and exposes the UI on `http://localhost:3000`.
+This builds the configurator image, starts the OpenTelemetry Collector (`helix-gateway`) with your config mounted, and exposes the UI on `http://localhost:8765`.
 
 ### 3. Open the UI
 
-- **Local:** [http://localhost:3000](http://localhost:3000)
+- **Local:** [http://localhost:8765](http://localhost:8765)
 - **Remote (SSH tunnel):**
   ```bash
-  ssh -L 3000:localhost:3000 <user>@<server>
+  ssh -L 8765:localhost:8765 <user>@<server>
   ```
-  Then open `http://localhost:3000` locally.
+  Then open `http://localhost:8765` locally.
 
 On first run, the UI walks you through a two-step onboarding wizard: capture credentials, restart the gateway, bridge to your application's network, then verify telemetry flow.
 
@@ -95,7 +95,7 @@ After onboarding, the dashboard provides:
 
 | Service | Container | Host Port | Purpose |
 |---|---|---|---|
-| `helix-configurator` | `helix-configurator` | 3000 → 3001 | Configurator UI + backend API |
+| `helix-configurator` | `helix-configurator` | 8765 → 3001 | Configurator UI + backend API |
 | `helix-gateway` | `helix-gateway` | 4317 | OTLP gRPC receiver |
 | `helix-gateway` | `helix-gateway` | 4318 | OTLP HTTP receiver |
 | `helix-gateway` | `helix-gateway` | 8888 | Prometheus metrics endpoint (used by the diagnostic counters) |
