@@ -8,6 +8,8 @@ const axios = require('axios');
 const crypto = require('crypto');
 const Docker = require('dockerode');
 const archiver = require('archiver');
+const zlib = require('zlib');
+const { OtelStore, extractSpans, extractLogRecords } = require('./otelStore');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const VERSION = require('./package.json').version;
@@ -217,7 +219,13 @@ const validateConfig = (yamlString) => {
 // --------------------------------------------------------------------------
 
 app.use(cors({ credentials: true }));
-app.use(express.json());
+// Raw body for OTLP ingest — must come BEFORE express.json() so the stream
+// isn't consumed by the JSON parser. Cap at 32MB to absorb large batches.
+app.use(['/api/otlp/traces', '/api/otlp/logs'], express.raw({
+  type: '*/*',
+  limit: '32mb',
+}));
+app.use(express.json({ limit: '4mb' }));
 
 // Serve static frontend (auth gate is on /api/* only — static assets stay public)
 app.use(express.static(path.join(__dirname, '../frontend-dist')));
@@ -225,6 +233,11 @@ app.use(express.static(path.join(__dirname, '../frontend-dist')));
 // SPA fallback for the AIOps mock route — express.static 404s on /aiops since
 // no file exists there. Send index.html so the client-side route renders.
 app.get(/^\/aiops(\/.*)?$/, (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
+});
+
+// SPA fallback for the View OTel Data route.
+app.get(/^\/otel-data(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
 });
 
@@ -288,6 +301,18 @@ exporters:
       X-Source: \${env:X_SOURCE}
     sending_queue:
       enabled: true
+  # Fan-out: traces also flow to the configurator backend so the local
+  # "View OTel Data" page can render waterfalls, errors, and DB insight.
+  otlphttp/local_store:
+    traces_endpoint: http://helix-configurator:3001/api/otlp/traces
+    encoding: json
+    compression: none
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: false
+    retry_on_failure:
+      enabled: false
 service:
   telemetry:
     metrics:
@@ -301,7 +326,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/bmchelix]
+      exporters: [otlphttp/bmchelix, otlphttp/local_store]
     metrics:
       receivers: [otlp]
       processors: [batch]
@@ -329,6 +354,9 @@ const renderDockerCompose = () => `services:
       context: .
       dockerfile: Dockerfile
     image: helix-configurator:local
+    # Stable hostname so the gateway can fan trace data out to
+    # http://helix-configurator:3001 over the helix-bridge network.
+    container_name: helix-configurator
     ports:
       # 8765 chosen over 3000 because it almost never collides with common
       # dev tools (Node, Vite, Django, etc. cluster around 3000/5000/8000).
@@ -337,6 +365,8 @@ const renderDockerCompose = () => `services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./helix-otel-collector.yaml:/app/helix-otel-collector.yaml
       - ./.env:/app/.env
+      # Persist the local OTel trace store across container restarts.
+      - ./data:/app/data
     env_file:
       - .env
     environment:
@@ -916,8 +946,139 @@ app.get('/api/aiops/install/:token.ps1', (req, res) => {
 });
 // --------------------------------------------------------------------------
 
+// --- OTel trace store (local fan-out from helix-gateway) -----------------
+// SQLite lives in a mounted volume so traces survive container restarts.
+// Outside Docker we fall back to backend/data so dev is self-contained.
+const OTEL_DB_PATH = process.env.OTEL_DB_PATH ||
+  (fs.existsSync('/app') ? '/app/data/otel-store.db' : path.join(__dirname, 'data', 'otel-store.db'));
+const otelStore = new OtelStore({ dbPath: OTEL_DB_PATH });
+console.log(`OTel trace store: ${OTEL_DB_PATH}`);
+
+// Decode an OTLP/HTTP request body. The gateway is configured for JSON +
+// no compression, but we still tolerate gzip in case the user wires their
+// own collector at this endpoint.
+const decodeOtlpBody = (req) => {
+  let buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
+  const enc = (req.headers['content-encoding'] || '').toLowerCase();
+  if (enc.includes('gzip')) buf = zlib.gunzipSync(buf);
+  else if (enc.includes('deflate')) buf = zlib.inflateSync(buf);
+  const ct = (req.headers['content-type'] || '').toLowerCase();
+  if (ct.includes('protobuf')) {
+    // Protobuf encoding not supported here — the local_store exporter is
+    // configured for JSON. Surface a clear error so a misconfig is obvious
+    // in the gateway logs.
+    throw new Error('OTLP protobuf encoding is not supported by /api/otlp; configure the exporter with encoding: json');
+  }
+  if (!buf.length) return {};
+  return JSON.parse(buf.toString('utf8'));
+};
+
+// POST /api/otlp/traces — public ingest from the gateway fan-out.
+// The configurator-side session cookie is irrelevant on this hop, and
+// requiring auth would block the gateway. We bind the listener to the
+// in-cluster docker network only via the helix-bridge / port-forward setup.
+app.post('/api/otlp/traces', (req, res) => {
+  try {
+    const body = decodeOtlpBody(req);
+    const spans = extractSpans(body);
+    otelStore.ingestSpans(spans);
+    // OTLP/HTTP success response is an empty ExportTraceServiceResponse.
+    res.json({});
+  } catch (e) {
+    console.error('OTLP traces ingest error:', e.message);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/otlp/logs — receives OTLP log records. The default gateway
+// pipeline does NOT fan logs here (logs go to Helix only), but the endpoint
+// is exposed so a user can opt-in via their own collector config and have
+// log records correlate with locally-stored traces.
+app.post('/api/otlp/logs', (req, res) => {
+  try {
+    const body = decodeOtlpBody(req);
+    const logs = extractLogRecords(body);
+    otelStore.ingestLogs(logs);
+    res.json({});
+  } catch (e) {
+    console.error('OTLP logs ingest error:', e.message);
+    res.status(400).json({ error: e.message });
+  }
+});
+// --------------------------------------------------------------------------
+
 // Gate everything else under /api/*
 app.use('/api', requireAuth);
+// --------------------------------------------------------------------------
+
+// --- OTel trace query endpoints (auth-gated) ------------------------------
+app.get('/api/traces', (req, res) => {
+  const { service, sinceMs, untilMs, limit } = req.query;
+  const traces = otelStore.listTraces({
+    service: typeof service === 'string' && service ? service : undefined,
+    sinceMs: sinceMs ? Number(sinceMs) : undefined,
+    untilMs: untilMs ? Number(untilMs) : undefined,
+    limit: limit ? Number(limit) : 200,
+  });
+  res.json({ traces });
+});
+
+app.get('/api/traces/services', (req, res) => {
+  res.json({ services: otelStore.listServices() });
+});
+
+app.get('/api/traces/errors', (req, res) => {
+  const { limit } = req.query;
+  res.json({ errors: otelStore.listErrors({ limit: limit ? Number(limit) : 200 }) });
+});
+
+app.get('/api/traces/stream', (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  res.write('event: connected\ndata: {}\n\n');
+
+  const onTrace = (summary) => {
+    res.write(`event: trace\ndata: ${JSON.stringify(summary)}\n\n`);
+  };
+  const onError = (err) => {
+    res.write(`event: error_record\ndata: ${JSON.stringify(err)}\n\n`);
+  };
+  otelStore.events.on('trace', onTrace);
+  otelStore.events.on('span_error', onError);
+
+  const heartbeat = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    otelStore.events.off('trace', onTrace);
+    otelStore.events.off('span_error', onError);
+  });
+});
+
+app.get('/api/traces/:traceId', (req, res) => {
+  const { traceId } = req.params;
+  if (!/^[0-9a-fA-F]{1,64}$/.test(traceId)) {
+    return res.status(400).json({ error: 'Invalid trace id' });
+  }
+  const trace = otelStore.getTrace(traceId.toLowerCase());
+  if (!trace) return res.status(404).json({ error: 'Not found' });
+  res.json(trace);
+});
+
+app.get('/api/logs/:traceId', (req, res) => {
+  const { traceId } = req.params;
+  if (!/^[0-9a-fA-F]{1,64}$/.test(traceId)) {
+    return res.status(400).json({ error: 'Invalid trace id' });
+  }
+  res.json({ logs: otelStore.listLogsForTrace(traceId.toLowerCase()) });
+});
 // --------------------------------------------------------------------------
 
 // GET current config

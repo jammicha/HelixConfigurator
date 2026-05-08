@@ -188,10 +188,14 @@ const App = () => {
   };
 
   useEffect(() => {
-    // Tail-style follow: only auto-scroll if the user is already pinned to the bottom.
-    // Instant scroll (not smooth) so rapid log arrival doesn't queue up animations.
-    if (shouldAutoScrollRef.current && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+    // Tail-style follow: only auto-scroll if the user is already pinned to the
+    // bottom. Setting scrollTop on the container directly — using
+    // scrollIntoView() bubbles up and yanks the entire page when the log pane
+    // isn't fully in the viewport, causing the layout to jitter on every log
+    // line.
+    if (shouldAutoScrollRef.current && logContainerRef.current) {
+      const el = logContainerRef.current;
+      el.scrollTop = el.scrollHeight;
     }
   }, [logs]);
 
@@ -1355,6 +1359,12 @@ ${logsData.logs || '(no logs available)'}
             >
               Onboarding
             </button>
+            <a
+              href="/otel-data"
+              className="hover:text-white transition-colors"
+            >
+              View OTel Data
+            </a>
             {authStatus.required && (
               <button
                 onClick={handleLogout}
@@ -1608,6 +1618,25 @@ OTEL_EXPORTER_OTLP_HEADERS=X-Api-Key=${envVars.HELIX_API_KEY},X-Source=${envVars
                       <p className="text-tiny text-gray-500 mb-6">After updating, restart your application container so the new env values take effect.</p>
                     </>
                   )}
+
+                  <div className="mb-6 p-2.5 bg-info/10 border border-info/40 rounded text-tiny text-gray-300 flex gap-2 items-start">
+                    <Activity className="w-3.5 h-3.5 text-info flex-shrink-0 mt-0.5" />
+                    <span>
+                      Traces sent to <code className="font-mono text-gray-200">helix-gateway</code> will also be visible locally in{' '}
+                      <a href="/otel-data" className="text-active hover:underline font-semibold">View OTel Data</a> —
+                      the gateway fans trace data to the configurator alongside the existing Helix export. No change to your app is needed.
+                    </span>
+                  </div>
+
+                  {/* Passive heads-up about the local trace store. The user's
+                      app config is unchanged — the gateway fans traces out
+                      to the configurator backend in addition to Helix. */}
+                  <div className="mb-6 flex items-start gap-2.5 p-3 rounded border border-active/30 bg-active/10 text-tiny text-gray-300">
+                    <span className="text-[#8ca1f3] font-bold flex-shrink-0 leading-tight" aria-hidden="true">i</span>
+                    <div>
+                      Traces will also be visible locally in <span className="font-semibold text-gray-100">View OTel Data</span> — the gateway fans trace data to a local store in addition to Helix. Your app config above does not change.
+                    </div>
+                  </div>
 
                   {/* Live App → Gateway verifier. Polls /api/diagnostics/receiver-counters
                       every 2s. Deltas vs. the baseline taken when Step 2 opened
@@ -2110,8 +2139,11 @@ OTEL_EXPORTER_OTLP_HEADERS=X-Api-Key=${envVars.HELIX_API_KEY},X-Source=${envVars
                           </button>
                         )}
                         {diagAlert && (
-                          <span className="flex items-center gap-2 bg-[#f5bcc6]/20 border border-danger/40 text-danger px-3 py-1 rounded text-tiny font-semibold uppercase tracking-wide">
-                            <span className="font-bold">!</span> Telemetry drop detected — check network or queue limits
+                          <span
+                            className="flex items-center gap-2 bg-[#f5bcc6]/20 border border-danger/40 text-danger px-3 py-1 rounded text-tiny font-semibold uppercase tracking-wide"
+                            title="Counted from log lines containing 'sending queue is full', 'exporting failed', 'connection refused', or 'deadline exceeded' in the streamed container."
+                          >
+                            <span className="font-bold">!</span> Drop events in logs — check network or queue limits
                             {diagAlertCount > 1 && (
                               <span className="bg-danger text-white px-1.5 rounded-full text-[10px]">{diagAlertCount}</span>
                             )}
@@ -2155,11 +2187,32 @@ OTEL_EXPORTER_OTLP_HEADERS=X-Api-Key=${envVars.HELIX_API_KEY},X-Source=${envVars
                                 <div className="text-lg font-bold text-success leading-tight">{liveMetrics.sent}</div>
                                 {renderSpark(ratesFor('sent'), '#11845b')}
                               </div>
-                              <div className="bg-gray-800 border-l-2 border-danger px-3 py-1.5 rounded-r min-w-[88px]">
-                                <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Dropped</div>
-                                <div className="text-lg font-bold text-danger leading-tight">{liveMetrics.failed}</div>
-                                {renderSpark(ratesFor('failed'), '#b2001e')}
-                              </div>
+                              {(() => {
+                                // The "DROPPED" card needs to reflect both
+                                // gateway-side send failures (otelcol_exporter_
+                                // send_failed_*) and log-pattern alerts
+                                // captured from the streamed container. Show
+                                // the larger of the two so users don't see "0"
+                                // while a 196-event alert is screaming. Hover
+                                // breaks down where it came from.
+                                const droppedHeadline = Math.max(liveMetrics.failed, diagAlertCount);
+                                const breakdown = `Gateway send-failures (otelcol_exporter_send_failed_*): ${liveMetrics.failed}\nDrop events in streamed logs: ${diagAlertCount}`;
+                                return (
+                                  <div
+                                    className="bg-gray-800 border-l-2 border-danger px-3 py-1.5 rounded-r min-w-[88px]"
+                                    title={breakdown}
+                                  >
+                                    <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Dropped</div>
+                                    <div className="text-lg font-bold text-danger leading-tight">{droppedHeadline}</div>
+                                    {liveMetrics.failed !== diagAlertCount && (
+                                      <div className="text-[9px] text-gray-500 leading-tight">
+                                        {diagAlertCount} log · {liveMetrics.failed} metric
+                                      </div>
+                                    )}
+                                    {renderSpark(ratesFor('failed'), '#b2001e')}
+                                  </div>
+                                );
+                              })()}
                             </>
                           );
                         })()}

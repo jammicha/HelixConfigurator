@@ -5,21 +5,32 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
-
 processors:
   batch:
     timeout: 1s
     send_batch_size: 1024
-
 exporters:
   otlphttp/bmchelix:
-    endpoint: ${HELIX_ENDPOINT}
+    endpoint: https://helixdemo8-itom-demo.onbmc.com/
     headers:
-      X-Api-Key: ${HELIX_API_KEY}
-      X-Source: ${X_SOURCE}
+      X-Api-Key: 1485278189::XOO1OD57W4X4RNC8NIHDJDQPDYWV67::zW4UGIjWLv2uQPHlCfASDv9EIavasORzgHX5PSDuC5MFQlpOD1
+      X-Source: JM-OTEL
     sending_queue:
       enabled: true
-
+  # Fan-out: traces also flow to the configurator backend so the local
+  # "View OTel Data" page can render waterfalls, errors, and DB query insight
+  # without a Jaeger / Tempo dependency. JSON encoding + no compression keeps
+  # the receiver simple (plain JSON body, no protobuf parser needed).
+  otlphttp/local_store:
+    traces_endpoint: http://helix-configurator:3001/api/otlp/traces
+    encoding: json
+    compression: none
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: false
+    retry_on_failure:
+      enabled: false
 service:
   telemetry:
     metrics:
@@ -31,14 +42,24 @@ service:
                 port: 8888
   pipelines:
     traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlphttp/bmchelix]
+      receivers:
+        - otlp
+      processors:
+        - batch
+      exporters:
+        - otlphttp/bmchelix
+        - otlphttp/local_store
     metrics:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlphttp/bmchelix]
+      receivers:
+        - otlp
+      processors:
+        - batch
+      exporters:
+        - otlphttp/bmchelix
     logs:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlphttp/bmchelix]
+      receivers:
+        - otlp
+      processors:
+        - batch
+      exporters:
+        - otlphttp/bmchelix
