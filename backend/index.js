@@ -2412,6 +2412,31 @@ const detectCollectorConfigPath = (inspect) => {
   return '/etc/otelcol-contrib/config.yaml';
 };
 
+// Walk the container's Mounts to find the host-side source for an
+// in-container path. Returns the host path if the file (or one of its
+// ancestor dirs) is bind-mounted from the host, otherwise null. Picks the
+// most specific (deepest) matching destination so a file-level mount wins
+// over a directory-level one.
+const resolveHostMountPath = (inspect, inContainerPath) => {
+  const mounts = (inspect && inspect.Mounts) || [];
+  let best = null;
+  for (const m of mounts) {
+    if (m.Type !== 'bind' || !m.Source || !m.Destination) continue;
+    const dest = m.Destination;
+    if (inContainerPath === dest) {
+      if (!best || dest.length >= best.dest.length) best = { dest, source: m.Source, rel: '' };
+      continue;
+    }
+    const destWithSlash = dest.endsWith('/') ? dest : dest + '/';
+    if (inContainerPath.startsWith(destWithSlash)) {
+      const rel = inContainerPath.substring(destWithSlash.length);
+      if (!best || dest.length > best.dest.length) best = { dest, source: m.Source, rel };
+    }
+  }
+  if (!best) return null;
+  return best.rel ? path.posix.join(best.source, best.rel) : best.source;
+};
+
 const proposeCollectorMerge = (yamlText) => {
   const parsed = yaml.load(yamlText);
   if (!parsed || typeof parsed !== 'object') {
@@ -2488,9 +2513,10 @@ app.get('/api/discovery/collector-config/:name', async (req, res) => {
     const container = docker.getContainer(name);
     const inspect = await container.inspect();
     const configPath = detectCollectorConfigPath(inspect);
+    const hostConfigPath = resolveHostMountPath(inspect, configPath);
     const configText = await readFileFromContainer(container, configPath);
     const proposal = proposeCollectorMerge(configText);
-    res.json({ name, configPath, configText, ...proposal });
+    res.json({ name, configPath, hostConfigPath, configText, ...proposal });
   } catch (e) {
     res.status(500).json({ error: 'Failed to read collector config', details: e.message });
   }
