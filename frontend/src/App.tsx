@@ -1636,7 +1636,7 @@ ${logsData.logs || '(no logs available)'}
 
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
           {!isSetupComplete ? (
-            <div className="max-w-3xl mx-auto mt-12 space-y-6">
+            <div className="max-w-4xl mx-auto mt-12 space-y-6">
               <h1 className="text-2xl font-bold text-center text-gray-100">Welcome to Helix Configurator</h1>
 
               {/* Stepper — clickable for completed steps. setupStep is 1-4. */}
