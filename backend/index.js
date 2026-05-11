@@ -1975,54 +1975,23 @@ app.post('/api/env', (req, res) => {
     const newContent = lines.join('\n');
     fs.writeFileSync(envPath, newContent, 'utf8');
     
-    // Reload into process.env
+    // Reload into process.env so subsequent same-process reads see fresh
+    // values. The collector container picks up the new values from .env via
+    // docker-compose's env_file mapping on the next restart; the caller is
+    // expected to follow this POST with /api/lifecycle/restart.
     process.env.HELIX_ENDPOINT = HELIX_ENDPOINT;
     process.env.HELIX_API_KEY = HELIX_API_KEY;
     process.env.X_SOURCE = X_SOURCE;
     process.env.APP_URL = APP_URL;
     process.env.BUSINESS_SERVICE_KEY = BUSINESS_SERVICE_KEY || '';
-    
-    // Inject YAML settings directly
-    try {
-      const configContent = fs.readFileSync(CONFIG_PATH, 'utf8');
-      const configObj = yaml.load(configContent) || {};
-      
-      // Ensure basic structure exists
-      configObj.exporters = configObj.exporters || {};
-      configObj.exporters['otlphttp/bmchelix'] = configObj.exporters['otlphttp/bmchelix'] || {};
-      
-      // Update exporter endpoint and headers
-      configObj.exporters['otlphttp/bmchelix'].endpoint = HELIX_ENDPOINT;
-      configObj.exporters['otlphttp/bmchelix'].headers = {
-        'X-Api-Key': String(HELIX_API_KEY).trim(),
-        'X-Source': String(X_SOURCE).trim()
-      };
-      configObj.exporters['otlphttp/bmchelix'].sending_queue = { enabled: true };
 
-      // Ensure service telemetry metrics readers format
-      configObj.service = configObj.service || {};
-      configObj.service.telemetry = configObj.service.telemetry || {};
-      configObj.service.telemetry.metrics = {
-        readers: [
-          {
-            pull: {
-              exporter: {
-                prometheus: {
-                  host: '0.0.0.0',
-                  port: 8888
-                }
-              }
-            }
-          }
-        ]
-      };
+    // Intentionally NOT rewriting helix-otel-collector.yaml here. The shipped
+    // YAML references ${env:HELIX_ENDPOINT} / ${env:HELIX_API_KEY} /
+    // ${env:X_SOURCE}, so the collector substitutes these from its own
+    // environment at startup. Inlining the literal values into the YAML
+    // (previous behavior) leaked the API key onto disk in a committed file
+    // and made `${env:...}` substitution stop working for subsequent edits.
 
-      const newYaml = yaml.dump(configObj, { lineWidth: -1 });
-      fs.writeFileSync(CONFIG_PATH, newYaml, 'utf8');
-    } catch (yamlErr) {
-      console.error('Failed to update YAML settings:', yamlErr.message);
-    }
-    
     res.json({ message: 'Environment variables updated and reloaded' });
   } catch (e) {
     res.status(500).json({ error: 'Failed to update .env file' });
