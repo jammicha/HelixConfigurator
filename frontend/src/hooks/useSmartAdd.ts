@@ -32,6 +32,7 @@ export type UseSmartAdd = {
   previewOpen: boolean;
   setPreviewOpen: (open: boolean) => void;
   apply: (collectorName: string) => Promise<void>;
+  dismissResult: () => void;
 };
 
 export function useSmartAdd({
@@ -82,7 +83,10 @@ export function useSmartAdd({
       const res = await fetch(`/api/discovery/collector-apply/${encodeURIComponent(collectorName)}`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setResult({ ok: false, message: data.error || data.details || 'Apply failed' });
+        const summary = data.error || 'Apply failed';
+        const message = data.details ? `${summary}: ${data.details}` : summary;
+        setResult({ ok: false, message });
+        setPreviewOpen(false);
         return;
       }
       if (data.alreadyConfigured) {
@@ -117,5 +121,7 @@ export function useSmartAdd({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setupStep, isSetupComplete, detectedCollectors.length, detectedCollectors[0]?.name]);
 
-  return { proposal, loading, applying, result, previewOpen, setPreviewOpen, apply };
+  const dismissResult = () => setResult(null);
+
+  return { proposal, loading, applying, result, previewOpen, setPreviewOpen, apply, dismissResult };
 }

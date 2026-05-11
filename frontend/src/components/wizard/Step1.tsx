@@ -37,7 +37,10 @@ const validateApiKey = (value: string): string | null => {
 };
 const validateXSource = (value: string): string | null => {
   if (!value) return 'Required';
-  if (!/^[a-zA-Z0-9\-_]+$/.test(value)) return 'Letters, digits, dash, underscore only';
+  if (value !== value.trim()) return 'No leading or trailing whitespace';
+  // OTel resource attribute values are arbitrary UTF-8 strings; only reject
+  // control chars (which would also break the HTTP header these flow into).
+  if (/[\x00-\x1f\x7f]/.test(value)) return 'Cannot contain control characters';
   return null;
 };
 const validateAppUrl = (value: string): string | null => {
@@ -105,11 +108,11 @@ export const Step1: React.FC<Props> = ({
             data-1p-ignore
             data-lpignore="true"
             value={envVars.X_SOURCE}
-            onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value.replace(/[^a-zA-Z0-9\-_]/g, '') })}
+            onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
             className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.X_SOURCE && errors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
             placeholder="e.g. payment-service"
           />
-          <p className="text-tiny text-gray-500">Choose a name that maps to a real service your team owns.</p>
+          <p className="text-tiny text-gray-500">Choose a name that will map to a business service in Helix AIOps.</p>
           {envVars.X_SOURCE && errors.X_SOURCE && (
             <p className="text-tiny text-danger">{errors.X_SOURCE}</p>
           )}
@@ -164,7 +167,7 @@ export const Step1: React.FC<Props> = ({
             value={envVars.APP_URL}
             onChange={(e) => setEnvVars({ ...envVars, APP_URL: e.target.value })}
             className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.APP_URL && errors.APP_URL ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-            placeholder="http://localhost:8080"
+            placeholder="URL of the application you're instrumenting"
           />
           {envVars.APP_URL && errors.APP_URL && (
             <p className="text-tiny text-danger">{errors.APP_URL}</p>

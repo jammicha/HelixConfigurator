@@ -316,9 +316,11 @@ app.get('/api/health', (req, res) => {
 // Simulates the BMC Helix AIOps "Manage Opentelemetry" wizard: takes the
 // X-Source name, fabricates an API key that looks like a real Helix one, and
 // streams back a zip of everything needed to run the HelixConfigurator sidecar
-// on Mac/Linux/Windows. The ingest endpoint is hardcoded — the real AIOps UI
-// would already know the tenant's endpoint.
-const SIMULATED_INGEST_ENDPOINT = 'https://helixdemo8-itom-demo.onbmc.com/';
+// on Mac/Linux/Windows. The ingest endpoint is an obvious placeholder so the
+// bundle doesn't leak whichever tenant the demo host happens to point at —
+// the user fills in their real endpoint at Step 1 of the wizard. (In a real
+// AIOps integration, the tenant URL would be known and substituted here.)
+const SIMULATED_INGEST_ENDPOINT = 'https://your-tenant.onbmc.com';
 
 const fakeHelixApiKey = () => `FAKE-KEY-${crypto.randomBytes(16).toString('hex').toUpperCase()}`;
 
@@ -488,10 +490,10 @@ while [ $(date +%s) -lt $deadline ]; do
     echo "Opening README and configurator UI..."
     if [ "$(uname)" = "Darwin" ]; then
       [ -f README.html ] && open README.html || true
-      open http://localhost:8765 || true
+      open "http://localhost:8765?view=onboarding" || true
     elif [ -n "$DISPLAY" ] && command -v xdg-open >/dev/null 2>&1; then
       [ -f README.html ] && (xdg-open README.html >/dev/null 2>&1 &)
-      (xdg-open http://localhost:8765 >/dev/null 2>&1 &)
+      (xdg-open "http://localhost:8765?view=onboarding" >/dev/null 2>&1 &)
     fi
     break
   fi
@@ -544,7 +546,7 @@ powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -Uri 'h
 if not errorlevel 1 (
   echo Opening README and configurator UI...
   if exist "%~dp0README.html" start "" "%~dp0README.html"
-  start "" http://localhost:8765
+  start "" "http://localhost:8765?view=onboarding"
   goto :ready
 )
 set /a "_waited+=1"
@@ -880,10 +882,10 @@ while [ $(date +%s) -lt $deadline ]; do
     echo "Opening README and configurator UI..."
     if [ "$(uname)" = "Darwin" ]; then
       [ -f README.html ] && open README.html || true
-      open http://localhost:8765 || true
+      open "http://localhost:8765?view=onboarding" || true
     elif [ -n "$DISPLAY" ] && command -v xdg-open >/dev/null 2>&1; then
       [ -f README.html ] && (xdg-open README.html >/dev/null 2>&1 &)
-      (xdg-open http://localhost:8765 >/dev/null 2>&1 &)
+      (xdg-open "http://localhost:8765?view=onboarding" >/dev/null 2>&1 &)
     fi
     break
   fi
@@ -1007,7 +1009,7 @@ while ((Get-Date) -lt $deadline) {
   try {
     Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:8765/api/health" -TimeoutSec 2 | Out-Null
     Write-Host "Opening http://localhost:8765 ..."
-    Start-Process "http://localhost:8765"
+    Start-Process "http://localhost:8765?view=onboarding"
     break
   } catch {
     Start-Sleep -Seconds 1
@@ -2395,6 +2397,62 @@ const writeFileToContainer = async (container, filePath, content) => {
   await container.putArchive(pack, { path: dir });
 };
 
+// Write `content` to `hostFilePath` (a host-side path) by spawning a
+// transient busybox container that bind-mounts the host directory and runs
+// `cat > /target/<basename>`. Needed because putArchive on the original
+// container goes through tar-extract, which calls `unlink` on existing
+// entries — and bind-mounted files inside a container cannot be unlinked
+// from inside the container. Writing via `cat >` uses O_WRONLY|O_TRUNC, which
+// works against bind mounts.
+const writeFileViaBusyboxSidecar = async (hostFilePath, content) => {
+  if (typeof hostFilePath !== 'string' || !hostFilePath.startsWith('/')) {
+    throw new Error(`writeFileViaBusyboxSidecar: hostFilePath must be an absolute path, got ${JSON.stringify(hostFilePath)}`);
+  }
+  const hostDir = path.posix.dirname(hostFilePath);
+  const baseName = path.posix.basename(hostFilePath);
+  if (!hostDir.startsWith('/') || !baseName) {
+    throw new Error(`writeFileViaBusyboxSidecar: could not derive a bind mount from ${hostFilePath} (dir=${hostDir}, base=${baseName})`);
+  }
+  // Pull busybox if not cached locally. Subsequent calls are no-ops.
+  try {
+    await docker.getImage('busybox:latest').inspect();
+  } catch {
+    await new Promise((resolve, reject) => {
+      docker.pull('busybox:latest', (err, stream) => {
+        if (err) return reject(err);
+        docker.modem.followProgress(stream, (e) => (e ? reject(e) : resolve()));
+      });
+    });
+  }
+  const quoted = baseName.replace(/'/g, `'\\''`);
+  const container = await docker.createContainer({
+    Image: 'busybox:latest',
+    Cmd: ['sh', '-c', `cat > '/target/${quoted}'`],
+    OpenStdin: true,
+    StdinOnce: true,
+    AttachStdin: true,
+    Tty: false,
+    HostConfig: { Binds: [`${hostDir}:/target`] },
+  });
+  try {
+    const stream = await container.attach({
+      stream: true,
+      stdin: true,
+      stdout: true,
+      stderr: true,
+      hijack: true,
+    });
+    await container.start();
+    stream.end(content);
+    const result = await container.wait();
+    if (result.StatusCode !== 0) {
+      throw new Error(`busybox sidecar write exited with code ${result.StatusCode}`);
+    }
+  } finally {
+    try { await container.remove({ force: true }); } catch { /* may already be gone */ }
+  }
+};
+
 const detectCollectorConfigPath = (inspect) => {
   const cmd = (inspect.Config && inspect.Config.Cmd) || [];
   const args = inspect.Args || [];
@@ -2437,6 +2495,140 @@ const resolveHostMountPath = (inspect, inContainerPath) => {
   return best.rel ? path.posix.join(best.source, best.rel) : best.source;
 };
 
+// Indent helpers used by the text-level patcher below.
+const indentOf = (line) => {
+  const m = line.match(/^( *)/);
+  return m ? m[1].length : 0;
+};
+const isStructural = (line) => !(/^\s*$/.test(line) || /^\s*#/.test(line));
+const escapeRe = (s) => s.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&');
+
+// Find the line index of `key` at exact column 0. Returns -1 if not found.
+const findRootKey = (lines, key) => {
+  const re = new RegExp(`^${escapeRe(key)}\\s*:`);
+  for (let i = 0; i < lines.length; i++) if (re.test(lines[i])) return i;
+  return -1;
+};
+
+// Find a child key `key` directly under the block headed at `parentIdx`
+// (parent is at indent `parentCol`). Children are the first structural lines
+// after parentIdx whose indent is consistent and strictly greater than parent.
+const findChildKey = (lines, parentIdx, parentCol, key) => {
+  let childCol = -1;
+  for (let i = parentIdx + 1; i < lines.length; i++) {
+    if (!isStructural(lines[i])) continue;
+    const ind = indentOf(lines[i]);
+    if (ind <= parentCol) break;
+    if (childCol < 0) childCol = ind;
+    if (ind !== childCol) continue;
+    if (new RegExp(`^ {${childCol}}${escapeRe(key)}\\s*:`).test(lines[i])) return i;
+  }
+  return -1;
+};
+
+// First structural line index past blockHeader at indent ≤ parentCol, or EOF.
+const findBlockEnd = (lines, parentIdx, parentCol) => {
+  for (let i = parentIdx + 1; i < lines.length; i++) {
+    if (!isStructural(lines[i])) continue;
+    if (indentOf(lines[i]) <= parentCol) return i;
+  }
+  return lines.length;
+};
+
+// Patch the original YAML text to (a) append the new exporter under the root
+// `exporters:` block and (b) wire it into the named pipelines' exporters
+// lists. Preserves comments, quote styles, flow-vs-block sequence style, and
+// blank lines because the edit is done at the text level, not via load/dump.
+// Throws when the structure isn't supported (multi-doc, missing exporters
+// section, multi-line flow lists, etc.) so callers can fall back gracefully.
+const patchCollectorYaml = (text, plan) => {
+  const lines = text.split('\n');
+  const { exporterName, addedToPipelines } = plan;
+
+  // --- 1. Wire exporterName into each named pipeline's `exporters:` list.
+  const serviceIdx = findRootKey(lines, 'service');
+  if (serviceIdx < 0) throw new Error('No `service:` section found');
+  const serviceCol = 0;
+  const pipelinesIdx = findChildKey(lines, serviceIdx, serviceCol, 'pipelines');
+  if (pipelinesIdx < 0) throw new Error('No `service.pipelines:` section found');
+  const pipelinesCol = indentOf(lines[pipelinesIdx]);
+
+  // Pipelines are processed back-to-front so earlier insertions don't shift
+  // later lookups out from under us.
+  const pipelinesByLine = addedToPipelines
+    .map((pname) => ({ pname, line: findChildKey(lines, pipelinesIdx, pipelinesCol, pname) }))
+    .filter((p) => p.line >= 0)
+    .sort((a, b) => b.line - a.line);
+
+  for (const { pname, line: pIdx } of pipelinesByLine) {
+    const pCol = indentOf(lines[pIdx]);
+    const expIdx = findChildKey(lines, pIdx, pCol, 'exporters');
+    if (expIdx < 0) throw new Error(`Pipeline "${pname}" has no exporters key`);
+    const expLine = lines[expIdx];
+
+    // Flow style: `exporters: [a, b, c]` on one line.
+    const flow = expLine.match(/^(\s*exporters\s*:\s*)\[(.*)\](\s*(?:#.*)?)$/);
+    if (flow) {
+      const [, prefix, inside, suffix] = flow;
+      const trimmed = inside.trim();
+      const next = trimmed ? `${trimmed}, ${exporterName}` : exporterName;
+      lines[expIdx] = `${prefix}[${next}]${suffix}`;
+      continue;
+    }
+    // Multi-line flow (`exporters: [\n  a,\n  b\n]`) — not supported.
+    if (/^\s*exporters\s*:\s*\[\s*(?:#.*)?$/.test(expLine)) {
+      throw new Error(`Pipeline "${pname}" uses multi-line flow exporters — not supported`);
+    }
+
+    // Block style. Find the first list child (`- item`); append after the last
+    // structural child of the block.
+    const expCol = indentOf(expLine);
+    let firstChild = -1;
+    for (let i = expIdx + 1; i < lines.length; i++) {
+      if (!isStructural(lines[i])) continue;
+      if (indentOf(lines[i]) <= expCol) break;
+      firstChild = i; break;
+    }
+    if (firstChild < 0) {
+      lines.splice(expIdx + 1, 0, `${' '.repeat(expCol + 2)}- ${exporterName}`);
+      continue;
+    }
+    const childCol = indentOf(lines[firstChild]);
+    const blockEnd = findBlockEnd(lines, expIdx, expCol);
+    let lastStructural = blockEnd - 1;
+    while (lastStructural > expIdx && !isStructural(lines[lastStructural])) lastStructural--;
+    lines.splice(lastStructural + 1, 0, `${' '.repeat(childCol)}- ${exporterName}`);
+  }
+
+  // --- 2. Append the new exporter definition under root `exporters:`.
+  const exportersIdx = findRootKey(lines, 'exporters');
+  if (exportersIdx < 0) throw new Error('No root `exporters:` section found');
+  const exportersBlockEnd = findBlockEnd(lines, exportersIdx, 0);
+  // Find child indent — default to 2 if the block is empty.
+  let childCol = 2;
+  for (let i = exportersIdx + 1; i < exportersBlockEnd; i++) {
+    if (!isStructural(lines[i])) continue;
+    childCol = indentOf(lines[i]);
+    break;
+  }
+  const ci = ' '.repeat(childCol);
+  const ci2 = ' '.repeat(childCol + 2);
+  const ci3 = ' '.repeat(childCol + 4);
+  const newBlock = [
+    `${ci}${exporterName}:`,
+    `${ci2}endpoint: http://helix-gateway:4318`,
+    `${ci2}tls:`,
+    `${ci3}insecure: true`,
+  ];
+  // Insert after the last structural line inside the exporters block (so we
+  // don't push it past a trailing comment that belongs to the next section).
+  let insertAfter = exportersBlockEnd - 1;
+  while (insertAfter > exportersIdx && !isStructural(lines[insertAfter])) insertAfter--;
+  lines.splice(insertAfter + 1, 0, ...newBlock);
+
+  return lines.join('\n');
+};
+
 const proposeCollectorMerge = (yamlText) => {
   const parsed = yaml.load(yamlText);
   if (!parsed || typeof parsed !== 'object') {
@@ -2460,25 +2652,17 @@ const proposeCollectorMerge = (yamlText) => {
     exporterName = `${baseName}_${n++}`;
   }
 
-  const newConfig = JSON.parse(JSON.stringify(parsed)); // deep clone
-  newConfig.exporters = newConfig.exporters || {};
-  newConfig.exporters[exporterName] = {
-    endpoint: 'http://helix-gateway:4318',
-    tls: { insecure: true },
-  };
-
-  const pipelines = (newConfig.service && newConfig.service.pipelines) || {};
+  // Plan: which pipelines need the new exporter wired in. Computed off the
+  // parsed object; the actual text edits happen via patchCollectorYaml below.
+  const pipelines = (parsed.service && parsed.service.pipelines) || {};
   const addedToPipelines = [];
   for (const [pname, pipeline] of Object.entries(pipelines)) {
     if (!pipeline || typeof pipeline !== 'object') continue;
-    if (!Array.isArray(pipeline.exporters)) pipeline.exporters = [];
-    if (!pipeline.exporters.includes(exporterName)) {
-      pipeline.exporters.push(exporterName);
-      addedToPipelines.push(pname);
-    }
+    const existing = Array.isArray(pipeline.exporters) ? pipeline.exporters : [];
+    if (!existing.includes(exporterName)) addedToPipelines.push(pname);
   }
 
-  const proposedYaml = yaml.dump(newConfig, { lineWidth: 120, noRefs: true });
+  const proposedYaml = patchCollectorYaml(yamlText, { exporterName, addedToPipelines });
   return {
     alreadyConfigured: false,
     exporterName,
@@ -2535,9 +2719,12 @@ app.post('/api/discovery/collector-apply/:name', async (req, res) => {
     const container = docker.getContainer(name);
     const inspect = await container.inspect();
     const configPath = detectCollectorConfigPath(inspect);
+    const hostConfigPath = resolveHostMountPath(inspect, configPath);
+    console.log(`[smart-add] apply on ${name}: configPath=${configPath}, hostConfigPath=${hostConfigPath || '<image-baked>'}`);
     const configText = await readFileFromContainer(container, configPath);
     const proposal = proposeCollectorMerge(configText);
     if (proposal.alreadyConfigured) {
+      console.log(`[smart-add] apply on ${name}: already configured via ${proposal.existingExporterName}, no-op`);
       return res.json({
         success: true,
         alreadyConfigured: true,
@@ -2546,9 +2733,21 @@ app.post('/api/discovery/collector-apply/:name', async (req, res) => {
       });
     }
     const backupPath = `${configPath}.helix-bak`;
-    await writeFileToContainer(container, backupPath, configText);
-    await writeFileToContainer(container, configPath, proposal.proposedYaml);
+    if (hostConfigPath && hostConfigPath.startsWith('/')) {
+      // Bind-mounted config: write via busybox sidecar mounting the host
+      // directory, so we don't trigger an unlink on the in-container path.
+      console.log(`[smart-add] apply on ${name}: writing via busybox sidecar (bind-mounted at ${hostConfigPath})`);
+      await writeFileViaBusyboxSidecar(`${hostConfigPath}.helix-bak`, configText);
+      await writeFileViaBusyboxSidecar(hostConfigPath, proposal.proposedYaml);
+    } else {
+      // Image-baked config (no host bind-mount): putArchive writes into the
+      // container's writable overlay and works as-is.
+      console.log(`[smart-add] apply on ${name}: writing via putArchive (no resolvable host path)`);
+      await writeFileToContainer(container, backupPath, configText);
+      await writeFileToContainer(container, configPath, proposal.proposedYaml);
+    }
     await container.restart();
+    console.log(`[smart-add] apply on ${name}: applied ${proposal.exporterName} into ${proposal.addedToPipelines.join(', ')}; container restarted`);
     res.json({
       success: true,
       configPath,
@@ -2557,6 +2756,7 @@ app.post('/api/discovery/collector-apply/:name', async (req, res) => {
       addedToPipelines: proposal.addedToPipelines,
     });
   } catch (e) {
+    console.error(`[smart-add] apply on ${name} failed:`, e);
     res.status(500).json({ error: 'Failed to apply collector config', details: e.message });
   }
 });

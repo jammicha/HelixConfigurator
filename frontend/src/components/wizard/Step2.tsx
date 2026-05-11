@@ -1,5 +1,5 @@
 import React from 'react';
-import { Container, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Container, Loader2, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import { SnippetBlock } from '../SnippetBlock';
 import type { SmartAddProposal, SmartAddResult } from '../../hooks/useSmartAdd';
 
@@ -9,6 +9,7 @@ type Props = {
   smartAddLoading: boolean;
   onOpenSmartAddPreview: () => void;
   onOpenGatewayConfig: () => void;
+  onDismissResult: () => void;
   onBack: () => void;
   onNext: () => void;
 };
@@ -19,6 +20,7 @@ export const Step2: React.FC<Props> = ({
   smartAddLoading,
   onOpenSmartAddPreview,
   onOpenGatewayConfig,
+  onDismissResult,
   onBack,
   onNext,
 }) => (
@@ -36,10 +38,17 @@ export const Step2: React.FC<Props> = ({
     {smartAddResult && (
       <div className={`mb-4 flex items-start gap-3 p-3 rounded text-sm ${smartAddResult.ok ? 'bg-success/10 border border-success/40' : 'bg-danger/10 border border-danger/40'}`}>
         {smartAddResult.ok ? <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />}
-        <span className="text-gray-200">{smartAddResult.message}</span>
+        <span className="text-gray-200 flex-1 break-words">{smartAddResult.message}</span>
+        <button
+          onClick={onDismissResult}
+          className="text-gray-400 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800 flex-shrink-0"
+          aria-label="Dismiss"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
     )}
-    {!smartAddResult && smartAddProposal && (
+    {smartAddProposal && (
       <div className="mb-5 p-4 bg-gray-1000 border border-active/40 rounded">
         <div className="flex items-center gap-2 mb-2">
           <Container className="w-4 h-4 text-active" />
@@ -71,7 +80,7 @@ export const Step2: React.FC<Props> = ({
         )}
       </div>
     )}
-    {!smartAddResult && smartAddLoading && (
+    {smartAddLoading && (
       <div className="mb-4 flex items-center gap-2 text-tiny text-gray-500">
         <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading detected collector config…
       </div>

@@ -1467,6 +1467,7 @@ ${logsData.logs || '(no logs available)'}
                   smartAddLoading={smartAdd.loading}
                   onOpenSmartAddPreview={() => smartAdd.setPreviewOpen(true)}
                   onOpenGatewayConfig={openGatewayConfigModal}
+                  onDismissResult={smartAdd.dismissResult}
                   onBack={() => setSetupStep(1)}
                   onNext={() => setSetupStep(3)}
                 />
@@ -1703,7 +1704,7 @@ ${logsData.logs || '(no logs available)'}
                         <input
                           type="text"
                           value={envVars.X_SOURCE}
-                          onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value.replace(/[^a-zA-Z0-9\-_]/g, '') })}
+                          onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
                           className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm"
                           placeholder="Source Name"
                         />
