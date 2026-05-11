@@ -71,9 +71,20 @@ This builds the configurator image, starts the OpenTelemetry Collector (`helix-g
   ```
   Then open `http://localhost:8765` locally.
 
-On first run, the UI walks you through a two-step onboarding wizard: capture credentials and restart the gateway, then route your telemetry. Step 2 detects existing OTel collectors on the host and offers one-click network attachment, surfaces the result of the auto-bridge attempt, includes copy-pasteable snippets for both collector-YAML and SDK-env-var instrumentation paths, and reminds you to restart your collector container after the change so gRPC re-resolves `helix-gateway`.
+On first run, the UI walks you through a four-step onboarding wizard:
+
+1. **Configure** — capture credentials (endpoint, API key, X-Source, optional App URL) and save + restart the gateway. The wizard validates each field as you type and auto-rebuilds the canonical `tenant::seg1::seg2` key from a pasted Helix-portal bundle.
+2. **Exporter** — paste-ready snippets for adding `helix-gateway` as an `otlphttp` exporter to your existing collector's pipelines. When a single OTel collector is detected on the host, **Smart-add** offers to read its config, compute the merge, preview the diff, and apply it for you (with a `.helix-bak` and an automatic container restart). See [Smart-add](#smart-add) below.
+3. **Connect** — ensures `helix-gateway` shares a Docker network with your collector. Surfaces the result of the auto-bridge attempt from Step 1 and offers one-click attach to any detected collector network, with a manual fallback. Detects Kubernetes-based collectors and offers a one-click apply of the K8s Attribute Enrichment template.
+4. **Verify** — live span/metric/log counters since the step opened, a synthetic `Gateway → Helix` round-trip check, app-side OTel export error detection, and a launch button for the dashboard.
+
+The stepper at the top is clickable for any step you've completed, so you can jump back to fix something without losing state.
 
 The nav bar (`Onboarding | Gateway Dashboard | View OTel Data`) lets you move between the wizard, the operator dashboard, and the local trace viewer at any time.
+
+### Smart-add
+
+When exactly one OTel collector container is running alongside the configurator, Step 2 reads its mounted config and proposes a merge that wires `helix-gateway` in as an `otlphttp` exporter on every existing pipeline. The **Review changes** modal renders the proposed YAML with the added lines highlighted, surfaces the host-side path (if the config is bind-mounted, with a Copy-path button) and explains exactly which pipelines will be touched. Clicking **Apply & restart** writes the new config back inside the collector container, saves the original as `<config>.helix-bak`, and restarts the container so the change takes effect. Re-running Step 2 detects an already-applied exporter and reports "Already configured" rather than duplicating it. If smart-add can't read or merge the config (image-baked configs, unusual layouts), the wizard falls back to the copy-paste snippet path.
 
 ## Features
 

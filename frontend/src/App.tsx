@@ -1,53 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor, { useMonaco } from '@monaco-editor/react';
-import { Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown, Hexagon, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
+import { useSmartAdd } from './hooks/useSmartAdd';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack, Toast } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
 import { TemplatesModal, Template } from './components/TemplatesModal';
 import { RawMetricsModal } from './components/RawMetricsModal';
-
-// Helix's UI sometimes hands users the API key split across two fields:
-//   Key details: <seg1>::<seg2>,Tenant ID: <digits>
-// The actual X-API-Key header value is "<tenantId>::<seg1>::<seg2>". This
-// pulls the pieces from a pasted blob (any order, any separator) and rebuilds
-// the canonical key. Returns null if the blob doesn't look like that bundle.
-const parseHelixKeyBundle = (raw: string): string | null => {
-  if (!raw) return null;
-  const keyMatch = raw.match(/Key\s*details\s*:\s*([A-Za-z0-9]+)::([A-Za-z0-9]+)/i);
-  const tenantMatch = raw.match(/Tenant\s*ID\s*:\s*(\d+)/i);
-  if (!keyMatch || !tenantMatch) return null;
-  return `${tenantMatch[1]}::${keyMatch[1]}::${keyMatch[2]}`;
-};
-
-// Code/config snippet block with a corner Copy button. Text remains selectable
-// (no whole-block click handler) so users can highlight just a section.
-const SnippetBlock: React.FC<{ text: string }> = ({ text }) => {
-  const [copied, setCopied] = React.useState(false);
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* clipboard blocked — user can still select+Cmd-C */ }
-  };
-  return (
-    <div className="relative bg-gray-1000 rounded border border-gray-800 mb-6 overflow-hidden">
-      <pre
-        className="font-mono text-tiny text-gray-300 p-4 pr-20 overflow-x-auto select-text"
-        style={{ fontFamily: "'Source Code Pro', monospace" }}
-      >{text}</pre>
-      <button
-        type="button"
-        onClick={onCopy}
-        className={`absolute top-2 right-2 px-2 py-1 text-tiny rounded border transition-colors ${copied ? 'bg-success/20 text-[#5eead4] border-success/50' : 'bg-gray-900 hover:bg-gray-800 text-gray-300 border-gray-700'}`}
-      >
-        {copied ? '✓ Copied' : 'Copy'}
-      </button>
-    </div>
-  );
-};
+import { Stepper } from './components/wizard/Stepper';
+import { Step1 } from './components/wizard/Step1';
+import { Step2 } from './components/wizard/Step2';
+import { Step3 } from './components/wizard/Step3';
+import { Step4 } from './components/wizard/Step4';
+import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
+import { parseHelixKeyBundle } from './utils/helixKey';
 
 const App = () => {
   const monaco = useMonaco();
@@ -138,26 +105,6 @@ const App = () => {
   const [step3Tab, setStep3Tab] = useState<'detected' | 'manual'>('detected');
   const [k8sApplying, setK8sApplying] = useState<boolean>(false);
   const [k8sApplyResult, setK8sApplyResult] = useState<'applied' | 'failed' | null>(null);
-  // Step 2 smart-add — read the customer collector's config and propose a
-  // merge that wires helix-gateway in as an exporter on every existing
-  // pipeline. Confirmation-guarded apply writes it back with a .helix-bak.
-  const [smartAddProposal, setSmartAddProposal] = useState<{
-    name: string;
-    configPath: string;
-    hostConfigPath?: string | null;
-    alreadyConfigured?: boolean;
-    existingExporterName?: string;
-    exporterName?: string;
-    addedToPipelines?: string[];
-    existingPipelines?: string[];
-    proposedYaml?: string;
-    error?: string;
-  } | null>(null);
-  const [smartAddLoading, setSmartAddLoading] = useState<boolean>(false);
-  const [smartAddApplying, setSmartAddApplying] = useState<boolean>(false);
-  const [smartAddResult, setSmartAddResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [smartAddPreviewOpen, setSmartAddPreviewOpen] = useState<boolean>(false);
-
   // App → Gateway verifier: poll the gateway's receiver counters and show
   // deltas since Step 2 was opened. Lets the user see real spans/metrics/logs
   // arriving from their app, not just the synthetic trace from the gateway.
@@ -627,44 +574,6 @@ const App = () => {
     }
   };
 
-  // Per-field validation for the wizard. Returns null when valid, or a short
-  // user-facing error message. Run on every keystroke for instant feedback.
-  const validateEndpoint = (value: string): string | null => {
-    if (!value) return 'Required';
-    if (!/^https?:\/\//i.test(value)) return 'Must start with https://';
-    if (/\/otlp(\/|$)/.test(value)) return 'Remove /otlp/... — the gateway adds the path itself';
-    try { new URL(value); } catch { return 'Not a valid URL'; }
-    return null;
-  };
-  const validateApiKey = (value: string): string | null => {
-    if (!value) return 'Required';
-    const parts = value.split('::');
-    if (parts.length !== 3 || parts.some(p => !p.trim())) {
-      return 'Must be three non-empty :: separated parts';
-    }
-    return null;
-  };
-  const validateXSource = (value: string): string | null => {
-    if (!value) return 'Required';
-    if (!/^[a-zA-Z0-9\-_]+$/.test(value)) return 'Letters, digits, dash, underscore only';
-    return null;
-  };
-  const validateAppUrl = (value: string): string | null => {
-    // Optional — empty is fine. If supplied, must parse as a URL so the bridge
-    // step can extract a hostname.
-    if (!value) return null;
-    try { new URL(value); } catch { return 'Not a valid URL'; }
-    return null;
-  };
-
-  const wizardFieldErrors = {
-    HELIX_ENDPOINT: validateEndpoint(envVars.HELIX_ENDPOINT),
-    HELIX_API_KEY: validateApiKey(envVars.HELIX_API_KEY),
-    X_SOURCE: validateXSource(envVars.X_SOURCE),
-    APP_URL: validateAppUrl(envVars.APP_URL),
-  };
-  const wizardCanSubmit = Object.values(wizardFieldErrors).every(e => e === null);
-
   useEscClose(isTemplatesOpen, () => setIsTemplatesOpen(false));
   useEscClose(isRawMetricsOpen, () => setIsRawMetricsOpen(false));
   useEscClose(isServicesOpen, () => setIsServicesOpen(false));
@@ -1038,80 +947,7 @@ const App = () => {
     });
   };
 
-  // Step 2 smart-add — fetch the proposed merge for a single detected
-  // collector. Re-fetches when detectedCollectors changes; only fires when
-  // exactly one collector is on the host. (Multi-collector apply could be
-  // a follow-up; for now we keep the auto-flow conservative.)
-  const refreshSmartAddProposal = async (collectorName: string) => {
-    setSmartAddLoading(true);
-    setSmartAddProposal(null);
-    try {
-      const res = await fetch(`/api/discovery/collector-config/${encodeURIComponent(collectorName)}`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setSmartAddProposal({ name: collectorName, configPath: '', error: data.error || data.details || 'Could not read collector config' });
-        return;
-      }
-      setSmartAddProposal({
-        name: data.name,
-        configPath: data.configPath,
-        hostConfigPath: data.hostConfigPath,
-        alreadyConfigured: data.alreadyConfigured,
-        existingExporterName: data.existingExporterName,
-        exporterName: data.exporterName,
-        addedToPipelines: data.addedToPipelines,
-        existingPipelines: data.existingPipelines,
-        proposedYaml: data.proposedYaml,
-      });
-    } catch (e: any) {
-      setSmartAddProposal({ name: collectorName, configPath: '', error: e?.message || 'Network error' });
-    } finally {
-      setSmartAddLoading(false);
-    }
-  };
-
-  const applySmartAdd = async (collectorName: string) => {
-    if (smartAddApplying) return;
-    setSmartAddApplying(true);
-    setSmartAddResult(null);
-    try {
-      const res = await fetch(`/api/discovery/collector-apply/${encodeURIComponent(collectorName)}`, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setSmartAddResult({ ok: false, message: data.error || data.details || 'Apply failed' });
-        return;
-      }
-      if (data.alreadyConfigured) {
-        setSmartAddResult({ ok: true, message: `Already configured — ${data.existingExporterName} already points at helix-gateway:4318. No changes needed.` });
-      } else {
-        setSmartAddResult({
-          ok: true,
-          message: `Applied. ${data.exporterName} added to ${(data.addedToPipelines || []).join(', ') || '(no pipelines)'} on ${collectorName}. Original saved as ${data.backupPath}. Container restarting.`,
-        });
-      }
-      setSmartAddPreviewOpen(false);
-      refreshDetectedCollectors();
-    } catch (e: any) {
-      setSmartAddResult({ ok: false, message: e?.message || 'Network error' });
-    } finally {
-      setSmartAddApplying(false);
-    }
-  };
-
-  // Auto-fetch proposal when entering Step 2 with exactly one detected
-  // collector. Re-fetch when detectedCollectors changes shape.
-  useEffect(() => {
-    if (isSetupComplete || setupStep !== 2) return;
-    if (detectedCollectors.length === 1) {
-      const name = detectedCollectors[0].name;
-      if (!smartAddProposal || smartAddProposal.name !== name) {
-        refreshSmartAddProposal(name);
-      }
-    } else {
-      setSmartAddProposal(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setupStep, isSetupComplete, detectedCollectors.length, detectedCollectors[0]?.name]);
+  const smartAdd = useSmartAdd({ setupStep, isSetupComplete, detectedCollectors, refreshDetectedCollectors });
 
   // Step 2 verification: inject a synthetic trace through the gateway and watch
   // for the sent counter to move. Proves gateway→Helix independent of whether
@@ -1610,788 +1446,83 @@ ${logsData.logs || '(no logs available)'}
             <div className="max-w-4xl mx-auto mt-12 space-y-6">
               <h1 className="text-2xl font-bold text-center text-gray-100">Welcome to Helix Configurator</h1>
 
-              {/* Stepper — clickable for completed steps. setupStep is 1-4. */}
-              <div className="flex items-center justify-between gap-2 px-1">
-                {[
-                  { n: 1, label: 'Configure' },
-                  { n: 2, label: 'Exporter' },
-                  { n: 3, label: 'Connect' },
-                  { n: 4, label: 'Verify' },
-                ].map((s, idx, arr) => {
-                  const isCurrent = setupStep === s.n;
-                  const isCompleted = setupStep > s.n;
-                  const clickable = s.n <= setupStep;
-                  return (
-                    <React.Fragment key={s.n}>
-                      <button
-                        onClick={() => clickable && setSetupStep(s.n)}
-                        disabled={!clickable}
-                        className={`flex items-center gap-2 ${clickable ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
-                        aria-current={isCurrent ? 'step' : undefined}
-                      >
-                        <span
-                          className={`w-7 h-7 rounded-full inline-flex items-center justify-center text-tiny font-semibold border ${
-                            isCurrent
-                              ? 'bg-primary border-primary text-white'
-                              : isCompleted
-                                ? 'bg-success border-success text-white'
-                                : 'bg-gray-1000 border-gray-700 text-gray-400'
-                          }`}
-                        >
-                          {isCompleted ? '✓' : s.n}
-                        </span>
-                        <span className={`text-tiny font-semibold uppercase tracking-wider ${isCurrent ? 'text-gray-100' : isCompleted ? 'text-gray-300' : 'text-gray-500'}`}>
-                          {s.label}
-                        </span>
-                      </button>
-                      {idx < arr.length - 1 && (
-                        <span className={`flex-1 h-px ${setupStep > s.n ? 'bg-success/60' : 'bg-gray-800'}`} />
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
+              <Stepper current={setupStep} onJump={setSetupStep} />
 
               {setupStep === 1 && (
-                <div className="adapt-card">
-                  <h2 className="text-lg font-bold mb-2 text-gray-200">Step 1: Configure helix-gateway</h2>
-                  <p className="text-sm text-gray-400 mb-6">Tell the sidecar where Helix lives and what to call your service. The gateway restarts on save.</p>
-                  <div className="space-y-4 mb-6">
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                        Helix Endpoint
-                        {!wizardFieldErrors.HELIX_ENDPOINT && envVars.HELIX_ENDPOINT && <span className="text-success normal-case tracking-normal">✓</span>}
-                      </label>
-                      <input
-                        type="url"
-                        name="helix-ingest-endpoint"
-                        autoComplete="off"
-                        spellCheck={false}
-                        data-1p-ignore
-                        data-lpignore="true"
-                        value={envVars.HELIX_ENDPOINT}
-                        onChange={(e) => setEnvVars({ ...envVars, HELIX_ENDPOINT: e.target.value })}
-                        className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.HELIX_ENDPOINT && wizardFieldErrors.HELIX_ENDPOINT ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-                        placeholder="https://your-tenant.onbmc.com"
-                      />
-                      {envVars.HELIX_ENDPOINT && wizardFieldErrors.HELIX_ENDPOINT && (
-                        <p className="text-tiny text-danger">{wizardFieldErrors.HELIX_ENDPOINT}</p>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2 flex-wrap">
-                        <span className="flex items-center gap-2">
-                          X-Source
-                          {!wizardFieldErrors.X_SOURCE && envVars.X_SOURCE && <span className="text-success normal-case tracking-normal">✓</span>}
-                        </span>
-                        <span className="normal-case tracking-normal text-gray-500 font-normal">— Business Service name in Helix topology &amp; AIOps</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="helix-x-source"
-                        autoComplete="off"
-                        spellCheck={false}
-                        data-1p-ignore
-                        data-lpignore="true"
-                        value={envVars.X_SOURCE}
-                        onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value.replace(/[^a-zA-Z0-9\-_]/g, '') })}
-                        className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.X_SOURCE && wizardFieldErrors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-                        placeholder="e.g. payment-service"
-                      />
-                      <p className="text-tiny text-gray-500">Choose a name that maps to a real service your team owns.</p>
-                      {envVars.X_SOURCE && wizardFieldErrors.X_SOURCE && (
-                        <p className="text-tiny text-danger">{wizardFieldErrors.X_SOURCE}</p>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                        X-API Key
-                        {!wizardFieldErrors.HELIX_API_KEY && envVars.HELIX_API_KEY && <span className="text-success normal-case tracking-normal">✓</span>}
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          name="helix-x-api-key"
-                          autoComplete="off"
-                          spellCheck={false}
-                          data-1p-ignore
-                          data-lpignore="true"
-                          value={envVars.HELIX_API_KEY}
-                          onChange={(e) => {
-                            const parsed = parseHelixKeyBundle(e.target.value);
-                            setEnvVars({ ...envVars, HELIX_API_KEY: parsed ?? e.target.value });
-                          }}
-                          style={!showApiKey ? { WebkitTextSecurity: 'disc', textSecurity: 'disc' } as React.CSSProperties : undefined}
-                          className={`w-full bg-gray-1000 border rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm ${envVars.HELIX_API_KEY && wizardFieldErrors.HELIX_API_KEY ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-                          placeholder="Paste your API key from the Helix portal"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowApiKey(s => !s)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-tiny text-gray-400 hover:text-gray-200 uppercase tracking-wider font-semibold px-1"
-                        >
-                          {showApiKey ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-                      <p className="text-tiny text-gray-500">Paste the full key — the format is parsed automatically.</p>
-                      {envVars.HELIX_API_KEY && wizardFieldErrors.HELIX_API_KEY && (
-                        <p className="text-tiny text-danger">{wizardFieldErrors.HELIX_API_KEY}</p>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
-                        <span>App URL</span>
-                        <span className="normal-case tracking-normal text-gray-500 font-normal">— optional</span>
-                      </label>
-                      <input
-                        type="url"
-                        name="helix-app-url"
-                        autoComplete="off"
-                        spellCheck={false}
-                        data-1p-ignore
-                        data-lpignore="true"
-                        value={envVars.APP_URL}
-                        onChange={(e) => setEnvVars({ ...envVars, APP_URL: e.target.value })}
-                        className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.APP_URL && wizardFieldErrors.APP_URL ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-                        placeholder="http://localhost:8080"
-                      />
-                      {envVars.APP_URL && wizardFieldErrors.APP_URL && (
-                        <p className="text-tiny text-danger">{wizardFieldErrors.APP_URL}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {setupError && (
-                    <div className="mb-4 flex gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm items-start">
-                      <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
-                      <div><span className="text-danger font-semibold">Verification failed:</span> <span className="text-gray-300">{setupError}</span></div>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handleInitialize}
-                    disabled={isVerifying || !wizardCanSubmit}
-                    title={!wizardCanSubmit ? 'Fix the field errors above before continuing' : ''}
-                    className="w-full bg-primary hover:bg-primary-hover disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 py-3 rounded font-semibold transition-all"
-                  >
-                    {isVerifying ? 'Saving…' : 'Save & initialize →'}
-                  </button>
-                </div>
+                <Step1
+                  envVars={envVars}
+                  setEnvVars={setEnvVars}
+                  showApiKey={showApiKey}
+                  setShowApiKey={setShowApiKey}
+                  setupError={setupError}
+                  isVerifying={isVerifying}
+                  onInitialize={handleInitialize}
+                />
               )}
 
               {setupStep === 2 && (
-                <div className="adapt-card">
-                  <h2 className="text-lg font-bold mb-4 text-gray-200">Step 2: Add helix-gateway as an exporter</h2>
-
-                  {/* Step 2 context banner — green check on a blue field. */}
-                  <div className="mb-4 flex items-start gap-3 p-3 bg-active/10 border border-active/40 rounded text-sm">
-                    <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
-                    <span className="text-gray-200"><span className="font-semibold">helix-gateway is already configured.</span> Just add it as an exporter in your collector config.</span>
-                  </div>
-
-                  {/* Smart-add — when exactly one OTel collector is detected
-                      on this host, the configurator can read its config,
-                      compute the merge, and apply it (with a backup +
-                      restart) for the user. POC scope. */}
-                  {smartAddResult && (
-                    <div className={`mb-4 flex items-start gap-3 p-3 rounded text-sm ${smartAddResult.ok ? 'bg-success/10 border border-success/40' : 'bg-danger/10 border border-danger/40'}`}>
-                      {smartAddResult.ok ? <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />}
-                      <span className="text-gray-200">{smartAddResult.message}</span>
-                    </div>
-                  )}
-                  {!smartAddResult && smartAddProposal && (
-                    <div className="mb-5 p-4 bg-gray-1000 border border-active/40 rounded">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Container className="w-4 h-4 text-active" />
-                        <span className="text-sm font-semibold text-gray-100">Smart-add — apply automatically</span>
-                        <span className="ml-auto text-tiny text-gray-500">POC</span>
-                      </div>
-                      {smartAddProposal.error ? (
-                        <p className="text-tiny text-warning">⚠ {smartAddProposal.error} You can still apply the snippet below manually.</p>
-                      ) : smartAddProposal.alreadyConfigured ? (
-                        <p className="text-tiny text-gray-300">
-                          Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
-                          <span className="text-success font-semibold">Already configured</span> — <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
-                        </p>
-                      ) : (
-                        <>
-                          <p className="text-tiny text-gray-300 mb-3">
-                            Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
-                            We'll add <code className="font-mono text-gray-100">{smartAddProposal.exporterName}</code> as an exporter and wire it into{' '}
-                            <strong className="text-gray-200">{(smartAddProposal.addedToPipelines || []).join(', ')}</strong> pipelines.
-                          </p>
-                          <button
-                            onClick={() => setSmartAddPreviewOpen(true)}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover text-white"
-                          >
-                            Review changes
-                          </button>
-                          <span className="text-tiny text-gray-500 ml-3">Or copy the snippets below to apply manually.</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {!smartAddResult && smartAddLoading && (
-                    <div className="mb-4 flex items-center gap-2 text-tiny text-gray-500">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading detected collector config…
-                    </div>
-                  )}
-
-                  <div className="mb-2 flex items-baseline justify-between gap-3">
-                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Exporter</span>
-                  </div>
-                  <SnippetBlock text={`exporters:
-  otlphttp/helix_sidecar:
-    endpoint: "http://helix-gateway:4318"
-    tls:
-      insecure: true`} />
-                  <p className="text-tiny text-gray-500 -mt-4 mb-6">
-                    In your main collector config (e.g. <code className="font-mono">otelcol-config.yaml</code>). No API key needed here —{' '}
-                    <button onClick={openGatewayConfigModal} className="text-active hover:underline font-semibold">view gateway config to see where it's set</button>.
-                  </p>
-
-                  <div className="mb-2 flex items-baseline justify-between gap-3">
-                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pipelines</span>
-                  </div>
-                  <SnippetBlock text={`service:
-  pipelines:
-    traces:
-      exporters: [..., otlphttp/helix_sidecar]
-    metrics:
-      exporters: [..., otlphttp/helix_sidecar]
-    logs:
-      exporters: [..., otlphttp/helix_sidecar]`} />
-                  <p className="text-tiny text-gray-500 -mt-4 mb-6">Wire into whichever pipelines your collector uses. Restart your collector after saving.</p>
-
-                  <div className="mb-3 flex items-start gap-2.5 p-3 rounded border border-warning/40 bg-warning/10 text-tiny text-gray-300">
-                    <span className="text-warning font-bold flex-shrink-0 leading-tight" aria-hidden="true">!</span>
-                    <span>After saving, restart your collector container so the new exporter takes effect.</span>
-                  </div>
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => setSetupStep(1)}
-                      className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-6 py-3 rounded font-semibold transition-colors text-sm"
-                    >Back</button>
-                    <button
-                      onClick={() => setSetupStep(3)}
-                      className="flex-1 bg-primary hover:bg-primary-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm"
-                    >Next: Connect →</button>
-                  </div>
-                </div>
+                <Step2
+                  smartAddProposal={smartAdd.proposal}
+                  smartAddResult={smartAdd.result}
+                  smartAddLoading={smartAdd.loading}
+                  onOpenSmartAddPreview={() => smartAdd.setPreviewOpen(true)}
+                  onOpenGatewayConfig={openGatewayConfigModal}
+                  onBack={() => setSetupStep(1)}
+                  onNext={() => setSetupStep(3)}
+                />
               )}
 
               {setupStep === 3 && (
-                <div className="adapt-card">
-                  <h2 className="text-lg font-bold mb-2 text-gray-200">Step 3: Connect your collector to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-bridge</code></h2>
-                  <p className="text-sm text-gray-400 mb-4">helix-gateway and your collector need to share a Docker network. We tried to wire it up automatically — finish the job here if needed.</p>
-
-                  {/* Auto-bridge result from Step 1's /api/lifecycle/bridge call. */}
-                  {bridgeStatus?.kind === 'success' && (
-                    <div className="mb-4 flex items-start gap-3 p-3 bg-success/10 border border-success/40 rounded text-sm">
-                      <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
-                      <span className="text-gray-200"><span className="font-semibold">helix-gateway was automatically attached to your app's network.</span> It joined <code className="font-mono">{bridgeStatus.network}</code> (matched container <code className="font-mono">{bridgeStatus.targetContainer}</code>).</span>
-                    </div>
-                  )}
-                  {bridgeStatus?.kind === 'skipped' && (
-                    <div className="mb-4 flex items-start gap-3 p-3 bg-active/10 border border-active/40 rounded text-sm">
-                      <Activity className="w-4 h-4 text-active flex-shrink-0 mt-0.5" />
-                      <span className="text-gray-200"><span className="font-semibold">APP_URL is a localhost or IP address — auto-attach skipped.</span> Use the controls below to connect manually.</span>
-                    </div>
-                  )}
-                  {bridgeStatus?.kind === 'error' && (
-                    <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-                      <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-                      <span className="text-gray-200"><span className="font-semibold">Auto-attach failed: </span>{bridgeStatus.reason}. Use the controls below to connect manually.</span>
-                    </div>
-                  )}
-
-                  {/* Step 3 tabs: Detected on this host | Manual */}
-                  <div className="flex border-b border-gray-800 mb-4 -mb-px">
-                    <button
-                      onClick={() => setStep3Tab('detected')}
-                      className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-                        step3Tab === 'detected' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
-                      }`}
-                    >Detected on this host</button>
-                    <button
-                      onClick={() => setStep3Tab('manual')}
-                      className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-                        step3Tab === 'manual' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
-                      }`}
-                    >Manual</button>
-                  </div>
-
-                  {step3Tab === 'detected' && (
-                    <div className="mt-2">
-                      {(() => {
-                        const k8sDetected = detectedCollectors.some(c => c.isKubernetes);
-                        return k8sDetected && (
-                          <div className="mb-4 flex items-start gap-3 p-3 bg-primary/10 border border-primary/40 rounded text-sm">
-                            <Hexagon className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
-                            <div className="flex-1">
-                              <div className="font-semibold text-gray-100 mb-1">Kubernetes detected</div>
-                              <p className="text-tiny text-gray-300">
-                                Apply the K8s Attribute Enrichment template to auto-enrich telemetry with pod, namespace &amp; node metadata.
-                              </p>
-                            </div>
-                            <button
-                              onClick={requestApplyK8sTemplate}
-                              disabled={k8sApplying || k8sApplyResult === 'applied'}
-                              className={`flex-shrink-0 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${
-                                k8sApplyResult === 'applied'
-                                  ? 'bg-success/20 text-success border border-success/40 cursor-default'
-                                  : 'bg-primary hover:bg-primary-hover text-white disabled:opacity-60'
-                              }`}
-                            >
-                              {k8sApplying ? 'Applying…' : k8sApplyResult === 'applied' ? '✓ Applied' : 'Apply template'}
-                            </button>
-                          </div>
-                        );
-                      })()}
-                      {k8sApplyResult === 'failed' && (
-                        <div className="mb-3 text-tiny text-danger">× Could not apply template — retry or apply it from the YAML editor on the dashboard.</div>
-                      )}
-
-                      {detectedCollectors.length === 0 ? (
-                        <div className="p-4 text-center text-tiny text-gray-500 border border-gray-800 rounded bg-gray-1000">
-                          No OTel collector containers detected on this host yet. Switch to the <button onClick={() => setStep3Tab('manual')} className="text-active hover:underline font-semibold">Manual</button> tab to attach by network name.
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {detectedCollectors.map(c => {
-                            const attachable = c.networks.filter(n => n !== 'helix-bridge');
-                            const reachable = c.sharesNetworkWithSidecar;
-                            return (
-                              <div key={c.name} className="flex items-start justify-between gap-3 p-3 bg-gray-1000 border border-gray-800 rounded">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                                    <span className="text-gray-200 font-mono text-sm truncate">{c.name}</span>
-                                    {c.isKubernetes && (
-                                      <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/20 text-primary inline-flex items-center gap-1">
-                                        <Hexagon className="w-2.5 h-2.5" />k8s
-                                      </span>
-                                    )}
-                                    {reachable ? (
-                                      <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/20 text-success">reachable</span>
-                                    ) : (
-                                      <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/20 text-warning">not reachable</span>
-                                    )}
-                                  </div>
-                                  <div className="text-tiny text-gray-500 truncate" title={c.image}>
-                                    {c.image}{attachable.length ? ` • on ${attachable.join(', ')}` : ''}
-                                  </div>
-                                </div>
-                                {reachable ? (
-                                  <span className="px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-success/20 text-success border border-success/40">Attached</span>
-                                ) : attachable.length === 0 ? (
-                                  <span className="text-tiny text-gray-500 self-center">no user networks</span>
-                                ) : attachable.length === 1 ? (
-                                  <button
-                                    onClick={() => attachSidecarToNetwork(attachable[0])}
-                                    disabled={attachingNetwork === attachable[0]}
-                                    className="px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover disabled:opacity-60 text-white"
-                                  >
-                                    {attachingNetwork === attachable[0] ? 'Attaching…' : 'Attach'}
-                                  </button>
-                                ) : (
-                                  <div className="flex flex-col gap-1">
-                                    {attachable.map(n => (
-                                      <button
-                                        key={n}
-                                        onClick={() => attachSidecarToNetwork(n)}
-                                        disabled={attachingNetwork === n}
-                                        className="px-2 py-1 text-tiny rounded bg-primary hover:bg-primary-hover disabled:opacity-60 text-white font-semibold"
-                                      >
-                                        {attachingNetwork === n ? '…' : `Attach to ${n}`}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                          {attachResult && (
-                            <div className={`text-tiny ${attachResult.ok ? 'text-success' : 'text-danger'}`}>
-                              {attachResult.ok ? '✓' : '×'} {attachResult.message}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      <p className="text-tiny text-gray-500 mt-3">After attaching, restart your collector so helix-gateway resolves.</p>
-                    </div>
-                  )}
-
-                  {step3Tab === 'manual' && (
-                    <div className="mt-2 space-y-4">
-                      <div>
-                        <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option A — attach helix-gateway to your app's network</p>
-                        <SnippetBlock text="docker network connect <your-network> helix-gateway" />
-                        <p className="text-tiny text-gray-500 -mt-4">
-                          Replace <code className="font-mono">&lt;your-network&gt;</code> with your compose network name.
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option B — attach your container to helix-bridge</p>
-                        <SnippetBlock text="docker network connect helix-bridge <your-container>" />
-                      </div>
-                      <p className="text-tiny text-gray-500">Then restart your container.</p>
-                    </div>
-                  )}
-
-                  {/* When helix-gateway is already on a user network with a
-                      detected collector, surface a "you're done — skip ahead"
-                      hint so re-entering users don't have to re-read Step 3. */}
-                  {detectedCollectors.some(c => c.sharesNetworkWithSidecar) && (
-                    <div className="mt-4 flex items-start gap-3 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0 mt-0.5" />
-                      <span>
-                        <span className="font-semibold text-gray-100">helix-gateway is already on a network with a detected collector.</span>{' '}
-                        You can continue to Verify — no further attach needed.
-                      </span>
-                    </div>
-                  )}
-                  <div className="mt-6 flex gap-4">
-                    <button
-                      onClick={() => setSetupStep(2)}
-                      className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-6 py-3 rounded font-semibold transition-colors text-sm"
-                    >Back</button>
-                    <button
-                      onClick={() => setSetupStep(4)}
-                      className={`flex-1 px-6 py-3 rounded font-semibold transition-all text-sm text-white ${
-                        detectedCollectors.some(c => c.sharesNetworkWithSidecar)
-                          ? 'bg-success hover:bg-success-hover'
-                          : 'bg-primary hover:bg-primary-hover'
-                      }`}
-                    >{detectedCollectors.some(c => c.sharesNetworkWithSidecar) ? 'Continue to Verify →' : 'Next: Verify →'}</button>
-                  </div>
-                </div>
+                <Step3
+                  bridgeStatus={bridgeStatus}
+                  tab={step3Tab}
+                  setTab={setStep3Tab}
+                  detectedCollectors={detectedCollectors}
+                  attachingNetwork={attachingNetwork}
+                  attachResult={attachResult}
+                  onAttachNetwork={attachSidecarToNetwork}
+                  k8sApplying={k8sApplying}
+                  k8sApplyResult={k8sApplyResult}
+                  onApplyK8sTemplate={requestApplyK8sTemplate}
+                  onBack={() => setSetupStep(2)}
+                  onNext={() => setSetupStep(4)}
+                />
               )}
 
               {setupStep === 4 && (
-                <div className="adapt-card">
-                  <h2 className="text-lg font-bold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
-                  <p className="text-sm text-gray-400 mb-5">Three quick checks. Restart your app or collector first if you just changed config.</p>
-
-                  {/* Mirror the Step 3 bridge banner here too — users can land
-                      on Step 4 directly via the stepper without seeing Step 3,
-                      and a "skipped" or "failed" bridge is the most common
-                      reason live counters stay at zero. */}
-                  {bridgeStatus?.kind === 'skipped' && (() => {
-                    const noUserNetwork = !detectedCollectors.some(c => c.sharesNetworkWithSidecar);
-                    if (!noUserNetwork) return null;
-                    return (
-                      <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-                        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-                        <span className="text-gray-200">
-                          <span className="font-semibold">Auto-attach was skipped and helix-gateway isn't sharing a network with any detected collector.</span>{' '}
-                          Live counters will stay at zero until you{' '}
-                          <button onClick={() => setSetupStep(3)} className="text-active hover:underline font-semibold">go back to Step 3</button>{' '}
-                          and attach.
-                        </span>
-                      </div>
-                    );
-                  })()}
-                  {bridgeStatus?.kind === 'error' && (
-                    <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-                      <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-                      <span className="text-gray-200">
-                        <span className="font-semibold">Auto-attach failed in Step 1: </span>{bridgeStatus.reason}.{' '}
-                        <button onClick={() => setSetupStep(3)} className="text-active hover:underline font-semibold">Go back to Step 3</button>{' '}
-                        to connect manually if you haven't already.
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Live counters — three cards. Reuse the existing
-                      receiver-counters polling (re-keyed on step 4). */}
-                  {(() => {
-                    const delta = (now: number | undefined, base: number | undefined) =>
-                      typeof now === 'number' && typeof base === 'number' ? Math.max(0, now - base) : 0;
-                    const dSpans = delta(receiverNow?.acceptedSpans, receiverBaseline?.acceptedSpans);
-                    const dMetrics = delta(receiverNow?.acceptedMetricPoints, receiverBaseline?.acceptedMetricPoints);
-                    const dLogs = delta(receiverNow?.acceptedLogRecords, receiverBaseline?.acceptedLogRecords);
-                    const Card = ({ label, value }: { label: string; value: number }) => (
-                      <div className="bg-gray-1000 border border-gray-800 rounded px-3 py-2.5">
-                        <div className="text-tiny text-gray-500 uppercase tracking-wider">{label}</div>
-                        <div className={`font-mono text-xl mt-1 ${value > 0 ? 'text-success' : 'text-gray-300'}`}>{value > 0 ? '+' : ''}{value}</div>
-                      </div>
-                    );
-                    return (
-                      <div className="mb-5">
-                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Live counters <span className="normal-case tracking-normal text-gray-500 font-normal">— since you opened this step</span></div>
-                        <div className="grid grid-cols-3 gap-3">
-                          <Card label="Spans" value={dSpans} />
-                          <Card label="Metric points" value={dMetrics} />
-                          <Card label="Log records" value={dLogs} />
-                        </div>
-                        {receiverError && <div className="mt-2 text-tiny text-warning">⚠ {receiverError}</div>}
-                        {appExportErrors.length > 0 && (
-                          <div className="mt-3 p-2.5 rounded border border-warning/40 bg-warning/10">
-                            <div className="text-tiny text-warning font-semibold uppercase tracking-wider mb-1">⚠ Errors detected on your side</div>
-                            {appExportErrors.map(err => (
-                              <div key={err.container} className="mb-2 last:mb-0">
-                                <div className="text-tiny text-gray-300 font-mono mb-0.5">{err.container}</div>
-                                <pre className="text-[10px] text-gray-400 font-mono whitespace-pre-wrap break-all bg-gray-1000 rounded p-2 max-h-32 overflow-auto select-text" style={{ fontFamily: "'Source Code Pro', monospace" }}>{err.lines.slice(-3).join('\n')}</pre>
-                              </div>
-                            ))}
-                            <div className="text-tiny text-gray-400 mt-1">
-                              Common fixes: confirm the container is on the <code className="font-mono text-gray-300">helix-bridge</code> network, the endpoint is <code className="font-mono text-gray-300">http://helix-gateway:4318</code> (not gRPC :4317), and the API key is correct.
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {detectedCollectors.some(c => c.isKubernetes) && (
-                    <div className="mb-5 flex items-start gap-3 p-2.5 rounded border border-primary/40 bg-primary/10 text-tiny text-gray-300">
-                      <Hexagon className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
-                      <span>Kubernetes detected — <code className="font-mono">k8s.namespace.name</code> and <code className="font-mono">k8s.cluster.name</code> are being enriched automatically via the K8s Attribute Enrichment template.</span>
-                    </div>
-                  )}
-
-                  {/* Gateway → Helix synthetic verify */}
-                  <div className="mb-5">
-                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Gateway → Helix</div>
-                    {traceVerifyResult && traceVerifyResult.status === 'exported' ? (
-                      <div className="flex items-start gap-3 p-3 bg-success/10 border border-success/40 rounded text-sm">
-                        <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
-                        <div className="flex-1">
-                          <span className="text-gray-200 font-semibold">Synthetic trace reached Helix.</span>
-                          <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
-                          <div className="text-tiny text-gray-500 mt-1">Run <button onClick={handleVerifyTelemetry} disabled={verifyingTrace} className="text-active hover:underline font-semibold disabled:opacity-60">again</button> any time.</div>
-                          {envVars.HELIX_API_KEY && envVars.HELIX_API_KEY.startsWith('FAKE-') && (
-                            <div className="mt-2 text-tiny text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1.5">
-                              <span className="font-semibold">Heads up:</span> your <code className="font-mono">HELIX_API_KEY</code> is a placeholder — Helix returns 200 for any request. Replace it with a real tenant key.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : traceVerifyResult && traceVerifyResult.status === 'rejected' ? (
-                      <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
-                        <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
-                        <div>
-                          <span className="text-gray-200 font-semibold">Helix rejected the trace.</span>
-                          <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
-                          {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-                        </div>
-                      </div>
-                    ) : traceVerifyResult && traceVerifyResult.status === 'pending' ? (
-                      <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-                        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-                        <div>
-                          <span className="text-gray-200 font-semibold">Trace queued but not yet exported.</span>
-                          <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
-                          {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-                        </div>
-                      </div>
-                    ) : traceVerifyResult && traceVerifyResult.status === 'error' ? (
-                      <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
-                        <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
-                        <div>
-                          <span className="text-gray-200 font-semibold">Verification failed.</span>
-                          <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
-                          {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-                        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-                        <span className="text-gray-200">Not yet verified. Run the synthetic check below.</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Blueprint prerequisite banner */}
-                  <div className="mb-5 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-                    <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-                    <div>
-                      <span className="text-gray-200">Before topology appears in Helix, the <span className="font-semibold">Default Blueprint for OTel Service</span> must be enabled in AIOps.</span>{' '}
-                      {envVars.HELIX_ENDPOINT && (
-                        <a
-                          href={`${envVars.HELIX_ENDPOINT.replace(/\/+$/, '')}/aiops/#/configurations/manageOpentelemetry`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-active hover:underline font-semibold inline-flex items-center gap-1"
-                        >
-                          Open Manage OpenTelemetry <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => setSetupStep(3)}
-                      className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-6 py-3 rounded font-semibold transition-colors text-sm"
-                    >Back</button>
-                    <button
-                      onClick={handleVerifyTelemetry}
-                      disabled={verifyingTrace}
-                      className="flex-1 bg-warning hover:bg-warning-hover text-gray-900 px-6 py-3 rounded font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
-                      title="Inject a synthetic trace and confirm it reaches Helix — independent of your app"
-                    >
-                      {verifyingTrace && <Loader2 className="w-4 h-4 animate-spin" />}
-                      {verifyingTrace ? 'Verifying…' : 'Verify Gateway → Helix'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        localStorage.setItem('helix-configurator.onboarded', '1');
-                        setIsSetupComplete(true);
-                      }}
-                      className="flex-1 bg-success hover:bg-success-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm"
-                    >Launch Dashboard</button>
-                  </div>
-
-                  <div className="mt-6 pt-4 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">
-                    <span className="font-semibold text-gray-400 uppercase tracking-wider">After launch:</span>
-                    <ul className="mt-2 space-y-1 list-disc list-inside">
-                      <li>Run a <span className="text-gray-300">Diagnostic Health Check</span> to validate config, API key, and tenant reachability.</li>
-                      <li>Use <span className="text-gray-300">Load Template</span> in the YAML editor to switch to a tail-sampling, Prometheus, or Kubernetes-attribute starter.</li>
-                      <li>Add an <span className="text-gray-300">AIOps Business Service Key</span> from Settings to enable the deep-link button.</li>
-                    </ul>
-                  </div>
-                </div>
+                <Step4
+                  bridgeStatus={bridgeStatus}
+                  detectedCollectors={detectedCollectors}
+                  receiverNow={receiverNow}
+                  receiverBaseline={receiverBaseline}
+                  receiverError={receiverError}
+                  appExportErrors={appExportErrors}
+                  traceVerifyResult={traceVerifyResult}
+                  verifyingTrace={verifyingTrace}
+                  envVars={envVars}
+                  onJumpToStep={setSetupStep}
+                  onVerifyTelemetry={handleVerifyTelemetry}
+                  onLaunchDashboard={() => {
+                    localStorage.setItem('helix-configurator.onboarded', '1');
+                    setIsSetupComplete(true);
+                  }}
+                />
               )}
 
-              {/* Gateway config modal — opened from Step 2's "view gateway
-                  config" link. Read-only — full editing happens on the
-                  dashboard's YAML editor card. */}
-              {gatewayConfigOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60" onClick={() => setGatewayConfigOpen(false)}>
-                  <div
-                    className="adapt-card !p-0 max-w-3xl w-full max-h-[80vh] flex flex-col overflow-hidden"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <header className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-800 bg-gray-900">
-                      <div>
-                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Gateway config</div>
-                        <div className="text-sm text-gray-200">Where the auth headers live</div>
-                      </div>
-                      <button onClick={() => setGatewayConfigOpen(false)} className="text-gray-400 hover:text-gray-200 p-1 rounded hover:bg-gray-800">
-                        <X className="w-5 h-5" />
-                      </button>
-                    </header>
-                    <div className="px-5 py-3 text-tiny text-gray-400 border-b border-gray-800 bg-gray-1000">
-                      Written automatically in Step 1. Your collector routes to the gateway receiver; the gateway authenticates to Helix via the highlighted headers.
-                    </div>
-                    <div className="flex-1 overflow-auto p-4 bg-gray-1000">
-                      <pre className="font-mono text-tiny text-gray-300 whitespace-pre" style={{ fontFamily: "'Source Code Pro', monospace" }}>
-                        {gatewayConfigText
-                          ? gatewayConfigText.split('\n').map((line, i) => {
-                              const highlight = /(X-Api-Key|X-Source|endpoint:)/.test(line);
-                              return (
-                                <div key={i} className={highlight ? 'bg-warning/15 border-l-2 border-warning pl-2 -ml-2' : ''}>{line || ' '}</div>
-                              );
-                            })
-                          : <span className="text-gray-500">Loading…</span>}
-                      </pre>
-                    </div>
-                    <footer className="px-5 py-3 border-t border-gray-800 bg-gray-900 flex justify-between items-center">
-                      <span className="text-tiny text-gray-500">Read-only here. Full editor available on the dashboard after launch.</span>
-                      <button
-                        onClick={() => setGatewayConfigOpen(false)}
-                        className="text-tiny font-semibold text-gray-300 hover:text-gray-100"
-                      >
-                        Close
-                      </button>
-                    </footer>
-                  </div>
-                </div>
-              )}
+              <GatewayConfigModal
+                open={gatewayConfigOpen}
+                text={gatewayConfigText}
+                onClose={() => setGatewayConfigOpen(false)}
+              />
 
-              {/* Smart-add preview modal — Detect step. Shows the merged
-                  config with helix-added lines highlighted, and exposes the
-                  Apply button. The modal IS the confirmation. */}
-              {smartAddPreviewOpen && smartAddProposal && smartAddProposal.proposedYaml && smartAddProposal.exporterName && (() => {
-                const exporterName = smartAddProposal.exporterName!;
-                const escapedName = exporterName.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&');
-                const declarationRe = new RegExp(`^(\\s*)${escapedName}:\\s*$`);
-                const lines = smartAddProposal.proposedYaml!.split('\n');
-                let activeIndent = -1;
-                const highlightFlags = lines.map((line) => {
-                  const decl = line.match(declarationRe);
-                  if (decl) {
-                    activeIndent = decl[1].length;
-                    return true;
-                  }
-                  if (activeIndent >= 0) {
-                    const m = line.match(/^(\s*)\S/);
-                    if (m && m[1].length > activeIndent) return true;
-                    activeIndent = -1;
-                  }
-                  return line.includes(exporterName);
-                });
-                return (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60" onClick={() => !smartAddApplying && setSmartAddPreviewOpen(false)}>
-                    <div
-                      className="adapt-card !p-0 max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <header className="flex items-start justify-between gap-3 px-5 py-3 border-b border-gray-800 bg-gray-900">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Smart-add preview</div>
-                          <div className="text-sm text-gray-200">{smartAddProposal.name} — <code className="font-mono text-gray-300">{smartAddProposal.configPath}</code></div>
-                          {smartAddProposal.hostConfigPath ? (
-                            <div className="mt-1.5 flex items-center gap-2 text-tiny text-gray-400">
-                              <span className="text-gray-500">Open locally:</span>
-                              <code className="font-mono text-gray-300 truncate" title={smartAddProposal.hostConfigPath}>{smartAddProposal.hostConfigPath}</code>
-                              <button
-                                type="button"
-                                onClick={() => copyToClipboard(smartAddProposal.hostConfigPath!)}
-                                className="text-active hover:underline font-semibold flex-shrink-0"
-                              >
-                                Copy path
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="mt-1.5 text-tiny text-gray-500">
-                              Config isn't bind-mounted from the host — it's baked into the image. No local path to open.
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => setSmartAddPreviewOpen(false)}
-                          disabled={smartAddApplying}
-                          className="text-gray-400 hover:text-gray-200 p-1 rounded hover:bg-gray-800 disabled:opacity-50 flex-shrink-0"
-                        >
-                          <X className="w-5 h-5" />
-                        </button>
-                      </header>
-                      <div className="px-5 py-3 text-tiny text-gray-400 border-b border-gray-800 bg-gray-1000">
-                        Adding <code className="font-mono text-gray-200">{exporterName}</code> and wiring it into <strong className="text-gray-200">{(smartAddProposal.addedToPipelines || []).join(', ') || '(no pipelines)'}</strong>. Highlighted lines are what will change. The current file is backed up as <code className="font-mono">.helix-bak</code> in the container.
-                      </div>
-                      <div className="flex-1 overflow-auto p-4 bg-gray-1000">
-                        <pre className="font-mono text-tiny text-gray-300 whitespace-pre" style={{ fontFamily: "'Source Code Pro', monospace" }}>
-                          {lines.map((line, i) => (
-                            <div key={i} className={highlightFlags[i] ? 'bg-success/15 border-l-2 border-success pl-2 -ml-2' : ''}>{line || ' '}</div>
-                          ))}
-                        </pre>
-                      </div>
-                      <footer className="px-5 py-3 border-t border-gray-800 bg-gray-900 flex justify-between items-center gap-3">
-                        <span className="text-tiny text-gray-500">The collector container will restart on apply.</span>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setSmartAddPreviewOpen(false)}
-                            disabled={smartAddApplying}
-                            className="text-tiny font-semibold text-gray-300 hover:text-gray-100 px-3 py-1.5 rounded hover:bg-gray-800 disabled:opacity-50"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => applySmartAdd(smartAddProposal.name)}
-                            disabled={smartAddApplying}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover disabled:opacity-60 text-white"
-                          >
-                            {smartAddApplying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                            {smartAddApplying ? 'Applying…' : 'Apply & restart'}
-                          </button>
-                        </div>
-                      </footer>
-                    </div>
-                  </div>
-                );
-              })()}
+              <SmartAddPreviewModal
+                open={smartAdd.previewOpen}
+                proposal={smartAdd.proposal}
+                applying={smartAdd.applying}
+                onClose={() => smartAdd.setPreviewOpen(false)}
+                onApply={() => smartAdd.proposal && smartAdd.apply(smartAdd.proposal.name)}
+                onCopyPath={copyToClipboard}
+              />
             </div>
           ) : (
             <>
