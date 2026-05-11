@@ -220,6 +220,7 @@ class OtelStore {
         received_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_logs_trace ON log_records(trace_id);
+      CREATE INDEX IF NOT EXISTS idx_logs_received ON log_records(received_at);
     `);
   }
 
@@ -600,6 +601,111 @@ class OtelStore {
 const safeJson = (raw, fallback) => {
   if (raw == null) return fallback;
   try { return JSON.parse(raw); } catch { return fallback; }
+};
+
+// Compute p50 and p95 from an unsorted array of numbers in place. Returns
+// {p50, p95} or null if the array is empty. Sorts a copy so the caller's data
+// is untouched; the histogram callers pass a per-bucket slice so this is fine
+// even at TRACE_CAP (500 entries) per request.
+const computePercentiles = (arr) => {
+  if (!arr.length) return null;
+  const sorted = arr.slice().sort((a, b) => a - b);
+  const at = (p) => {
+    const idx = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p));
+    return sorted[idx];
+  };
+  return { p50: at(0.5), p95: at(0.95) };
+};
+
+// Bin trace rows into a fixed number of equal-width time buckets. Each bucket
+// reports total/ok/slow/error counts plus p50/p95 of duration. Used by the
+// Traces timeline chart on /otel-data. Service filter matches the trace-list
+// behavior (any participant, not just root).
+OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, service }) {
+  const now = Date.now();
+  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : now - 60 * 60 * 1000;
+  const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
+  if (end <= start) return { bucketStartMs: start, bucketEndMs: end, bucketSizeMs: 0, buckets: [] };
+  const n = Math.min(Math.max(2, buckets | 0 || 60), 240);
+  const bucketSize = Math.max(1, Math.floor((end - start) / n));
+
+  const params = [];
+  const where = ['t.received_at >= ?', 't.received_at <= ?'];
+  params.push(start, end);
+  if (service) {
+    where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
+    params.push(service);
+  }
+  const sql = `
+    SELECT t.received_at AS ts, t.duration_ms AS dur, t.has_error AS err
+    FROM traces t
+    WHERE ${where.join(' AND ')}
+    ORDER BY t.received_at ASC
+  `;
+  const rows = this.db.prepare(sql).all(...params);
+
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({
+      tsMs: start + i * bucketSize,
+      total: 0, ok: 0, slow: 0, error: 0,
+      p50: null, p95: null,
+      _durs: [],
+    });
+  }
+  const SLOW_MS = 1000; // matches the frontend SLOW_THRESHOLD_MS constant
+  for (const r of rows) {
+    const idx = Math.min(n - 1, Math.max(0, Math.floor((r.ts - start) / bucketSize)));
+    const b = out[idx];
+    b.total++;
+    if (r.err) b.error++;
+    else if (r.dur > SLOW_MS) b.slow++;
+    else b.ok++;
+    b._durs.push(r.dur || 0);
+  }
+  for (const b of out) {
+    const pct = computePercentiles(b._durs);
+    if (pct) { b.p50 = pct.p50; b.p95 = pct.p95; }
+    delete b._durs;
+  }
+  return { bucketStartMs: start, bucketEndMs: end, bucketSizeMs: bucketSize, buckets: out };
+};
+
+// Bin log records into time buckets, stacked by severity class. Severity is
+// normalized into 4 buckets (debug / info / warn / error) to match the
+// Logs sub-tab's severity filter.
+OtelStore.prototype.logsHistogram = function ({ sinceMs, untilMs, buckets }) {
+  const now = Date.now();
+  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : now - 60 * 60 * 1000;
+  const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
+  if (end <= start) return { bucketStartMs: start, bucketEndMs: end, bucketSizeMs: 0, buckets: [] };
+  const n = Math.min(Math.max(2, buckets | 0 || 60), 240);
+  const bucketSize = Math.max(1, Math.floor((end - start) / n));
+
+  const rows = this.db.prepare(
+    `SELECT received_at AS ts, severity AS sev FROM log_records
+     WHERE received_at >= ? AND received_at <= ?
+     ORDER BY received_at ASC`
+  ).all(start, end);
+
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({ tsMs: start + i * bucketSize, total: 0, debug: 0, info: 0, warn: 0, error: 0 });
+  }
+  const severityBucket = (sev) => {
+    const s = String(sev || '').toLowerCase();
+    if (s.startsWith('err') || s.startsWith('fatal') || s.startsWith('crit')) return 'error';
+    if (s.startsWith('warn')) return 'warn';
+    if (s.startsWith('debug') || s.startsWith('trace')) return 'debug';
+    return 'info';
+  };
+  for (const r of rows) {
+    const idx = Math.min(n - 1, Math.max(0, Math.floor((r.ts - start) / bucketSize)));
+    const b = out[idx];
+    b.total++;
+    b[severityBucket(r.sev)]++;
+  }
+  return { bucketStartMs: start, bucketEndMs: end, bucketSizeMs: bucketSize, buckets: out };
 };
 
 module.exports = { OtelStore, extractSpans, extractLogRecords };

@@ -607,6 +607,32 @@ The first run builds the configurator image locally (no registry pull
 required) and may take a few minutes. Subsequent runs reuse the cached image
 and start in seconds.
 
+## Update
+
+To pick up new releases of the configurator, **re-run the same install
+one-liner** you used originally. The installer detects the existing
+\`helix-configurator/\` directory and preserves your user-owned files while
+refreshing the source code:
+
+- \`.env\` — your credentials and source name
+- \`helix-otel-collector.yaml\` — gateway pipeline config (including any edits
+  you made via the dashboard YAML editor)
+- \`data/\` — local OTel trace store database
+
+Everything else (\`Dockerfile\`, \`docker-compose.yml\`, \`backend/\`,
+\`frontend/\`, \`start.*\`, this README) is replaced with the new bundle
+content, and \`docker compose up -d --build\` rebuilds the image with the
+updated source.
+
+If extraction fails mid-update, the installer restores the preserved files
+into a fresh \`helix-configurator/\` so you're never left without your \`.env\`.
+
+> **Where do I get the install one-liner from again?** Open the simulated
+> AIOps page in your tenant, re-enter your source name (\`${xSource}\`), and
+> copy the new \`curl ... | sh\` / \`iwr ... | iex\` command. Tokens are
+> session-scoped on the demo host; if the host has restarted since your
+> first install, you'll need a fresh command.
+
 ## What's inside
 
 | File | Purpose |
@@ -852,6 +878,21 @@ fi
 
 mkdir -p "$TARGET"
 cd "$TARGET"
+
+# If a prior install exists, back up user-owned files so we can refresh the
+# source code without nuking real credentials, edited gateway YAML, or the
+# local OTel trace store.
+HELIX_BAK=""
+if [ -d helix-configurator ]; then
+  echo "Existing install detected — preserving .env, helix-otel-collector.yaml, and data/."
+  HELIX_BAK=$(mktemp -d "\${TMPDIR:-/tmp}/helix-update.XXXXXX")
+  for keep in .env helix-otel-collector.yaml data; do
+    if [ -e "helix-configurator/$keep" ]; then
+      cp -R "helix-configurator/$keep" "$HELIX_BAK/"
+    fi
+  done
+fi
+
 # Force a clean slate so a partial/stale extract from a prior failed run can't
 # leave a corrupt Dockerfile (etc.) that survives unzip -o.
 rm -rf helix-configurator
@@ -862,7 +903,26 @@ unzip -oq package.zip
 rm package.zip
 if [ ! -d helix-configurator ]; then
   echo "Error: extraction failed — helix-configurator/ directory missing."
+  if [ -n "$HELIX_BAK" ]; then
+    echo "Restoring preserved files..."
+    mkdir -p helix-configurator
+    cp -R "$HELIX_BAK/." helix-configurator/ 2>/dev/null || true
+    rm -rf "$HELIX_BAK"
+  fi
   exit 1
+fi
+
+# Re-overlay user files on top of the fresh extract. The bundle ships
+# placeholder versions of .env / helix-otel-collector.yaml; those are useful
+# on a first install but would clobber real values on update.
+if [ -n "$HELIX_BAK" ]; then
+  for keep in .env helix-otel-collector.yaml data; do
+    if [ -e "$HELIX_BAK/$keep" ]; then
+      rm -rf "helix-configurator/$keep"
+      cp -R "$HELIX_BAK/$keep" "helix-configurator/"
+    fi
+  done
+  rm -rf "$HELIX_BAK"
 fi
 cd helix-configurator
 for required in Dockerfile docker-compose.yml .env; do
@@ -968,6 +1028,21 @@ if (-not (Test-DockerRunning)) {
 
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
 Set-Location $Target
+
+# If a prior install exists, back up user-owned files so re-running the
+# installer refreshes the source code without nuking real credentials, edited
+# gateway YAML, or the local OTel trace store.
+$bak = $null
+if (Test-Path "helix-configurator") {
+  Write-Host "Existing install detected -- preserving .env, helix-otel-collector.yaml, and data/."
+  $bak = Join-Path $env:TEMP ("helix-update-" + [System.IO.Path]::GetRandomFileName())
+  New-Item -ItemType Directory -Force -Path $bak | Out-Null
+  foreach ($keep in @('.env', 'helix-otel-collector.yaml', 'data')) {
+    $src = Join-Path "helix-configurator" $keep
+    if (Test-Path $src) { Copy-Item -Recurse -Force $src $bak }
+  }
+}
+
 # Force a clean slate so a partial/stale extract can't leave a corrupt file behind.
 if (Test-Path "helix-configurator") { Remove-Item -Recurse -Force "helix-configurator" }
 Write-Host "Downloading package..."
@@ -977,8 +1052,32 @@ Expand-Archive -Force -Path "package.zip" -DestinationPath "."
 Remove-Item "package.zip"
 if (-not (Test-Path "helix-configurator")) {
   Write-Host "Error: extraction failed -- helix-configurator/ directory missing."
+  if ($bak) {
+    Write-Host "Restoring preserved files..."
+    New-Item -ItemType Directory -Force -Path "helix-configurator" | Out-Null
+    Get-ChildItem -Force -Path $bak | ForEach-Object {
+      Copy-Item -Recurse -Force $_.FullName "helix-configurator"
+    }
+    Remove-Item -Recurse -Force $bak
+  }
   exit 1
 }
+
+# Re-overlay user files on top of the fresh extract. The bundle ships
+# placeholder versions of .env / helix-otel-collector.yaml; those are useful
+# on a first install but would clobber real values on update.
+if ($bak) {
+  foreach ($keep in @('.env', 'helix-otel-collector.yaml', 'data')) {
+    $src = Join-Path $bak $keep
+    if (Test-Path $src) {
+      $dst = Join-Path "helix-configurator" $keep
+      if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+      Copy-Item -Recurse -Force $src "helix-configurator"
+    }
+  }
+  Remove-Item -Recurse -Force $bak
+}
+
 Set-Location "helix-configurator"
 foreach ($required in @('Dockerfile', 'docker-compose.yml', '.env')) {
   if (-not (Test-Path $required)) {
@@ -1231,6 +1330,18 @@ app.get('/api/operations', (req, res) => {
   });
 });
 
+// Time-binned aggregates for the timeline chart on the Traces tab. Each bucket
+// reports total / ok / slow / error counts plus p50 + p95 duration in ms.
+app.get('/api/traces/histogram', (req, res) => {
+  const { sinceMs, untilMs, buckets, service } = req.query;
+  res.json(otelStore.tracesHistogram({
+    sinceMs: sinceMs ? Number(sinceMs) : undefined,
+    untilMs: untilMs ? Number(untilMs) : undefined,
+    buckets: buckets ? Number(buckets) : undefined,
+    service: typeof service === 'string' && service ? service : undefined,
+  }));
+});
+
 app.get('/api/traces/:traceId', (req, res) => {
   const { traceId } = req.params;
   if (!/^[0-9a-fA-F]{1,64}$/.test(traceId)) {
@@ -1251,6 +1362,16 @@ app.get('/api/logs', (req, res) => {
       limit: limit ? Number(limit) : undefined,
     }),
   });
+});
+
+// Severity-stacked log volume buckets for the Logs / Errors timeline.
+app.get('/api/logs/histogram', (req, res) => {
+  const { sinceMs, untilMs, buckets } = req.query;
+  res.json(otelStore.logsHistogram({
+    sinceMs: sinceMs ? Number(sinceMs) : undefined,
+    untilMs: untilMs ? Number(untilMs) : undefined,
+    buckets: buckets ? Number(buckets) : undefined,
+  }));
 });
 
 app.get('/api/logs/:traceId', (req, res) => {

@@ -15,6 +15,21 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
+import { TimelineChart, TIMELINE_COLORS } from './TimelineChart';
+
+// Shared shape returned by /api/traces/histogram and /api/logs/histogram.
+// Hoisted to module scope so the sub-tab components can reference it.
+type Histogram = {
+  bucketStartMs: number;
+  bucketEndMs: number;
+  bucketSizeMs: number;
+  buckets: Array<{
+    tsMs: number; total: number;
+    ok?: number; slow?: number; error?: number;
+    debug?: number; info?: number; warn?: number;
+    p50?: number | null; p95?: number | null;
+  }>;
+};
 
 // View OTel Data — local trace viewer fed by the helix-gateway fan-out.
 //
@@ -289,6 +304,13 @@ export const OtelDataPage: React.FC = () => {
   const [restartResult, setRestartResult] = useState<{ name: string; ok: boolean; message: string } | null>(null);
   const diagRef = useRef<HTMLDivElement | null>(null);
 
+  // Timeline state. customRange is set when the user clicks a bucket on the
+  // chart — it zooms the trace/log list into that bucket's window while the
+  // chart itself stays at the broader `range` and shades the selection.
+  const [customRange, setCustomRange] = useState<{ sinceMs: number; untilMs: number } | null>(null);
+  const [tracesHistogram, setTracesHistogram] = useState<Histogram | null>(null);
+  const [logsHistogram, setLogsHistogram] = useState<Histogram | null>(null);
+
   useEffect(() => {
     const refresh = async () => {
       try {
@@ -419,17 +441,59 @@ export const OtelDataPage: React.FC = () => {
     }
   }, [serviceFilter, statusFilter, range, searchQuery, minMs, selectedTraceId]);
 
+  // Resolve the active time window. customRange (set by clicking a bucket on
+  // the timeline chart) takes precedence over the relative TIME_RANGES picker.
+  const resolveWindow = (): { sinceMs?: number; untilMs?: number } => {
+    if (customRange) return { sinceMs: customRange.sinceMs, untilMs: customRange.untilMs };
+    const r = TIME_RANGES.find(x => x.value === range);
+    if (r?.ms) return { sinceMs: Date.now() - r.ms };
+    return {};
+  };
+
+  // Window for the timeline chart itself. Stays at the broad `range` even when
+  // customRange is set — that way the chart shades the active selection rather
+  // than collapsing into it.
+  const resolveChartWindow = (): { sinceMs?: number; untilMs?: number } => {
+    const r = TIME_RANGES.find(x => x.value === range);
+    if (r?.ms) return { sinceMs: Date.now() - r.ms, untilMs: Date.now() };
+    return {};
+  };
+
   const refreshTraces = async () => {
-    const range_ = TIME_RANGES.find(r => r.value === range);
     const params = new URLSearchParams();
     if (serviceFilter) params.set('service', serviceFilter);
-    if (range_?.ms) params.set('sinceMs', String(Date.now() - range_.ms));
+    const w = resolveWindow();
+    if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
+    if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
     const res = await fetch(`/api/traces?${params}`);
     if (res.ok) {
       const j = await res.json();
       setTraces(j.traces || []);
     }
     setTracesLoading(false);
+  };
+
+  const refreshTracesHistogram = async () => {
+    const w = resolveChartWindow();
+    const params = new URLSearchParams({ buckets: '60' });
+    if (serviceFilter) params.set('service', serviceFilter);
+    if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
+    if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+    try {
+      const res = await fetch(`/api/traces/histogram?${params}`);
+      if (res.ok) setTracesHistogram(await res.json());
+    } catch { /* non-fatal */ }
+  };
+
+  const refreshLogsHistogram = async () => {
+    const w = resolveChartWindow();
+    const params = new URLSearchParams({ buckets: '60' });
+    if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
+    if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+    try {
+      const res = await fetch(`/api/logs/histogram?${params}`);
+      if (res.ok) setLogsHistogram(await res.json());
+    } catch { /* non-fatal */ }
   };
 
   const refreshServices = async () => {
@@ -449,7 +513,10 @@ export const OtelDataPage: React.FC = () => {
   };
 
   const refreshLogs = async () => {
-    const res = await fetch('/api/logs?limit=500');
+    const params = new URLSearchParams({ limit: '500' });
+    const w = resolveWindow();
+    if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
+    const res = await fetch(`/api/logs?${params}`);
     if (res.ok) {
       const j = await res.json();
       setLogs(j.logs || []);
@@ -459,9 +526,10 @@ export const OtelDataPage: React.FC = () => {
   const refreshOperations = async () => {
     setOperationsLoading(true);
     try {
-      const range_ = TIME_RANGES.find(r => r.value === range);
       const params = new URLSearchParams();
-      if (range_?.ms) params.set('sinceMs', String(Date.now() - range_.ms));
+      const w = resolveWindow();
+      if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
+      if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
       const res = await fetch(`/api/operations?${params}`);
       if (res.ok) {
         const j = await res.json();
@@ -493,11 +561,17 @@ export const OtelDataPage: React.FC = () => {
     return m;
   }, [operations]);
 
-  // Initial load + reload when filters change.
+  // Initial load + reload when filters change. customRange is included so
+  // clicking a histogram bucket zooms the list into that bucket immediately.
   useEffect(() => {
     setTracesLoading(true);
     refreshTraces();
-  }, [serviceFilter, range]);
+  }, [serviceFilter, range, customRange]);
+
+  // Reload logs whenever the active time window changes (including click-zoom).
+  useEffect(() => {
+    refreshLogs();
+  }, [range, customRange]);
 
   // Periodic re-fetch so the rollup counts (logs/errors/db calls) on
   // SSE-pushed traces catch up — those arrive with counts at 0 because
@@ -509,7 +583,27 @@ export const OtelDataPage: React.FC = () => {
       refreshTraces();
     }, 30_000);
     return () => clearInterval(id);
+  }, [serviceFilter, range, customRange]);
+
+  // Histogram polling — refresh once on mount + every 15s. Chart window
+  // follows `range` (not customRange) so the user keeps full context while
+  // they zoom the list.
+  useEffect(() => {
+    refreshTracesHistogram();
+    refreshLogsHistogram();
+    const id = setInterval(() => {
+      refreshTracesHistogram();
+      refreshLogsHistogram();
+    }, 15_000);
+    return () => clearInterval(id);
   }, [serviceFilter, range]);
+
+  // Clearing the customRange when the user switches the relative range keeps
+  // the two pickers consistent — the new range implies "show everything in
+  // this window, no sub-zoom".
+  useEffect(() => {
+    setCustomRange(null);
+  }, [range]);
 
   useEffect(() => {
     refreshServices();
@@ -757,6 +851,10 @@ export const OtelDataPage: React.FC = () => {
             operationP95={operationP95}
             tracesLoading={tracesLoading}
             onSelect={setSelectedTraceId}
+            histogram={tracesHistogram}
+            customRange={customRange}
+            onBucketClick={(s, u) => setCustomRange({ sinceMs: s, untilMs: u })}
+            onClearCustomRange={() => setCustomRange(null)}
           />
         )}
         {activeTab === 'operations' && (
@@ -783,6 +881,10 @@ export const OtelDataPage: React.FC = () => {
               setActiveTab('traces');
               setSelectedTraceId(traceId);
             }}
+            histogram={logsHistogram}
+            customRange={customRange}
+            onBucketClick={(s, u) => setCustomRange({ sinceMs: s, untilMs: u })}
+            onClearCustomRange={() => setCustomRange(null)}
           />
         )}
       </main>
@@ -855,10 +957,15 @@ const TracesTab: React.FC<{
   operationP95: Map<string, number>;
   tracesLoading: boolean;
   onSelect: (traceId: string) => void;
+  histogram: Histogram | null;
+  customRange: { sinceMs: number; untilMs: number } | null;
+  onBucketClick: (sinceMs: number, untilMs: number) => void;
+  onClearCustomRange: () => void;
 }> = ({
   traces, services, serviceFilter, setServiceFilter, statusFilter, setStatusFilter,
   range, setRange, searchQuery, setSearchQuery, minMs, setMinMs,
   paused, setPaused, streamConnected, helixEnv, operationP95, tracesLoading, onSelect,
+  histogram, customRange, onBucketClick, onClearCustomRange,
 }) => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -958,6 +1065,33 @@ const TracesTab: React.FC<{
           {traces.length} trace{traces.length === 1 ? '' : 's'} • cap 500 (sliding window)
         </div>
       </div>
+
+      {histogram && histogram.buckets.length > 0 && (
+        <div className="adapt-card !p-3 mb-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Trace volume</div>
+            {customRange && (
+              <button
+                onClick={onClearCustomRange}
+                className="text-tiny text-active hover:underline font-semibold uppercase tracking-wider"
+              >Clear time selection</button>
+            )}
+          </div>
+          <TimelineChart
+            buckets={histogram.buckets as any}
+            bucketSizeMs={histogram.bucketSizeMs}
+            height={84}
+            segments={[
+              { key: 'ok', label: 'OK', fill: TIMELINE_COLORS.ok },
+              { key: 'slow', label: 'Slow', fill: TIMELINE_COLORS.slow },
+              { key: 'error', label: 'Error', fill: TIMELINE_COLORS.error },
+            ]}
+            percentiles={histogram.buckets.map(b => ({ p50: b.p50 ?? null, p95: b.p95 ?? null }))}
+            selectedRange={customRange}
+            onBucketClick={onBucketClick}
+          />
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto adapt-card !p-0">
         {tracesLoading ? (
@@ -1143,7 +1277,11 @@ const LogsAndErrorsTab: React.FC<{
   streamConnected: boolean;
   helixEnv: HelixEnv | null;
   onJumpToTrace: (traceId: string) => void;
-}> = ({ logs, errors, paused, setPaused, streamConnected, helixEnv, onJumpToTrace }) => {
+  histogram: Histogram | null;
+  customRange: { sinceMs: number; untilMs: number } | null;
+  onBucketClick: (sinceMs: number, untilMs: number) => void;
+  onClearCustomRange: () => void;
+}> = ({ logs, errors, paused, setPaused, streamConnected, helixEnv, onJumpToTrace, histogram, customRange, onBucketClick, onClearCustomRange }) => {
   const [subTab, setSubTab] = useState<'logs' | 'errors'>('logs');
   const [severityFilter, setSeverityFilter] = useState<string>('');
   const [logQuery, setLogQuery] = useState<string>('');
@@ -1160,6 +1298,25 @@ const LogsAndErrorsTab: React.FC<{
     }
     return out;
   }, [logs, severityFilter, logQuery]);
+
+  // Errors histogram is derived client-side because span_errors lives in a
+  // different table than log_records (the Logs sub-tab's data source). Aligns
+  // to the same bucket grid as the logs histogram so switching sub-tabs
+  // doesn't shift the time axis.
+  const errorsHistogram = useMemo<Histogram | null>(() => {
+    if (!histogram || !histogram.buckets.length || !histogram.bucketSizeMs) return null;
+    const start = histogram.bucketStartMs;
+    const size = histogram.bucketSizeMs;
+    const n = histogram.buckets.length;
+    const out: Histogram['buckets'] = histogram.buckets.map(b => ({ tsMs: b.tsMs, total: 0, error: 0 }));
+    for (const e of errors) {
+      const idx = Math.floor((e.received_at - start) / size);
+      if (idx < 0 || idx >= n) continue;
+      out[idx].total++;
+      out[idx].error = (out[idx].error || 0) + 1;
+    }
+    return { bucketStartMs: start, bucketEndMs: histogram.bucketEndMs, bucketSizeMs: size, buckets: out };
+  }, [errors, histogram]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -1243,6 +1400,41 @@ const LogsAndErrorsTab: React.FC<{
           )}
         </div>
       </div>
+
+      {(() => {
+        const chart = subTab === 'logs' ? histogram : errorsHistogram;
+        if (!chart || chart.buckets.length === 0) return null;
+        return (
+          <div className="adapt-card !p-3 mb-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">
+                {subTab === 'logs' ? 'Log volume by severity' : 'Errors over time'}
+              </div>
+              {customRange && (
+                <button
+                  onClick={onClearCustomRange}
+                  className="text-tiny text-active hover:underline font-semibold uppercase tracking-wider"
+                >Clear time selection</button>
+              )}
+            </div>
+            <TimelineChart
+              buckets={chart.buckets as any}
+              bucketSizeMs={chart.bucketSizeMs}
+              height={84}
+              segments={subTab === 'logs' ? [
+                { key: 'debug', label: 'Debug', fill: TIMELINE_COLORS.debug },
+                { key: 'info', label: 'Info', fill: TIMELINE_COLORS.info },
+                { key: 'warn', label: 'Warn', fill: TIMELINE_COLORS.warn },
+                { key: 'error', label: 'Error', fill: TIMELINE_COLORS.error },
+              ] : [
+                { key: 'error', label: 'Error', fill: TIMELINE_COLORS.error },
+              ]}
+              selectedRange={customRange}
+              onBucketClick={onBucketClick}
+            />
+          </div>
+        );
+      })()}
 
       {subTab === 'logs' && <LogsView logs={filteredLogs} onJumpToTrace={onJumpToTrace} totalUnfiltered={logs.length} helixEnv={helixEnv} />}
       {subTab === 'errors' && <ErrorsView errors={errors} onJumpToTrace={onJumpToTrace} helixEnv={helixEnv} />}
