@@ -10,6 +10,7 @@ type Props = {
   onOpenSmartAddPreview: () => void;
   onOpenGatewayConfig: () => void;
   onDismissResult: () => void;
+  onVerifyExporter: (() => void) | null;
   onBack: () => void;
   onNext: () => void;
 };
@@ -21,6 +22,7 @@ export const Step2: React.FC<Props> = ({
   onOpenSmartAddPreview,
   onOpenGatewayConfig,
   onDismissResult,
+  onVerifyExporter,
   onBack,
   onNext,
 }) => (
@@ -56,12 +58,28 @@ export const Step2: React.FC<Props> = ({
           <span className="ml-auto text-tiny text-gray-500">POC</span>
         </div>
         {smartAddProposal.error ? (
-          <p className="text-tiny text-warning">⚠ {smartAddProposal.error} You can still apply the snippet below manually.</p>
+          <>
+            <p className="text-tiny text-warning mb-3">⚠ {smartAddProposal.error} You can still apply the snippet below manually.</p>
+            {onVerifyExporter && (
+              <button
+                onClick={onVerifyExporter}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
+              >Verify exporter</button>
+            )}
+          </>
         ) : smartAddProposal.alreadyConfigured ? (
-          <p className="text-tiny text-gray-300">
-            Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
-            <span className="text-success font-semibold">Already configured</span> — <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
-          </p>
+          <>
+            <p className="text-tiny text-gray-300 mb-3">
+              Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
+              <span className="text-success font-semibold">Already configured</span> — <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
+            </p>
+            {onVerifyExporter && (
+              <button
+                onClick={onVerifyExporter}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
+              >Re-verify exporter</button>
+            )}
+          </>
         ) : (
           <>
             <p className="text-tiny text-gray-300 mb-3">
@@ -69,13 +87,22 @@ export const Step2: React.FC<Props> = ({
               We'll add <code className="font-mono text-gray-100">{smartAddProposal.exporterName}</code> as an exporter and wire it into{' '}
               <strong className="text-gray-200">{(smartAddProposal.addedToPipelines || []).join(', ')}</strong> pipelines.
             </p>
-            <button
-              onClick={onOpenSmartAddPreview}
-              className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover text-white"
-            >
-              Review changes
-            </button>
-            <span className="text-tiny text-gray-500 ml-3">Or copy the snippets below to apply manually.</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={onOpenSmartAddPreview}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover text-white"
+              >
+                Review changes
+              </button>
+              {onVerifyExporter && (
+                <button
+                  onClick={onVerifyExporter}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
+                  title="Re-check whether helix-gateway is already wired into this collector's pipelines"
+                >Verify exporter</button>
+              )}
+              <span className="text-tiny text-gray-500">Or copy the snippets below to apply manually.</span>
+            </div>
           </>
         )}
       </div>

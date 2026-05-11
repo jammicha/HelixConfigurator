@@ -354,16 +354,9 @@ export const OtelDataPage: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
   const [tracesLoading, setTracesLoading] = useState(true);
-  const [showInternal, setShowInternal] = useState<boolean>(() => {
-    try { return localStorage.getItem('helix-otel.showInternal') === '1'; } catch { return false; }
-  });
-
-  useEffect(() => {
-    try { localStorage.setItem('helix-otel.showInternal', showInternal ? '1' : '0'); } catch { /* ignore */ }
-  }, [showInternal]);
 
   const visibleTraces = useMemo(() => {
-    let out = showInternal ? traces : traces.filter(t => !INTERNAL_SERVICES.has(t.service_name));
+    let out = traces.filter(t => !INTERNAL_SERVICES.has(t.service_name));
     if (statusFilter === 'outlier') {
       // Outlier = trace's duration > 2× its operation's p95. Build the map
       // only when the filter is active; depends on the same operations data
@@ -386,20 +379,19 @@ export const OtelDataPage: React.FC = () => {
       );
     }
     return out;
-  }, [traces, showInternal, statusFilter, minMs, searchQuery, operations]);
+  }, [traces, statusFilter, minMs, searchQuery, operations]);
   const visibleServices = useMemo(
-    () => showInternal ? services : services.filter(s => !INTERNAL_SERVICES.has(s.name)),
-    [services, showInternal],
+    () => services.filter(s => !INTERNAL_SERVICES.has(s.name)),
+    [services],
   );
   const visibleErrors = useMemo(
-    () => showInternal ? errors : errors.filter(e => !INTERNAL_SERVICES.has(e.service_name)),
-    [errors, showInternal],
+    () => errors.filter(e => !INTERNAL_SERVICES.has(e.service_name)),
+    [errors],
   );
   const visibleLogs = useMemo(
-    () => showInternal ? logs : logs.filter(l => !INTERNAL_SERVICES.has(l.serviceName)),
-    [logs, showInternal],
+    () => logs.filter(l => !INTERNAL_SERVICES.has(l.serviceName)),
+    [logs],
   );
-  const internalCount = traces.length - visibleTraces.length;
 
   const eventSourceRef = useRef<EventSource | null>(null);
   // Read inside the SSE handler so toggling pause doesn't tear down/rebuild
@@ -691,18 +683,6 @@ export const OtelDataPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-3 pb-2">
-            <label
-              className="flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400 cursor-pointer select-none"
-              title="Internal services (helix-gateway, configurator, verify pings) are useful for debugging the pipeline but usually noise when looking for your app's traces."
-            >
-              <input
-                type="checkbox"
-                checked={showInternal}
-                onChange={(e) => setShowInternal(e.target.checked)}
-                className="accent-active"
-              />
-              Show internal{internalCount > 0 && !showInternal ? ` (${internalCount})` : ''}
-            </label>
             <div ref={diagRef} className="relative">
               <button
                 onClick={() => setDiagOpen(o => !o)}

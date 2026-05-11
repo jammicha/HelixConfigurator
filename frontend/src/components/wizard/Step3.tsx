@@ -72,22 +72,24 @@ export const Step3: React.FC<Props> = ({
         </div>
       )}
 
-      <div className="flex border-b border-gray-800 mb-4 -mb-px">
-        <button
-          onClick={() => setTab('detected')}
-          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-            tab === 'detected' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
-          }`}
-        >Detected on this host</button>
-        <button
-          onClick={() => setTab('manual')}
-          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-            tab === 'manual' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
-          }`}
-        >Manual</button>
-      </div>
+      {!someoneAttached && (
+        <div className="flex border-b border-gray-800 mb-4 -mb-px">
+          <button
+            onClick={() => setTab('detected')}
+            className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+              tab === 'detected' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
+            }`}
+          >Detected on this host</button>
+          <button
+            onClick={() => setTab('manual')}
+            className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+              tab === 'manual' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
+            }`}
+          >Manual</button>
+        </div>
+      )}
 
-      {tab === 'detected' && (
+      {!someoneAttached && tab === 'detected' && (
         <div className="mt-2">
           {k8sDetected && (
             <div className="mb-4 flex items-start gap-3 p-3 bg-primary/10 border border-primary/40 rounded text-sm">
@@ -184,7 +186,7 @@ export const Step3: React.FC<Props> = ({
         </div>
       )}
 
-      {tab === 'manual' && (
+      {!someoneAttached && tab === 'manual' && (
         <div className="mt-2 space-y-4">
           <div>
             <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option A — attach helix-gateway to your app's network</p>

@@ -33,6 +33,7 @@ export type UseSmartAdd = {
   setPreviewOpen: (open: boolean) => void;
   apply: (collectorName: string) => Promise<void>;
   dismissResult: () => void;
+  refresh: (collectorName: string) => Promise<void>;
 };
 
 export function useSmartAdd({
@@ -123,5 +124,13 @@ export function useSmartAdd({
 
   const dismissResult = () => setResult(null);
 
-  return { proposal, loading, applying, result, previewOpen, setPreviewOpen, apply, dismissResult };
+  // Re-run the proposal fetch on demand. Used by the "Verify exporter"
+  // affordance on Step 2 so the user can re-check after applying the snippet
+  // by hand and restarting their collector.
+  const refresh = async (collectorName: string) => {
+    setResult(null);
+    await refreshProposal(collectorName);
+  };
+
+  return { proposal, loading, applying, result, previewOpen, setPreviewOpen, apply, dismissResult, refresh };
 }

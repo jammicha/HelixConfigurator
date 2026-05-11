@@ -141,6 +141,11 @@ const App = () => {
   const connectedApp = discoveredContainers.find(c => !c.name.includes('helix-gateway') && c.networks.includes('helix-bridge'))?.name || null;
   const isGatewayConnected = discoveredContainers.some(c => c.name.includes('helix-gateway') && c.networks.includes('helix-bridge'));
   const isDiagnosticEnabled = isGatewayConnected;
+  // Install bundles ship HELIX_ENDPOINT=https://your-tenant.onbmc.com so the
+  // wizard has something to validate against. Don't render Helix deep-links
+  // until the user has replaced that placeholder with a real tenant URL —
+  // otherwise clicking "View dashboard" opens the literal placeholder host.
+  const hasRealHelixEndpoint = !!helixConfig.baseUrl && !/\/\/your-tenant\.onbmc\.com\b/i.test(helixConfig.baseUrl);
 
   // Check auth status on mount; gate the rest of the app on it.
   useEffect(() => {
@@ -1081,6 +1086,33 @@ ${logsData.logs || '(no logs available)'}
     }
   };
 
+  // Tear down the diagnostic session: close SSE streams, stop metrics polling,
+  // clear alert timer, flip state off, and tell the gateway to drop debug log
+  // level. Called both from the user-facing toggle and automatically when the
+  // user changes the connected app (attach/disconnect), so the user re-arms
+  // diags intentionally for the new target rather than silently jumping.
+  const stopDiagnosticsIfRunning = async () => {
+    if (!showDiagnostics) return;
+    if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null; }
+    if ((eventSourceRef as any).currentApp) {
+      (eventSourceRef as any).currentApp.close();
+      (eventSourceRef as any).currentApp = null;
+    }
+    if (metricsIntervalRef.current) { clearInterval(metricsIntervalRef.current); metricsIntervalRef.current = null; }
+    if (diagAlertTimerRef.current) { clearTimeout(diagAlertTimerRef.current); diagAlertTimerRef.current = null; }
+    setShowDiagnostics(false);
+    setTraceInjectionStatus('');
+    setDiagAlert(false);
+    setDiagAlertCount(0);
+    try {
+      await fetch('/api/diagnostics/toggle-debug', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable: false }),
+      });
+    } catch { /* non-fatal */ }
+  };
+
   const handleToggleDiagnostics = async () => {
     if (isTogglingDiagRef.current) return;
     isTogglingDiagRef.current = true;
@@ -1151,26 +1183,7 @@ ${logsData.logs || '(no logs available)'}
         showToastMsg(err.message || 'Failed to start diagnostics', 'error');
       }
     } else {
-      // Disabling diagnostics
-      if (eventSourceRef.current) eventSourceRef.current.close();
-      if ((eventSourceRef as any).currentApp) (eventSourceRef as any).currentApp.close();
-      if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
-      if (diagAlertTimerRef.current) {
-        clearTimeout(diagAlertTimerRef.current);
-        diagAlertTimerRef.current = null;
-      }
-
-      setShowDiagnostics(false);
-      setTraceInjectionStatus('');
-      setDiagAlert(false);
-      setDiagAlertCount(0);
-      try {
-        await fetch('/api/diagnostics/toggle-debug', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enable: false })
-        });
-      } catch (err) { }
+      await stopDiagnosticsIfRunning();
     }
     } finally {
       isTogglingDiagRef.current = false;
@@ -1197,6 +1210,10 @@ ${logsData.logs || '(no logs available)'}
   };
 
   const handleAttachContainer = async (name: string) => {
+    // Tear down any active diagnostic session before changing the bridge —
+    // the user re-arms diags for the new target intentionally, so we don't
+    // silently swap the SSE source under them.
+    await stopDiagnosticsIfRunning();
     setLoadingContainers(prev => new Set(prev).add(name));
     try {
       // Step 1: Disconnect ALL other apps currently on the bridge (excluding gateway)
@@ -1245,6 +1262,8 @@ ${logsData.logs || '(no logs available)'}
   };
 
   const handleDisconnectContainer = async (name: string) => {
+    // Same rationale as attach — close diags before changing the bridge.
+    await stopDiagnosticsIfRunning();
     setLoadingContainers(prev => new Set(prev).add(name));
     try {
       const res = await fetch('/api/containers/disconnect', {
@@ -1294,7 +1313,7 @@ ${logsData.logs || '(no logs available)'}
                 <div className="w-1.5 h-1.5 rounded-full bg-[#11845b] flex-shrink-0"></div>
                 Connected
               </span>
-              {helixConfig.baseUrl && (
+              {hasRealHelixEndpoint && (
                 <a
                   href={`${helixConfig.baseUrl}/dashboards/d/OTelServiceOverview/otel-service-overview?orgId=${helixConfig.tenantId}&from=now-3h&to=now&timezone=browser&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&var-OTelService=${container.name}&var-status=STATUS_CODE_UNSET`}
                   target="_blank"
@@ -1468,6 +1487,7 @@ ${logsData.logs || '(no logs available)'}
                   onOpenSmartAddPreview={() => smartAdd.setPreviewOpen(true)}
                   onOpenGatewayConfig={openGatewayConfigModal}
                   onDismissResult={smartAdd.dismissResult}
+                  onVerifyExporter={smartAdd.proposal ? () => smartAdd.refresh(smartAdd.proposal!.name) : null}
                   onBack={() => setSetupStep(1)}
                   onNext={() => setSetupStep(3)}
                 />
@@ -1605,7 +1625,7 @@ ${logsData.logs || '(no logs available)'}
                     >
                       Copy Support Bundle
                     </button>
-                    {helixConfig.baseUrl && (
+                    {hasRealHelixEndpoint && (
                       <a
                         href={`${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`}
                         target="_blank"
@@ -1615,7 +1635,7 @@ ${logsData.logs || '(no logs available)'}
                         Helix OTel Dashboard
                       </a>
                     )}
-                    {helixConfig.baseUrl && helixConfig.businessServiceKey && (
+                    {hasRealHelixEndpoint && helixConfig.businessServiceKey && (
                       <a
                         href={`${helixConfig.baseUrl}/aiops/#/entities/service/${extractServiceKey(helixConfig.businessServiceKey)}?type=key`}
                         target="_blank"
@@ -1957,7 +1977,11 @@ ${logsData.logs || '(no logs available)'}
                           <span className="text-tiny text-gray-600">{timeline.length} event{timeline.length === 1 ? '' : 's'}</span>
                         </div>
                         <div className="flex gap-1.5 overflow-x-auto pb-1">
-                          {timeline.map((ev, idx) => {
+                          {/* Newest first (reverse-chronological). The state
+                              array is append-only; we reverse here at render
+                              so insertion stays O(1) and slice semantics
+                              continue to evict oldest from the back. */}
+                          {[...timeline].reverse().map((ev, idx) => {
                             const time = new Date(ev.ts).toLocaleTimeString([], { hour12: false });
                             const colorByKind: Record<TimelineKind, string> = {
                               'config-saved': 'bg-info/15 border-info/40 text-info',
@@ -2125,7 +2149,7 @@ ${logsData.logs || '(no logs available)'}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
           {/* Namespace Dashboard Link */}
-          {helixConfig.baseUrl && (
+          {hasRealHelixEndpoint && (
             <a
               href={`${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`}
               target="_blank"
