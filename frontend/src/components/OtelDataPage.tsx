@@ -601,6 +601,19 @@ export const OtelDataPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-3 pb-2">
+            <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
+              <Clock className="w-3.5 h-3.5" />
+              Range
+              <select
+                value={range}
+                onChange={(e) => setRange(e.target.value as TimeRange)}
+                disabled={!!customRange}
+                title={customRange ? 'Custom window is active — clear it to use a preset range' : 'Time range — persists across tabs'}
+                className="bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny text-gray-200 focus:outline-none focus:border-active normal-case tracking-normal font-normal disabled:opacity-50"
+              >
+                {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </label>
             <div ref={customRangePopoverRef} className="relative">
               <button
                 onClick={() => setCustomRangePopoverOpen(o => !o)}
@@ -731,8 +744,6 @@ export const OtelDataPage: React.FC = () => {
             setServiceFilter={setServiceFilter}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
-            range={range}
-            setRange={setRange}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
             minMs={minMs}
@@ -754,8 +765,6 @@ export const OtelDataPage: React.FC = () => {
           <OperationsTab
             operations={operations}
             loading={operationsLoading}
-            range={range}
-            setRange={setRange}
             onJumpToOperation={(op) => {
               setSearchQuery(op);
               setActiveTab('traces');

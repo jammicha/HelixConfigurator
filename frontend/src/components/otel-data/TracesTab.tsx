@@ -3,9 +3,9 @@ import { Activity, AlertTriangle, Database, ExternalLink, FileText, Loader2, Ser
 import { TimelineChart, TIMELINE_COLORS } from '../TimelineChart';
 import { BmcChevron } from './BmcChevron';
 import { StatusPill } from './StatusPill';
-import { MIN_DURATION_PRESETS, SLOW_THRESHOLD_MS, TIME_RANGES } from './constants';
+import { MIN_DURATION_PRESETS, SLOW_THRESHOLD_MS } from './constants';
 import { buildHelixTraceUrl, formatDuration, formatRelative } from './utils';
-import type { HelixEnv, Histogram, TimeRange, TraceStatus, TraceSummary } from './types';
+import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
 
 export const TracesTab: React.FC<{
   traces: TraceSummary[];
@@ -14,8 +14,6 @@ export const TracesTab: React.FC<{
   setServiceFilter: (s: string) => void;
   statusFilter: '' | TraceStatus;
   setStatusFilter: (s: '' | TraceStatus) => void;
-  range: TimeRange;
-  setRange: (r: TimeRange) => void;
   searchQuery: string;
   setSearchQuery: (s: string) => void;
   minMs: number;
@@ -33,7 +31,7 @@ export const TracesTab: React.FC<{
   onClearCustomRange: () => void;
 }> = ({
   traces, services, serviceFilter, setServiceFilter, statusFilter, setStatusFilter,
-  range, setRange, searchQuery, setSearchQuery, minMs, setMinMs,
+  searchQuery, setSearchQuery, minMs, setMinMs,
   paused, setPaused, streamConnected, helixEnv, operationP95, tracesLoading, onSelect,
   histogram, customRange, onBucketClick, onClearCustomRange,
 }) => {
@@ -123,18 +121,6 @@ export const TracesTab: React.FC<{
           >
             {MIN_DURATION_PRESETS.map(p => (
               <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Time range</label>
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value as TimeRange)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
-          >
-            {TIME_RANGES.map(r => (
-              <option key={r.value} value={r.value}>{r.label}</option>
             ))}
           </select>
         </div>

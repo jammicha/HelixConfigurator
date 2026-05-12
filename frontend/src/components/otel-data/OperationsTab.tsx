@@ -1,16 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { Loader2, Server } from 'lucide-react';
-import { SLOW_THRESHOLD_MS, TIME_RANGES } from './constants';
+import { SLOW_THRESHOLD_MS } from './constants';
 import { formatDuration } from './utils';
-import type { OperationStat, TimeRange } from './types';
+import type { OperationStat } from './types';
 
 export const OperationsTab: React.FC<{
   operations: OperationStat[];
   loading: boolean;
-  range: TimeRange;
-  setRange: (r: TimeRange) => void;
   onJumpToOperation: (op: string) => void;
-}> = ({ operations, loading, range, setRange, onJumpToOperation }) => {
+}> = ({ operations, loading, onJumpToOperation }) => {
   const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'max' | 'count' | 'errors' | 'slow' | 'service'>('p95');
   const sorted = useMemo(() => {
     const arr = operations.slice();
@@ -59,16 +57,6 @@ export const OperationsTab: React.FC<{
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-end gap-3 mb-4 flex-wrap">
-        <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Time range</label>
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value as TimeRange)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
-          >
-            {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-          </select>
-        </div>
         <div className="ml-auto text-tiny text-gray-500 pb-1">
           {operations.length} operation{operations.length === 1 ? '' : 's'}
         </div>
