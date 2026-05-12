@@ -153,7 +153,7 @@ export const SmartAddPreviewModal: React.FC<SmartAddPreviewModalProps> = ({
             <button
               onClick={onApply}
               disabled={applying}
-              className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover disabled:opacity-60 text-white"
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-primary hover:bg-primary-hover disabled:opacity-60 text-white"
             >
               {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               {applying ? 'Applying…' : 'Apply & restart'}

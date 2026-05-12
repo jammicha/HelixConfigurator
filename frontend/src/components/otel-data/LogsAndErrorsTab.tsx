@@ -149,7 +149,7 @@ export const LogsAndErrorsTab: React.FC<{
               {customRange && (
                 <button
                   onClick={onClearCustomRange}
-                  className="text-tiny text-active hover:underline font-semibold uppercase tracking-wider"
+                  className="text-tiny text-active hover:underline font-semibold"
                 >Clear time selection</button>
               )}
             </div>
@@ -232,7 +232,7 @@ const LogsView: React.FC<{
                   <span className="inline-flex items-center gap-2">
                     <button
                       onClick={() => onJumpToTrace(l.traceId)}
-                      className="text-active hover:text-[#a5baff] text-tiny font-semibold uppercase tracking-wider"
+                      className="text-active hover:text-[#a5baff] text-tiny font-semibold"
                     >
                       Open trace →
                     </button>
@@ -366,7 +366,7 @@ const ErrorsView: React.FC<{
                   <span className="inline-flex items-center gap-2">
                     <button
                       onClick={() => onJumpToTrace(e.trace_id)}
-                      className="text-active hover:text-[#a5baff] text-tiny font-semibold uppercase tracking-wider"
+                      className="text-active hover:text-[#a5baff] text-tiny font-semibold"
                     >
                       Open trace →
                     </button>
@@ -441,7 +441,7 @@ const ErrorGroupRow: React.FC<{
               <span className="inline-flex items-center gap-2 flex-shrink-0">
                 <button
                   onClick={() => onJumpToTrace(e.trace_id)}
-                  className="text-active hover:text-[#a5baff] font-semibold uppercase tracking-wider"
+                  className="text-active hover:text-[#a5baff] font-semibold"
                 >Open trace →</button>
                 {(() => {
                   const url = buildHelixTraceUrl(helixEnv, { traceId: e.trace_id, serviceName: e.service_name, timeNs: e.ts_ns });

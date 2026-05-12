@@ -199,7 +199,7 @@ export const OverviewTab: React.FC<Props> = ({
           </div>
           <button
             onClick={onClearCustomRange}
-            className="text-tiny text-active hover:underline font-semibold uppercase tracking-wider"
+            className="text-tiny text-active hover:underline font-semibold"
           >Clear time selection</button>
         </div>
       )}
@@ -310,7 +310,7 @@ export const OverviewTab: React.FC<Props> = ({
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-tiny text-active hover:text-white inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider whitespace-nowrap"
+                  className="text-tiny text-active hover:text-white inline-flex items-center gap-1.5 font-semibold whitespace-nowrap"
                 >
                   Open in AIOps Topology
                   <ExternalLink className="w-3 h-3" />

@@ -51,10 +51,10 @@ export const TemplatesModal: React.FC<Props> = ({ isOpen, templates, loadingTemp
                 <button
                   onClick={() => onApply(t.id)}
                   disabled={loadingTemplateId !== null}
-                  className="bg-primary hover:bg-[#3006c2] disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-tiny font-semibold uppercase tracking-wider transition-colors flex items-center gap-2 flex-shrink-0"
+                  className="bg-primary hover:bg-[#3006c2] disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-tiny font-semibold transition-colors flex items-center gap-2 flex-shrink-0"
                 >
                   {loadingTemplateId === t.id && <Loader2 className="w-3 h-3 animate-spin" />}
-                  Use Template
+                  Use template
                 </button>
               </div>
             </div>

@@ -51,16 +51,16 @@ export const CustomRangePopover: React.FC<{
       <div className="flex items-center justify-between gap-2">
         <button
           onClick={onClear}
-          className="text-tiny text-gray-400 hover:text-gray-200 uppercase tracking-wider font-semibold"
+          className="text-tiny text-gray-400 hover:text-gray-200 font-semibold"
         >Clear</button>
         <div className="flex gap-2">
           <button
             onClick={onClose}
-            className="text-tiny text-gray-400 hover:text-gray-200 px-2 py-1 rounded uppercase tracking-wider font-semibold"
+            className="text-tiny text-gray-400 hover:text-gray-200 px-2 py-1 rounded font-semibold"
           >Cancel</button>
           <button
             onClick={apply}
-            className="text-tiny bg-primary hover:bg-primary-hover text-white px-3 py-1 rounded uppercase tracking-wider font-semibold"
+            className="text-tiny bg-primary hover:bg-primary-hover text-white px-3 py-1 rounded font-semibold"
           >Apply</button>
         </div>
       </div>

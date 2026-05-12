@@ -157,7 +157,7 @@ export const TracesTab: React.FC<{
             {customRange && (
               <button
                 onClick={onClearCustomRange}
-                className="text-tiny text-active hover:underline font-semibold uppercase tracking-wider"
+                className="text-tiny text-active hover:underline font-semibold"
               >Clear time selection</button>
             )}
           </div>

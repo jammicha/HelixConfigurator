@@ -686,7 +686,7 @@ export const OtelDataPage: React.FC = () => {
                           <button
                             onClick={() => restartCollector(c.name)}
                             disabled={restartingName === c.name}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-tiny rounded bg-warning/20 hover:bg-warning/30 text-warning font-semibold uppercase tracking-wider disabled:opacity-60"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-tiny rounded bg-warning/20 hover:bg-warning/30 text-warning font-semibold disabled:opacity-60"
                           >
                             {restartingName === c.name ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                             {restartingName === c.name ? 'Restarting' : 'Restart'}

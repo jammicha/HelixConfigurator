@@ -93,7 +93,7 @@ export const Step2: React.FC<Props> = ({
                 <button
                   onClick={handleVerify}
                   disabled={verifyStatus === 'verifying'}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
                 >Verify exporter</button>
                 {verifyBadge}
               </div>
@@ -110,7 +110,7 @@ export const Step2: React.FC<Props> = ({
                 <button
                   onClick={handleVerify}
                   disabled={verifyStatus === 'verifying'}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
                 >Re-verify exporter</button>
                 {verifyBadge}
               </div>
@@ -126,7 +126,7 @@ export const Step2: React.FC<Props> = ({
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={onOpenSmartAddPreview}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-primary hover:bg-primary-hover text-white"
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-primary hover:bg-primary-hover text-white"
               >
                 Review changes
               </button>
@@ -134,7 +134,7 @@ export const Step2: React.FC<Props> = ({
                 <button
                   onClick={handleVerify}
                   disabled={verifyStatus === 'verifying'}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
                   title="Re-check whether helix-gateway is already wired into this collector's pipelines"
                 >Verify exporter</button>
               )}

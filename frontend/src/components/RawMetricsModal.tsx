@@ -72,14 +72,14 @@ export const RawMetricsModal: React.FC<Props> = ({ isOpen, text, isLoading, filt
             <button
               onClick={onRefresh}
               disabled={isLoading}
-              className="text-info text-tiny font-semibold uppercase tracking-wider hover:underline disabled:opacity-50"
+              className="text-info text-tiny font-semibold hover:underline disabled:opacity-50"
             >
               {isLoading ? 'Refreshing...' : 'Refresh'}
             </button>
             <button
               onClick={() => onCopy(display)}
               disabled={!text || isLoading}
-              className="text-info text-tiny font-semibold uppercase tracking-wider hover:underline disabled:opacity-50"
+              className="text-info text-tiny font-semibold hover:underline disabled:opacity-50"
             >
               Copy
             </button>
