@@ -12,43 +12,18 @@ const tarStream = require('tar-stream');
 const zlib = require('zlib');
 const { marked } = require('marked');
 const { OtelStore, extractSpans, extractLogRecords } = require('./otelStore');
+const {
+  demuxLogBuffer,
+  makeContainerLogs,
+  isValidContainerName,
+  computeInstallBaseUrl,
+} = require('./util');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const VERSION = require('./package.json').version;
 
 const docker = new Docker(); // uses /var/run/docker.sock by default
-
-// Demultiplex docker logs() output when the container isn't TTY-attached.
-// Each multiplexed frame is: [streamType:1][padding:3][length:4_BE][payload].
-const demuxLogBuffer = (buf) => {
-  if (!Buffer.isBuffer(buf)) return String(buf || '');
-  const out = [];
-  let offset = 0;
-  while (offset + 8 <= buf.length) {
-    const streamType = buf[offset];
-    if (streamType !== 0 && streamType !== 1 && streamType !== 2) {
-      // Not a header — treat the whole buffer as raw text (TTY container)
-      return buf.toString('utf8');
-    }
-    const length = buf.readUInt32BE(offset + 4);
-    out.push(buf.slice(offset + 8, offset + 8 + length).toString('utf8'));
-    offset += 8 + length;
-  }
-  if (offset < buf.length) out.push(buf.slice(offset).toString('utf8'));
-  return out.join('');
-};
-
-const containerLogs = async (containerName, options = {}) => {
-  const container = docker.getContainer(containerName);
-  const buf = await container.logs({
-    stdout: true,
-    stderr: true,
-    follow: false,
-    timestamps: false,
-    ...options,
-  });
-  return demuxLogBuffer(buf);
-};
+const containerLogs = makeContainerLogs(docker);
 
 // --- UI auth (shared-password) --------------------------------------------
 // If UI_AUTH_PASSWORD is unset, auth is disabled (open access). Set it to enable.
@@ -116,11 +91,6 @@ app.set('trust proxy', 'loopback');
 
 const CONFIG_PATH = path.join(__dirname, '../helix-otel-collector.yaml');
 const TEMPLATES_DIR = path.join(__dirname, '../templates');
-
-// Reject anything that isn't a valid Docker container name to prevent shell
-// injection if a route ever reaches exec/spawn with user-controlled input.
-const isValidContainerName = (name) =>
-  typeof name === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(name);
 
 // Track active log streaming subprocesses so we can clean them up on shutdown.
 const activeLogProcesses = new Set();
@@ -672,53 +642,6 @@ docker compose down
 // home/corp LANs) over 172.16-31.x (often docker/VPN). When the AIOps page is
 // opened at localhost we substitute this in so the install command pasted on
 // another machine on the same LAN actually reaches the backend.
-const getLanIPv4 = () => {
-  const ifaces = os.networkInterfaces();
-  const candidates = [];
-  for (const name of Object.keys(ifaces)) {
-    if (/docker|bridge|vbox|vmnet|utun|tun|tap|wg/i.test(name)) continue;
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        candidates.push({ name, address: iface.address });
-      }
-    }
-  }
-  const priority = (ip) => /^192\.168\./.test(ip) ? 0 : /^10\./.test(ip) ? 1 : 2;
-  candidates.sort((a, b) => priority(a.address) - priority(b.address));
-  return candidates[0]?.address || null;
-};
-
-// Build the URL we'll embed in copyable install commands and inside the
-// generated install scripts themselves. Resolution order:
-//   1. INSTALL_BASE_URL env var — explicit override for any tunnel/proxy.
-//   2. X-Forwarded-Host header — set by cloudflared / ngrok / reverse proxies.
-//      We trust 'loopback' so this is only honored when the tunnel runs
-//      locally (the typical demo setup).
-//   3. LAN IP substitution — if the request came from localhost, swap in the
-//      machine's LAN IPv4 so the URL works from another box on the same network.
-//   4. Bare Host header — same-machine demos.
-// Chained proxies (cloudflared → vite → backend) append to X-Forwarded-* rather
-// than overwrite, so the value can be a comma-joined list like "https,http".
-// The first entry is the outermost client-facing value.
-const firstHeaderValue = (raw) => (raw ? raw.split(',')[0].trim() : null);
-
-const computeInstallBaseUrl = (req) => {
-  if (process.env.INSTALL_BASE_URL) {
-    return process.env.INSTALL_BASE_URL.replace(/\/$/, '');
-  }
-  const fwdHost = firstHeaderValue(req.get('x-forwarded-host'));
-  if (fwdHost) {
-    const proto = firstHeaderValue(req.get('x-forwarded-proto')) || req.protocol;
-    return `${proto}://${fwdHost}`;
-  }
-  const host = req.get('host') || `localhost:${port}`;
-  const lanIp = getLanIPv4();
-  if (lanIp && /^(localhost|127\.0\.0\.1)(:|$)/.test(host)) {
-    return `${req.protocol}://${host.replace(/^(localhost|127\.0\.0\.1)/, lanIp)}`;
-  }
-  return `${req.protocol}://${host}`;
-};
-
 // In-memory session store for the AIOps configure → install → download flow.
 // A session pins the apiKey + xSource so the value shown in the UI matches
 // what's in the downloaded zip / installed .env. TTL is 1h; cleaned every 10m.
