@@ -14,7 +14,7 @@ export const HelixCtaBanner: React.FC<Props> = ({ helixEnv }) => {
   if (!url || dismissed) return null;
 
   return (
-    <div className="mb-3 flex items-center justify-between gap-3 rounded border border-[#FF5A4D]/30 bg-[#FF5A4D]/5 px-3 py-2">
+    <div className="mb-3 flex items-center justify-between gap-3 rounded border border-active/40 bg-active/5 px-3 py-2">
       <div className="flex items-center gap-3 min-w-0">
         <BmcChevron className="h-5 w-auto shrink-0" />
         <div className="text-tiny text-gray-200 truncate">
@@ -29,7 +29,7 @@ export const HelixCtaBanner: React.FC<Props> = ({ helixEnv }) => {
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-gray-800 hover:border-[#FF5A4D] text-tiny uppercase tracking-wider font-semibold text-gray-300 hover:text-white transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-gray-800 hover:border-active text-tiny font-semibold text-gray-300 hover:text-white transition-colors"
         >
           Open in Helix AIOps
           <ExternalLink className="w-4 h-4 opacity-70" />

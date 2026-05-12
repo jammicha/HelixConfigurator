@@ -28,7 +28,7 @@ export const LoginScreen: React.FC<Props> = ({ onLogin }) => {
       >
         <div className="flex items-center gap-3">
           <img src="/bmc-logo.svg" alt="BMC" className="h-7 w-auto" />
-          <h1 className="text-white font-light text-xl">Helix OTel Configurator</h1>
+          <h1 className="text-white font-semibold text-xl">Helix OTel Configurator</h1>
         </div>
         <div className="space-y-1">
           <label htmlFor="login-password" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Password</label>

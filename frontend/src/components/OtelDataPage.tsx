@@ -546,7 +546,7 @@ export const OtelDataPage: React.FC = () => {
             <img src="/bmc-logo.svg" alt="BMC" className="h-8 w-auto" />
           </a>
           <div className="h-8 w-px bg-helixDivider mx-4"></div>
-          <h1 className="text-white font-light text-[1.3125rem] m-0 ml-[15px] tracking-wide">
+          <h1 className="text-white font-semibold text-[1.3125rem] m-0 ml-[15px] tracking-wide">
             Helix OTel Configurator
           </h1>
           <div className="h-8 w-px bg-helixDivider mx-5"></div>
@@ -848,7 +848,7 @@ const TraceDetailDrawer: React.FC<{
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-gray-800 hover:border-[#FF5A4D] text-tiny uppercase tracking-wider font-semibold text-gray-300 hover:text-white transition-colors"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-gray-800 hover:border-active text-tiny font-semibold text-gray-300 hover:text-white transition-colors"
                 >
                   <BmcChevron className="h-4 w-auto" />
                   View in Helix
@@ -1329,7 +1329,7 @@ const ServiceBreakdownPanel: React.FC<{
               key={b.name}
               style={{ width: `${w}%`, backgroundColor: colorForService(b.name) }}
               title={`${b.name}: ${formatDuration(b.totalMs)} (${(b.totalMs / denom * 100).toFixed(1)}%)`}
-              className="opacity-80 hover:opacity-100 transition-opacity"
+              className="brightness-90 hover:brightness-110 transition-[filter]"
             />
           );
         })}

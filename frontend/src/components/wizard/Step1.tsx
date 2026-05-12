@@ -68,7 +68,7 @@ export const Step1: React.FC<Props> = ({
 
   return (
     <div className="adapt-card">
-      <h2 className="text-lg font-bold mb-2 text-gray-200">Step 1: Configure helix-gateway</h2>
+      <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 1: Configure helix-gateway</h2>
       <p className="text-sm text-gray-400 mb-6">Tell the sidecar where Helix lives and what to call your service. The gateway restarts on save.</p>
       <div className="space-y-4 mb-6">
         <div className="space-y-1">

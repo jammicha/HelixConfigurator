@@ -29,7 +29,7 @@ export const TemplatesModal: React.FC<Props> = ({ isOpen, templates, loadingTemp
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700 flex-shrink-0">
           <div>
-            <h2 id="templates-modal-title" className="text-lg font-bold text-gray-200">Configuration Templates</h2>
+            <h2 id="templates-modal-title" className="text-lg font-semibold text-gray-200">Configuration templates</h2>
             <p className="text-tiny text-gray-500">Loading a template replaces the editor contents — click Save Config after to apply.</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white p-1" aria-label="Close templates dialog">

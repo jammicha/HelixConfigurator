@@ -47,7 +47,7 @@ export const RawMetricsModal: React.FC<Props> = ({ isOpen, text, isLoading, filt
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700 flex-shrink-0">
           <div>
-            <h2 id="raw-metrics-modal-title" className="text-lg font-bold text-gray-200">Raw Collector Metrics</h2>
+            <h2 id="raw-metrics-modal-title" className="text-lg font-semibold text-gray-200">Raw collector metrics</h2>
             <p className="text-tiny text-gray-500">Direct output from <span className="font-mono">helix-gateway:8888/metrics</span></p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white p-1" aria-label="Close raw metrics dialog">

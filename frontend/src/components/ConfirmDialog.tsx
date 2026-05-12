@@ -26,7 +26,7 @@ export const ConfirmDialog: React.FC<Props> = ({ request, onCancel }) => {
         className="bg-gray-900 border border-gray-700 rounded-lg shadow-4 w-full max-w-md p-5 space-y-4"
         onClick={e => e.stopPropagation()}
       >
-        <h2 id="confirm-dialog-title" className="text-lg font-bold text-gray-200">{request.title}</h2>
+        <h2 id="confirm-dialog-title" className="text-lg font-semibold text-gray-200">{request.title}</h2>
         <p className="text-sm text-gray-300 leading-relaxed">{request.message}</p>
         <div className="flex justify-end gap-3">
           <button

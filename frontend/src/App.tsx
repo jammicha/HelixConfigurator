@@ -1379,7 +1379,7 @@ ${logsData.logs || '(no logs available)'}
           <div className="flex items-center">
             <img src="/bmc-logo.svg" alt="BMC" className="h-8 w-auto" />
             <div className="h-8 w-px bg-helixDivider mx-4"></div>
-            <h1 className="text-white font-light text-[1.3125rem] m-0 ml-[15px] tracking-wide">Helix OTel Configurator</h1>
+            <h1 className="text-white font-semibold text-[1.3125rem] m-0 ml-[15px] tracking-wide">Helix OTel Configurator</h1>
             <div className="h-8 w-px bg-helixDivider mx-5"></div>
             <nav className="flex items-center space-x-5 text-sm text-[#cfd3da]">
               <button
@@ -1463,7 +1463,7 @@ ${logsData.logs || '(no logs available)'}
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
           {!isSetupComplete ? (
             <div className="max-w-4xl mx-auto mt-12 space-y-6">
-              <h1 className="text-2xl font-bold text-center text-gray-100">Welcome to Helix Configurator</h1>
+              <h1 className="text-2xl font-semibold text-center text-gray-100">Welcome to Helix Configurator</h1>
 
               <Stepper current={setupStep} onJump={setSetupStep} />
 
@@ -1556,7 +1556,7 @@ ${logsData.logs || '(no logs available)'}
                       className={`w-3 h-3 rounded-full ${getStatusColor()} ${gatewayStatus === 'running' ? 'animate-pulse' : ''}`}
                       aria-hidden="true"
                     ></div>
-                    <h2 className="text-lg font-bold text-gray-200">Helix Gateway Status</h2>
+                    <h2 className="text-lg font-semibold text-gray-200">Helix Gateway Status</h2>
                     <span
                       className="text-tiny text-gray-400 uppercase tracking-wider font-semibold ml-auto"
                       role="status"
@@ -1594,7 +1594,7 @@ ${logsData.logs || '(no logs available)'}
                 </div>
                 {/* Operation Shortcuts */}
                 <div className="adapt-card">
-                  <h2 className="text-lg font-bold mb-4 text-gray-200">Operation Shortcuts</h2>
+                  <h2 className="text-lg font-semibold mb-4 text-gray-200">Operation shortcuts</h2>
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       onClick={handleToggleDiagnostics}
@@ -1779,7 +1779,7 @@ ${logsData.logs || '(no logs available)'}
                 <>
                   {/* Row 2 */}
                   <div className="adapt-card">
-                    <h2 className="text-lg font-bold mb-4 text-gray-200">Helix Troubleshooting & Diagnostics</h2>
+                    <h2 className="text-lg font-semibold mb-4 text-gray-200">Helix troubleshooting & diagnostics</h2>
                     <div className="grid grid-cols-4 gap-4">
                       {['Collector Configuration', 'X-API Key Format', 'X-Source Format', 'Tenant URL Endpoint'].map((title, i) => {
                         let isPass = false;
@@ -1873,7 +1873,7 @@ ${logsData.logs || '(no logs available)'}
                   <div className="adapt-card flex flex-col relative overflow-hidden">
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
-                        <h2 className="text-lg font-bold text-gray-200">{connectedApp ? `${connectedApp} Logs` : 'Helix Gateway Logs'}</h2>
+                        <h2 className="text-lg font-semibold text-gray-200">{connectedApp ? `${connectedApp} logs` : 'Helix gateway logs'}</h2>
                         <button
                           onClick={handleOpenRawMetrics}
                           className="text-info text-tiny font-semibold uppercase tracking-wider hover:underline"
@@ -2134,7 +2134,7 @@ ${logsData.logs || '(no logs available)'}
         aria-hidden={!isServicesOpen}
       >
         <div className="bg-gray-900 px-4 border-b border-gray-700 flex items-center justify-between flex-shrink-0 h-[52px]">
-          <h2 id="discovered-services-title" className="text-lg font-bold flex items-center gap-2">
+          <h2 id="discovered-services-title" className="text-lg font-semibold flex items-center gap-2">
             <Activity className="w-5 h-5 text-primary" />
             Discovered Services
           </h2>

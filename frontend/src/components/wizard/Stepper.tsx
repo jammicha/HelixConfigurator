@@ -27,7 +27,7 @@ export const Stepper: React.FC<Props> = ({ current, onJump }) => (
             aria-current={isCurrent ? 'step' : undefined}
           >
             <span
-              className={`w-7 h-7 rounded-full inline-flex items-center justify-center text-tiny font-semibold border ${
+              className={`w-7 h-7 rounded inline-flex items-center justify-center text-tiny font-semibold border ${
                 isCurrent
                   ? 'bg-primary border-primary text-white'
                   : isCompleted

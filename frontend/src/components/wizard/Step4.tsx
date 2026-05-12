@@ -62,7 +62,7 @@ export const Step4: React.FC<Props> = ({
 
   return (
     <div className="adapt-card">
-      <h2 className="text-lg font-bold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
+      <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
       <p className="text-sm text-gray-400 mb-5">Restart your app or collector first if you just changed config.</p>
 
       {bridgeStatus?.kind === 'skipped' && !someoneAttached && (
@@ -185,12 +185,12 @@ export const Step4: React.FC<Props> = ({
           title="Inject a synthetic trace and confirm it reaches Helix — independent of your app"
         >
           {verifyingTrace && <Loader2 className="w-4 h-4 animate-spin" />}
-          {verifyingTrace ? 'Verifying…' : 'Verify Gateway → Helix'}
+          {verifyingTrace ? 'Verifying…' : 'Verify gateway → Helix'}
         </button>
         <button
           onClick={onLaunchDashboard}
           className="flex-1 bg-success hover:bg-success-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm"
-        >Launch Dashboard</button>
+        >Launch dashboard</button>
       </div>
 
       <div className="mt-6 pt-4 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">
