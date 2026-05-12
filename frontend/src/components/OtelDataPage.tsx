@@ -222,6 +222,11 @@ export const OtelDataPage: React.FC = () => {
   const [traceLogs, setTraceLogs] = useState<LogRecord[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [tracesLoading, setTracesLoading] = useState(true);
+  // SSE connection state — only meaningful in Live stream mode. Surfaces as
+  // a small dot next to the Stream selector so users have an honest signal
+  // when the live feed has silently dropped (the bug that lost this
+  // indicator when the unifier shipped).
+  const [sseConnected, setSseConnected] = useState(false);
 
   const visibleTraces = useMemo(() => {
     // Backend listTraces / tracesHistogram already filter out all-internal
@@ -489,6 +494,7 @@ export const OtelDataPage: React.FC = () => {
   useEffect(() => {
     const es = new EventSource('/api/traces/stream');
     eventSourceRef.current = es;
+    es.addEventListener('connected', () => setSseConnected(true));
     es.addEventListener('trace', (evt: MessageEvent) => {
       // Pause: stop merging incoming traces so the user's view stays stable
       // while they read. Unpausing resumes the live feed; a fresh /api/traces
@@ -569,7 +575,7 @@ export const OtelDataPage: React.FC = () => {
         setLogs(prev => [record, ...prev].slice(0, 500));
       } catch { /* ignore */ }
     });
-    es.onerror = () => { /* connection state was used by the per-tab Live/Paused pill; no longer rendered */ };
+    es.onerror = () => setSseConnected(false);
     return () => {
       es.close();
       eventSourceRef.current = null;
@@ -728,6 +734,13 @@ export const OtelDataPage: React.FC = () => {
                 <option value="5m">5m</option>
                 <option value="paused">Paused</option>
               </select>
+              {streamMode === 'live' && (
+                <span
+                  className={`inline-block w-1.5 h-1.5 rounded-full ${sseConnected ? 'bg-[#5eead4] animate-pulse' : 'bg-warning'}`}
+                  title={sseConnected ? 'SSE connected — live updates flowing' : 'SSE disconnected — reconnecting'}
+                  aria-label={sseConnected ? 'Live stream connected' : 'Live stream reconnecting'}
+                />
+              )}
             </label>
             <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
               <Clock className="w-3.5 h-3.5" />
