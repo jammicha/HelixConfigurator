@@ -1330,6 +1330,124 @@ app.get('/api/operations', (req, res) => {
   });
 });
 
+// Single-round-trip aggregate powering the Overview tab — four headline
+// stats (with sparklines + delta-vs-previous-window), top services, top
+// errors. Service filter narrows the trace pool consistently with the rest
+// of the Traces API.
+app.get('/api/overview', async (req, res) => {
+  const { sinceMs, untilMs, service } = req.query;
+  const payload = otelStore.overview({
+    sinceMs: sinceMs ? Number(sinceMs) : undefined,
+    untilMs: untilMs ? Number(untilMs) : undefined,
+    service: typeof service === 'string' && service ? service : undefined,
+  });
+  // Lightweight Grafana-style annotations: surface gateway lifecycle events
+  // (last container start) as a vertical event marker on the volume chart.
+  // Only emit when within the chart window so off-window restarts don't
+  // float at the edges.
+  const annotations = [];
+  try {
+    const targetContainer = process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
+    const info = await docker.getContainer(targetContainer).inspect();
+    const startedAt = info && info.State && info.State.StartedAt ? Date.parse(info.State.StartedAt) : NaN;
+    if (Number.isFinite(startedAt) && startedAt >= payload.windowMs.start && startedAt <= payload.windowMs.end) {
+      annotations.push({ tsMs: startedAt, label: `${targetContainer} restarted`, tone: 'info' });
+    }
+  } catch { /* docker inspect non-fatal */ }
+  payload.annotations = annotations;
+  res.json(payload);
+});
+
+// Composite bundle for the Overview tab: returns everything the page needs
+// in a single round-trip — overview stats, traces histogram (+ prior window
+// for the AppD-style comparison overlay), logs histogram, heatmap, insights,
+// and service map. Replaces six separate fetches the frontend was firing in
+// lockstep on every refresh tick.
+app.get('/api/overview-bundle', async (req, res) => {
+  const { sinceMs, untilMs, buckets, service } = req.query;
+  const since = sinceMs ? Number(sinceMs) : undefined;
+  const until = untilMs ? Number(untilMs) : undefined;
+  const svc = typeof service === 'string' && service ? service : undefined;
+  const bucketCount = buckets ? Number(buckets) : 60;
+  const tracesHist = otelStore.tracesHistogram({ sinceMs: since, untilMs: until, buckets: bucketCount, service: svc });
+  // Prior window = same-duration window immediately preceding the requested one.
+  let priorTracesHist = null;
+  if (since != null && until != null) {
+    const span = until - since;
+    priorTracesHist = otelStore.tracesHistogram({
+      sinceMs: since - span,
+      untilMs: until - span,
+      buckets: bucketCount,
+      service: svc,
+    });
+  }
+  const overview = otelStore.overview({ sinceMs: since, untilMs: until, service: svc });
+  const logsHist = otelStore.logsHistogram({ sinceMs: since, untilMs: until, buckets: bucketCount });
+  const heatmap = otelStore.latencyHeatmap({
+    sinceMs: since, untilMs: until,
+    timeBuckets: 48, durationBuckets: 12,
+    service: svc,
+  });
+  const insights = otelStore.insights({ sinceMs: since, untilMs: until, service: svc });
+  const serviceMap = otelStore.serviceMap({ sinceMs: since, untilMs: until });
+
+  // Annotation: gateway restart (mirrors the standalone /api/overview).
+  const annotations = [];
+  try {
+    const targetContainer = process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
+    const info = await docker.getContainer(targetContainer).inspect();
+    const startedAt = info && info.State && info.State.StartedAt ? Date.parse(info.State.StartedAt) : NaN;
+    if (Number.isFinite(startedAt) && startedAt >= overview.windowMs.start && startedAt <= overview.windowMs.end) {
+      annotations.push({ tsMs: startedAt, label: `${targetContainer} restarted`, tone: 'info' });
+    }
+  } catch { /* non-fatal */ }
+
+  res.json({
+    overview: { ...overview, annotations },
+    tracesHistogram: tracesHist,
+    priorTotals: priorTracesHist ? priorTracesHist.buckets.map(b => b.total || 0) : null,
+    logsHistogram: logsHist,
+    heatmap,
+    insights,
+    serviceMap,
+  });
+});
+
+// Datadog-style service map: nodes (services that produced traces) + edges
+// (parent→child inter-service calls). Layout computed client-side.
+app.get('/api/service-map', (req, res) => {
+  const { sinceMs, untilMs } = req.query;
+  res.json(otelStore.serviceMap({
+    sinceMs: sinceMs ? Number(sinceMs) : undefined,
+    untilMs: untilMs ? Number(untilMs) : undefined,
+  }));
+});
+
+// Davis-style insights: small rule-based anomaly narrator. Returns 0-3
+// short plain-English findings comparing current window vs prior. Backend
+// is intentionally simple (thresholded comparisons), not LLM-driven.
+app.get('/api/insights', (req, res) => {
+  const { sinceMs, untilMs, service } = req.query;
+  res.json(otelStore.insights({
+    sinceMs: sinceMs ? Number(sinceMs) : undefined,
+    untilMs: untilMs ? Number(untilMs) : undefined,
+    service: typeof service === 'string' && service ? service : undefined,
+  }));
+});
+
+// 2-D heatmap: traces binned by (time, duration). Duration axis log-scaled
+// to keep the slow tail readable next to the fast bulk.
+app.get('/api/traces/latency-heatmap', (req, res) => {
+  const { sinceMs, untilMs, timeBuckets, durationBuckets, service } = req.query;
+  res.json(otelStore.latencyHeatmap({
+    sinceMs: sinceMs ? Number(sinceMs) : undefined,
+    untilMs: untilMs ? Number(untilMs) : undefined,
+    timeBuckets: timeBuckets ? Number(timeBuckets) : undefined,
+    durationBuckets: durationBuckets ? Number(durationBuckets) : undefined,
+    service: typeof service === 'string' && service ? service : undefined,
+  }));
+});
+
 // Time-binned aggregates for the timeline chart on the Traces tab. Each bucket
 // reports total / ok / slow / error counts plus p50 + p95 duration in ms.
 app.get('/api/traces/histogram', (req, res) => {

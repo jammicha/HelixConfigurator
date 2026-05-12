@@ -8,6 +8,7 @@ import {
   Database,
   ExternalLink,
   FileText,
+  LayoutDashboard,
   Loader2,
   RefreshCw,
   Repeat,
@@ -16,166 +17,25 @@ import {
   X,
 } from 'lucide-react';
 import { TimelineChart, TIMELINE_COLORS } from './TimelineChart';
+import { OverviewTab } from './OverviewTab';
+import { useOverview } from '../hooks/useOverview';
+import { usePageRefresh, REFRESH_INTERVAL_MS } from '../hooks/usePageRefresh';
+import type { RefreshInterval } from '../hooks/usePageRefresh';
+import { useLocalStorageState } from '../hooks/useLocalStorageState';
 
-// Shared shape returned by /api/traces/histogram and /api/logs/histogram.
-// Hoisted to module scope so the sub-tab components can reference it.
-type Histogram = {
-  bucketStartMs: number;
-  bucketEndMs: number;
-  bucketSizeMs: number;
-  buckets: Array<{
-    tsMs: number; total: number;
-    ok?: number; slow?: number; error?: number;
-    debug?: number; info?: number; warn?: number;
-    p50?: number | null; p95?: number | null;
-  }>;
-};
+// Shared types/utilities + sub-tab components — moved out of this file to
+// keep OtelDataPage focused on page-level wiring rather than per-tab UI.
+import type { HelixEnv, OperationStat, TraceDetail, TraceStatus, TraceSummary, TimeRange, LogRecord, ErrorRecord, SpanDetail } from './otel-data/types';
+import { TIME_RANGES, SLOW_THRESHOLD_MS, INTERNAL_SERVICES } from './otel-data/constants';
+import { buildHelixTraceUrl, detectNPlusOne, formatDuration, formatRelative, formatTime, normalizeSeverity, severityBadgeClass, traceStatus } from './otel-data/utils';
+import { BmcChevron } from './otel-data/BmcChevron';
+import { CustomRangePopover } from './otel-data/CustomRangePopover';
+import { TabButton } from './otel-data/TabButton';
+import { TracesTab } from './otel-data/TracesTab';
+import { OperationsTab } from './otel-data/OperationsTab';
+import { LogsAndErrorsTab } from './otel-data/LogsAndErrorsTab';
 
-// View OTel Data — local trace viewer fed by the helix-gateway fan-out.
-//
-// Why a single component instead of a router-based layout: the rest of the
-// configurator app uses path-based view switching from main.tsx (no router
-// dependency). This page mirrors that pattern so the bundle stays tiny.
 
-type TraceSummary = {
-  trace_id: string;
-  service_name: string;
-  root_operation: string;
-  start_time_ns: number;
-  end_time_ns: number;
-  duration_ms: number;
-  span_count: number;
-  has_error: number;
-  received_at: number;
-  // Rollup counts populated by the trace list query. Optional because SSE-
-  // pushed new traces arrive before logs/db-spans have settled — those rows
-  // show 0 until the next periodic refresh.
-  log_count?: number;
-  error_count?: number;
-  db_call_count?: number;
-};
-
-type SpanDetail = {
-  spanId: string;
-  traceId: string;
-  parentSpanId: string | null;
-  serviceName: string;
-  name: string;
-  kind: number;
-  startTimeNs: number;
-  endTimeNs: number;
-  durationMs: number;
-  statusCode: number;
-  statusMessage: string;
-  attributes: Record<string, any>;
-  events: { name: string; timeUnixNano: number; attributes: Record<string, any> }[];
-};
-
-type TraceDetail = {
-  summary: TraceSummary;
-  spans: SpanDetail[];
-};
-
-type ErrorRecord = {
-  id: number;
-  trace_id: string;
-  span_id: string;
-  service_name: string;
-  exception_type: string;
-  message: string;
-  stack: string;
-  ts_ns: number;
-  received_at: number;
-};
-
-type OperationStat = {
-  service_name: string;
-  root_operation: string;
-  trace_count: number;
-  avg_ms: number;
-  min_ms: number;
-  max_ms: number;
-  p50_ms: number;
-  p95_ms: number;
-  error_count: number;
-  slow_count: number;
-};
-
-type LogRecord = {
-  id: number;
-  traceId: string;
-  spanId: string | null;
-  serviceName: string;
-  severity: string;
-  body: string;
-  attributes: Record<string, any>;
-  timeUnixNano: number;
-  receivedAt: number;
-};
-
-type TimeRange = '5m' | '15m' | '1h' | '6h' | '24h' | 'all';
-const TIME_RANGES: { value: TimeRange; label: string; ms: number | null }[] = [
-  { value: '5m', label: 'Last 5 min', ms: 5 * 60_000 },
-  { value: '15m', label: 'Last 15 min', ms: 15 * 60_000 },
-  { value: '1h', label: 'Last hour', ms: 60 * 60_000 },
-  { value: '6h', label: 'Last 6 hours', ms: 6 * 60 * 60_000 },
-  { value: '24h', label: 'Last 24 hours', ms: 24 * 60 * 60_000 },
-  { value: 'all', label: 'All', ms: null },
-];
-
-const formatDuration = (ms: number) => {
-  if (!isFinite(ms) || ms < 0) return '—';
-  if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
-  if (ms < 1000) return `${ms.toFixed(1)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
-};
-
-const formatRelative = (epochMs: number) => {
-  const diff = Date.now() - epochMs;
-  if (diff < 1000) return 'just now';
-  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return new Date(epochMs).toLocaleString();
-};
-
-const formatTime = (epochMs: number) =>
-  new Date(epochMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-const SLOW_THRESHOLD_MS = 1000;
-
-// Services emitted by the configurator/sidecar themselves — useful for
-// debugging the pipeline, but noise when a user is looking for their app's
-// traces. Hidden by default; toggleable via the "Show internal" switch.
-const INTERNAL_SERVICES = new Set<string>([
-  'helix-gateway',
-  'helix-configurator',
-  'helix-configurator-verify',
-  'otelcol-contrib',
-]);
-
-// Detect N+1 pattern: 5+ spans with the same db.operation + db.name.
-const detectNPlusOne = (spans: SpanDetail[]): { operation: string; dbName: string; count: number } | null => {
-  const buckets = new Map<string, number>();
-  for (const s of spans) {
-    const op = s.attributes['db.operation'];
-    const dbName = s.attributes['db.name'];
-    if (!op) continue;
-    const key = `${op}|${dbName || ''}`;
-    buckets.set(key, (buckets.get(key) || 0) + 1);
-  }
-  let worst: { operation: string; dbName: string; count: number } | null = null;
-  for (const [key, count] of buckets) {
-    if (count >= 5 && (!worst || count > worst.count)) {
-      const [operation, dbName] = key.split('|');
-      worst = { operation, dbName, count };
-    }
-  }
-  return worst;
-};
-
-// Mirrors App.tsx's nav: render the Logout button only when auth is actually
-// configured, hide it otherwise so the bar isn't cluttered on open-access setups.
 const LogoutLink: React.FC = () => {
   const [authRequired, setAuthRequired] = useState(false);
   useEffect(() => {
@@ -198,24 +58,7 @@ const LogoutLink: React.FC = () => {
   );
 };
 
-type TraceStatus = 'error' | 'slow' | 'ok' | 'outlier';
 
-const traceStatus = (trace: TraceSummary): TraceStatus => {
-  if (trace.has_error) return 'error';
-  if (trace.duration_ms > SLOW_THRESHOLD_MS) return 'slow';
-  return 'ok';
-};
-
-const StatusPill: React.FC<{ trace: TraceSummary }> = ({ trace }) => {
-  const status = traceStatus(trace);
-  if (status === 'error') return <span className="adapt-badge-danger">Error</span>;
-  if (status === 'slow') return <span className="adapt-badge-warning">Slow</span>;
-  return <span className="adapt-badge-success">OK</span>;
-};
-
-// URL state — keep filters and the selected trace in the query string so
-// reload preserves view and links are shareable. Reading on mount avoids the
-// flash of "All / 1h / nothing selected" before hydration.
 const readUrlState = () => {
   if (typeof window === 'undefined') return { service: '', status: '' as '' | TraceStatus, range: '1h' as TimeRange, q: '', minMs: 0, selected: null as string | null };
   const p = new URLSearchParams(window.location.search);
@@ -234,51 +77,19 @@ const readUrlState = () => {
   };
 };
 
-// Format a nanosecond Unix timestamp as Helix expects in the dashboard's
-// TraceTimestamp variable: "YYYY-MM-DD HH:MM:SS.NNNNNNNNN" in browser-local
-// time. JS numbers preserve millisecond accuracy at these magnitudes; the
-// trailing nanoseconds are zero-padded since we don't have sub-ms data.
-const formatHelixTimestamp = (timeNs: number | null | undefined): string => {
-  if (!timeNs) return '';
-  const ms = Math.floor(timeNs / 1e6);
-  const d = new Date(ms);
-  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  return `${date} ${time}.${pad(d.getMilliseconds(), 3)}000000`;
-};
 
-type HelixEnv = { endpoint: string; tenantId: string; source: string };
-
-const buildHelixTraceUrl = (
-  env: HelixEnv | null,
-  { traceId, serviceName, timeNs }: { traceId: string; serviceName: string; timeNs: number },
-): string | null => {
-  if (!env || !env.endpoint || !env.tenantId || !traceId) return null;
-  const params = new URLSearchParams({
-    orgId: env.tenantId,
-    'var-BusinessService': env.source || '',
-    'var-OTelNamespace': env.source || '',
-    'var-OTelService': serviceName || '',
-    'var-TraceTimestamp': formatHelixTimestamp(timeNs),
-    'var-TraceId': traceId.toUpperCase(),
-  });
-  return `${env.endpoint.replace(/\/+$/, '')}/dashboards/d/OTelTraceDetails/otel-trace-details?${params.toString()}`;
-};
-
-const MIN_DURATION_PRESETS: { value: number; label: string }[] = [
-  { value: 0, label: 'Any duration' },
-  { value: 100, label: '≥ 100ms' },
-  { value: 250, label: '≥ 250ms' },
-  { value: 500, label: '≥ 500ms' },
-  { value: 1000, label: '≥ 1s' },
-  { value: 2000, label: '≥ 2s' },
-  { value: 5000, label: '≥ 5s' },
-];
 
 export const OtelDataPage: React.FC = () => {
   const initial = readUrlState();
-  const [activeTab, setActiveTab] = useState<'traces' | 'operations' | 'errors'>('traces');
+  // Persisted so a refresh / new session lands on whichever tab the user was
+  // last using. Validates against the allowed enum so stale stored values
+  // from an earlier build can't crash the page.
+  const ALLOWED_TABS: Array<'overview' | 'traces' | 'operations' | 'errors'> = ['overview', 'traces', 'operations', 'errors'];
+  const [activeTab, setActiveTab] = useLocalStorageState<'overview' | 'traces' | 'operations' | 'errors'>(
+    'helix-otel.activeTab',
+    'overview',
+    (v): v is 'overview' | 'traces' | 'operations' | 'errors' => typeof v === 'string' && ALLOWED_TABS.includes(v as any),
+  );
   const [operations, setOperations] = useState<OperationStat[]>([]);
   const [operationsLoading, setOperationsLoading] = useState<boolean>(false);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
@@ -308,8 +119,14 @@ export const OtelDataPage: React.FC = () => {
   // chart — it zooms the trace/log list into that bucket's window while the
   // chart itself stays at the broader `range` and shades the selection.
   const [customRange, setCustomRange] = useState<{ sinceMs: number; untilMs: number } | null>(null);
-  const [tracesHistogram, setTracesHistogram] = useState<Histogram | null>(null);
-  const [logsHistogram, setLogsHistogram] = useState<Histogram | null>(null);
+  const ALLOWED_REFRESH: RefreshInterval[] = ['off', '10s', '30s', '60s', '5m'];
+  const [refreshInterval, setRefreshInterval] = useLocalStorageState<RefreshInterval>(
+    'helix-otel.refreshInterval',
+    '60s',
+    (v): v is RefreshInterval => typeof v === 'string' && ALLOWED_REFRESH.includes(v as RefreshInterval),
+  );
+  const [customRangePopoverOpen, setCustomRangePopoverOpen] = useState(false);
+  const customRangePopoverRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const refresh = async () => {
@@ -334,6 +151,25 @@ export const OtelDataPage: React.FC = () => {
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [diagOpen]);
+
+  // Same pattern for the custom-range popover.
+  useEffect(() => {
+    if (!customRangePopoverOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (customRangePopoverRef.current && !customRangePopoverRef.current.contains(e.target as Node)) {
+        setCustomRangePopoverOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCustomRangePopoverOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [customRangePopoverOpen]);
 
   const restartCollector = async (name: string) => {
     if (restartingName) return;
@@ -473,28 +309,17 @@ export const OtelDataPage: React.FC = () => {
     setTracesLoading(false);
   };
 
-  const refreshTracesHistogram = async () => {
-    const w = resolveChartWindow();
-    const params = new URLSearchParams({ buckets: '60' });
-    if (serviceFilter) params.set('service', serviceFilter);
-    if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
-    if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
-    try {
-      const res = await fetch(`/api/traces/histogram?${params}`);
-      if (res.ok) setTracesHistogram(await res.json());
-    } catch { /* non-fatal */ }
-  };
-
-  const refreshLogsHistogram = async () => {
-    const w = resolveChartWindow();
-    const params = new URLSearchParams({ buckets: '60' });
-    if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
-    if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
-    try {
-      const res = await fetch(`/api/logs/histogram?${params}`);
-      if (res.ok) setLogsHistogram(await res.json());
-    } catch { /* non-fatal */ }
-  };
+  // The six overview-tab datasets (overview stats, traces/logs histograms,
+  // prior-window totals, heatmap, insights, service map) are now fetched in
+  // one composite round-trip via useOverview. Auto-refreshes when serviceFilter
+  // or chart window changes; refresh() below is what the page-wide refresh
+  // interval calls to poll.
+  const overviewWindow = resolveChartWindow();
+  const ov = useOverview({
+    sinceMs: overviewWindow.sinceMs,
+    untilMs: overviewWindow.untilMs,
+    service: serviceFilter || undefined,
+  });
 
   const refreshServices = async () => {
     const res = await fetch('/api/traces/services');
@@ -585,18 +410,10 @@ export const OtelDataPage: React.FC = () => {
     return () => clearInterval(id);
   }, [serviceFilter, range, customRange]);
 
-  // Histogram polling — refresh once on mount + every 15s. Chart window
-  // follows `range` (not customRange) so the user keeps full context while
-  // they zoom the list.
-  useEffect(() => {
-    refreshTracesHistogram();
-    refreshLogsHistogram();
-    const id = setInterval(() => {
-      refreshTracesHistogram();
-      refreshLogsHistogram();
-    }, 15_000);
-    return () => clearInterval(id);
-  }, [serviceFilter, range]);
+  // Page-wide refresh cadence. useOverview auto-fetches when its inputs
+  // (serviceFilter, chart window) change; this hook drives the periodic
+  // re-poll cadence. Auto-pauses when the tab is hidden.
+  usePageRefresh(refreshInterval, ov.refresh);
 
   // Clearing the customRange when the user switches the relative range keeps
   // the two pickers consistent — the new range implies "show everything in
@@ -754,6 +571,12 @@ export const OtelDataPage: React.FC = () => {
         <div className="flex items-end justify-between border-b border-gray-800 mb-4">
           <div className="flex">
             <TabButton
+              active={activeTab === 'overview'}
+              onClick={() => setActiveTab('overview')}
+              icon={<LayoutDashboard className="w-4 h-4" />}
+              label="Overview"
+            />
+            <TabButton
               active={activeTab === 'traces'}
               onClick={() => setActiveTab('traces')}
               icon={<Activity className="w-4 h-4" />}
@@ -777,6 +600,47 @@ export const OtelDataPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-3 pb-2">
+            <div ref={customRangePopoverRef} className="relative">
+              <button
+                onClick={() => setCustomRangePopoverOpen(o => !o)}
+                title={customRange ? 'Edit custom time window' : 'Set an explicit start/end window'}
+                className={`inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold transition-colors ${
+                  customRange ? 'text-active hover:text-active-hover' : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                {customRange ? 'Custom window' : 'Custom range…'}
+              </button>
+              {customRangePopoverOpen && (
+                <CustomRangePopover
+                  initial={customRange}
+                  onClose={() => setCustomRangePopoverOpen(false)}
+                  onApply={(s, u) => {
+                    setCustomRange({ sinceMs: s, untilMs: u });
+                    setCustomRangePopoverOpen(false);
+                  }}
+                  onClear={() => {
+                    setCustomRange(null);
+                    setCustomRangePopoverOpen(false);
+                  }}
+                />
+              )}
+            </div>
+            <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
+              <RefreshCw className="w-3.5 h-3.5" />
+              Auto-refresh
+              <select
+                value={refreshInterval}
+                onChange={(e) => setRefreshInterval(e.target.value as RefreshInterval)}
+                className="bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny text-gray-200 focus:outline-none focus:border-active normal-case tracking-normal font-normal"
+              >
+                <option value="off">Off</option>
+                <option value="10s">10s</option>
+                <option value="30s">30s</option>
+                <option value="60s">60s</option>
+                <option value="5m">5m</option>
+              </select>
+            </label>
             <div ref={diagRef} className="relative">
               <button
                 onClick={() => setDiagOpen(o => !o)}
@@ -830,6 +694,36 @@ export const OtelDataPage: React.FC = () => {
           </div>
         </div>
 
+        {activeTab === 'overview' && (
+          <OverviewTab
+            data={ov.overview}
+            heatmap={ov.heatmap}
+            tracesHistogram={ov.tracesHistogram}
+            priorTotals={ov.priorTotals}
+            insights={ov.insights}
+            insightsLoading={ov.loading}
+            serviceMap={ov.serviceMap}
+            loading={ov.loading}
+            customRange={customRange}
+            onClearCustomRange={() => setCustomRange(null)}
+            onBucketClick={(s, u) => setCustomRange({ sinceMs: s, untilMs: u })}
+            onDrilldownService={(name) => {
+              setServiceFilter(name);
+              setActiveTab('traces');
+            }}
+            onDrilldownError={(_exceptionType, serviceName) => {
+              // Errors view filters by service in-page already via the existing
+              // search box; we just jump the user to the right surface.
+              if (serviceName) setServiceFilter(serviceName);
+              setActiveTab('errors');
+            }}
+            onDrilldownHeatmapCell={(s, u, minDurationMs) => {
+              setCustomRange({ sinceMs: s, untilMs: u });
+              setMinMs(Math.max(0, Math.floor(minDurationMs)));
+              setActiveTab('traces');
+            }}
+          />
+        )}
         {activeTab === 'traces' && (
           <TracesTab
             traces={visibleTraces}
@@ -851,7 +745,7 @@ export const OtelDataPage: React.FC = () => {
             operationP95={operationP95}
             tracesLoading={tracesLoading}
             onSelect={setSelectedTraceId}
-            histogram={tracesHistogram}
+            histogram={ov.tracesHistogram}
             customRange={customRange}
             onBucketClick={(s, u) => setCustomRange({ sinceMs: s, untilMs: u })}
             onClearCustomRange={() => setCustomRange(null)}
@@ -881,7 +775,7 @@ export const OtelDataPage: React.FC = () => {
               setActiveTab('traces');
               setSelectedTraceId(traceId);
             }}
-            histogram={logsHistogram}
+            histogram={ov.logsHistogram}
             customRange={customRange}
             onBucketClick={(s, u) => setCustomRange({ sinceMs: s, untilMs: u })}
             onClearCustomRange={() => setCustomRange(null)}
@@ -903,935 +797,6 @@ export const OtelDataPage: React.FC = () => {
   );
 };
 
-const TabButton: React.FC<{
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  count?: number;
-  countTone?: 'neutral' | 'danger';
-}> = ({ active, onClick, icon, label, count, countTone = 'neutral' }) => (
-  <button
-    onClick={onClick}
-    className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
-      active
-        ? 'border-active text-gray-100'
-        : 'border-transparent text-gray-400 hover:text-gray-200'
-    }`}
-  >
-    {icon}
-    {label}
-    {typeof count === 'number' && count > 0 && (
-      <span
-        className={`text-tiny px-1.5 py-0.5 rounded font-mono ${
-          countTone === 'danger'
-            ? 'bg-danger/20 text-[#ff8a8a]'
-            : active
-              ? 'bg-active/20 text-[#a5baff]'
-              : 'bg-gray-800 text-gray-400'
-        }`}
-      >
-        {count}
-      </span>
-    )}
-  </button>
-);
-
-const TracesTab: React.FC<{
-  traces: TraceSummary[];
-  services: { name: string; traceCount: number }[];
-  serviceFilter: string;
-  setServiceFilter: (s: string) => void;
-  statusFilter: '' | TraceStatus;
-  setStatusFilter: (s: '' | TraceStatus) => void;
-  range: TimeRange;
-  setRange: (r: TimeRange) => void;
-  searchQuery: string;
-  setSearchQuery: (s: string) => void;
-  minMs: number;
-  setMinMs: (n: number) => void;
-  paused: boolean;
-  setPaused: React.Dispatch<React.SetStateAction<boolean>>;
-  streamConnected: boolean;
-  helixEnv: HelixEnv | null;
-  operationP95: Map<string, number>;
-  tracesLoading: boolean;
-  onSelect: (traceId: string) => void;
-  histogram: Histogram | null;
-  customRange: { sinceMs: number; untilMs: number } | null;
-  onBucketClick: (sinceMs: number, untilMs: number) => void;
-  onClearCustomRange: () => void;
-}> = ({
-  traces, services, serviceFilter, setServiceFilter, statusFilter, setStatusFilter,
-  range, setRange, searchQuery, setSearchQuery, minMs, setMinMs,
-  paused, setPaused, streamConnected, helixEnv, operationP95, tracesLoading, onSelect,
-  histogram, customRange, onBucketClick, onClearCustomRange,
-}) => {
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-end gap-3 mb-4 flex-wrap">
-        <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Stream</label>
-          <button
-            onClick={() => setPaused(p => !p)}
-            title={paused ? 'Resume live updates' : 'Pause incoming traces so the list stops moving'}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border bg-gray-1000 text-tiny uppercase tracking-wider font-semibold transition-colors ${
-              paused
-                ? 'border-warning/40 text-warning hover:border-warning'
-                : streamConnected
-                  ? 'border-gray-800 text-[#5eead4] hover:border-success/40'
-                  : 'border-gray-800 text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${
-              paused ? 'bg-warning' : streamConnected ? 'bg-success animate-pulse' : 'bg-gray-600'
-            }`} />
-            {paused ? 'Paused' : streamConnected ? 'Live' : 'Reconnecting…'}
-          </button>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Service</label>
-          <select
-            value={serviceFilter}
-            onChange={(e) => setServiceFilter(e.target.value)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active min-w-[14rem]"
-          >
-            <option value="">All services</option>
-            {services.map(s => (
-              <option key={s.name} value={s.name}>{s.name} ({s.traceCount})</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Status</label>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as '' | TraceStatus)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
-          >
-            <option value="">All statuses</option>
-            <option value="error">Error</option>
-            <option value="slow">Slow (&gt;{SLOW_THRESHOLD_MS}ms)</option>
-            <option value="ok">OK</option>
-            <option value="outlier">Outlier (&gt;2× p95)</option>
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Min duration</label>
-          <select
-            value={String(minMs)}
-            onChange={(e) => setMinMs(parseInt(e.target.value, 10) || 0)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
-          >
-            {MIN_DURATION_PRESETS.map(p => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Time range</label>
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value as TimeRange)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
-          >
-            {TIME_RANGES.map(r => (
-              <option key={r.value} value={r.value}>{r.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1 flex-1 min-w-[16rem]">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Search</label>
-          <div className="relative">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="operation, service, or trace id…"
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active pr-8"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                aria-label="Clear search"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="ml-auto text-tiny text-gray-500 pb-1">
-          {traces.length} trace{traces.length === 1 ? '' : 's'} • cap 500 (sliding window)
-        </div>
-      </div>
-
-      {histogram && histogram.buckets.length > 0 && (
-        <div className="adapt-card !p-3 mb-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Trace volume</div>
-            {customRange && (
-              <button
-                onClick={onClearCustomRange}
-                className="text-tiny text-active hover:underline font-semibold uppercase tracking-wider"
-              >Clear time selection</button>
-            )}
-          </div>
-          <TimelineChart
-            buckets={histogram.buckets as any}
-            bucketSizeMs={histogram.bucketSizeMs}
-            height={84}
-            segments={[
-              { key: 'ok', label: 'OK', fill: TIMELINE_COLORS.ok },
-              { key: 'slow', label: 'Slow', fill: TIMELINE_COLORS.slow },
-              { key: 'error', label: 'Error', fill: TIMELINE_COLORS.error },
-            ]}
-            percentiles={histogram.buckets.map(b => ({ p50: b.p50 ?? null, p95: b.p95 ?? null }))}
-            selectedRange={customRange}
-            onBucketClick={onBucketClick}
-          />
-        </div>
-      )}
-
-      <div className="flex-1 overflow-auto adapt-card !p-0">
-        {tracesLoading ? (
-          <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
-            <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading traces…
-          </div>
-        ) : traces.length === 0 ? (
-          <TracesEmptyState filtered={!!serviceFilter || !!statusFilter || !!searchQuery || minMs > 0} />
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-gray-900 border-b border-gray-800 z-10">
-              <tr className="text-left text-tiny text-gray-400 uppercase tracking-wider">
-                <th className="px-4 py-2 font-semibold">Status</th>
-                <th className="px-4 py-2 font-semibold">Service</th>
-                <th className="px-4 py-2 font-semibold">Root operation</th>
-                <th className="px-4 py-2 font-semibold text-right">Duration</th>
-                <th className="px-4 py-2 font-semibold text-right">Spans</th>
-                <th className="px-4 py-2 font-semibold">Received</th>
-                {helixEnv?.endpoint && <th className="px-4 py-2 font-semibold w-10" aria-label="Helix" />}
-              </tr>
-            </thead>
-            <tbody>
-              {traces.map(t => (
-                <tr
-                  key={t.trace_id}
-                  onClick={() => onSelect(t.trace_id)}
-                  className="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors"
-                >
-                  <td className="px-4 py-2">
-                    <StatusPill trace={t} />
-                  </td>
-                  <td className="px-4 py-2 font-medium text-gray-100">
-                    <span className="inline-flex items-center gap-2 flex-wrap">
-                      <Server className="w-3.5 h-3.5 text-gray-500" />
-                      {t.service_name}
-                      {(t.error_count || 0) > 0 && (
-                        <span
-                          className="adapt-badge-danger flex-shrink-0 inline-flex items-center gap-1"
-                          title={`${t.error_count} error${t.error_count === 1 ? '' : 's'} in this trace`}
-                        >
-                          <AlertTriangle className="w-2.5 h-2.5" />{t.error_count}
-                        </span>
-                      )}
-                      {(t.db_call_count || 0) > 0 && (
-                        <span
-                          className="adapt-badge-info flex-shrink-0 inline-flex items-center gap-1"
-                          title={`${t.db_call_count} DB call${t.db_call_count === 1 ? '' : 's'} in this trace`}
-                        >
-                          <Database className="w-2.5 h-2.5" />{t.db_call_count}
-                        </span>
-                      )}
-                      {(t.log_count || 0) > 0 && (
-                        <span
-                          className="adapt-badge-info flex-shrink-0 inline-flex items-center gap-1"
-                          title={`${t.log_count} log record${t.log_count === 1 ? '' : 's'} in this trace`}
-                        >
-                          <FileText className="w-2.5 h-2.5" />{t.log_count}
-                        </span>
-                      )}
-                      {(() => {
-                        // Item 3: outlier badge when this trace runs >2× the
-                        // p95 of its operation — only when we have stats
-                        // for the op (computed from the same time window).
-                        const p95 = operationP95.get(`${t.service_name}|${t.root_operation}`) || 0;
-                        if (p95 > 0 && t.duration_ms > p95 * 2) {
-                          return (
-                            <span
-                              className="adapt-badge-warning flex-shrink-0 inline-flex items-center gap-1"
-                              title={`Outlier — ${formatDuration(t.duration_ms)} is ${(t.duration_ms / p95).toFixed(1)}× this operation's p95 (${formatDuration(p95)})`}
-                            >
-                              <AlertTriangle className="w-2.5 h-2.5" />Outlier
-                            </span>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-gray-300 font-mono text-tiny">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSearchQuery(t.root_operation || ''); }}
-                      title="Filter list to this operation"
-                      className="text-left hover:text-active hover:underline truncate max-w-md"
-                    >
-                      {t.root_operation}
-                    </button>
-                  </td>
-                  <td className={`px-4 py-2 text-right font-mono ${t.duration_ms > SLOW_THRESHOLD_MS ? 'text-warning font-semibold' : 'text-gray-300'}`}>
-                    {formatDuration(t.duration_ms)}
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono text-gray-400">{t.span_count}</td>
-                  <td className="px-4 py-2 text-tiny text-gray-500">{formatRelative(t.received_at)}</td>
-                  {helixEnv?.endpoint && (
-                    <td className="px-4 py-2 text-right">
-                      {(() => {
-                        const url = buildHelixTraceUrl(helixEnv, {
-                          traceId: t.trace_id,
-                          serviceName: t.service_name,
-                          timeNs: t.start_time_ns,
-                        });
-                        if (!url) return null;
-                        return (
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            title="Open this trace in Helix"
-                            className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200"
-                          >
-                            <BmcChevron className="h-3.5 w-auto" />
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        );
-                      })()}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const TracesEmptyState: React.FC<{ filtered: boolean }> = ({ filtered }) => (
-  <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
-    <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
-      <Activity className="w-6 h-6 text-gray-500" />
-    </div>
-    <h3 className="text-base font-semibold text-gray-200 mb-2">
-      {filtered ? 'No traces match these filters' : 'No traces received yet'}
-    </h3>
-    <p className="text-sm text-gray-400 max-w-md mb-3 leading-relaxed">
-      {filtered ? (
-        <>Try widening the time range, or clear the service filter to see all traces.</>
-      ) : (
-        <>Send traffic to your instrumented application. Spans will stream in here within a few seconds of arriving at the gateway.</>
-      )}
-    </p>
-    {!filtered && (
-      <p className="text-tiny text-gray-500 max-w-md leading-relaxed">
-        Reminder: your application should be exporting OpenTelemetry traces to{' '}
-        <code className="font-mono text-gray-300 bg-gray-1000 px-1.5 py-0.5 rounded">helix-gateway:4318</code>{' '}
-        (HTTP) or <code className="font-mono text-gray-300 bg-gray-1000 px-1.5 py-0.5 rounded">helix-gateway:4317</code> (gRPC).
-      </p>
-    )}
-  </div>
-);
-
-const SEVERITY_OPTIONS = ['', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'] as const;
-
-// Group equivalent severity strings (Info/INFO/info_2/SeverityNumber=9 etc.)
-// into the canonical bucket the dropdown filters on.
-const normalizeSeverity = (s: string): string => {
-  const u = (s || '').toUpperCase();
-  if (u.includes('FATAL') || u.includes('CRITICAL')) return 'FATAL';
-  if (u.includes('ERROR')) return 'ERROR';
-  if (u.includes('WARN')) return 'WARN';
-  if (u.includes('INFO')) return 'INFO';
-  if (u.includes('DEBUG')) return 'DEBUG';
-  if (u.includes('TRACE')) return 'TRACE';
-  return u || '—';
-};
-
-const severityBadgeClass = (s: string): string => {
-  switch (normalizeSeverity(s)) {
-    case 'FATAL':
-    case 'ERROR': return 'adapt-badge-danger';
-    case 'WARN': return 'adapt-badge-warning';
-    case 'INFO': return 'adapt-badge-success';
-    default: return 'bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded text-tiny font-mono';
-  }
-};
-
-const LogsAndErrorsTab: React.FC<{
-  logs: LogRecord[];
-  errors: ErrorRecord[];
-  paused: boolean;
-  setPaused: React.Dispatch<React.SetStateAction<boolean>>;
-  streamConnected: boolean;
-  helixEnv: HelixEnv | null;
-  onJumpToTrace: (traceId: string) => void;
-  histogram: Histogram | null;
-  customRange: { sinceMs: number; untilMs: number } | null;
-  onBucketClick: (sinceMs: number, untilMs: number) => void;
-  onClearCustomRange: () => void;
-}> = ({ logs, errors, paused, setPaused, streamConnected, helixEnv, onJumpToTrace, histogram, customRange, onBucketClick, onClearCustomRange }) => {
-  const [subTab, setSubTab] = useState<'logs' | 'errors'>('logs');
-  const [severityFilter, setSeverityFilter] = useState<string>('');
-  const [logQuery, setLogQuery] = useState<string>('');
-
-  const filteredLogs = useMemo(() => {
-    let out = logs;
-    if (severityFilter) out = out.filter(l => normalizeSeverity(l.severity) === severityFilter);
-    if (logQuery.trim()) {
-      const q = logQuery.trim().toLowerCase();
-      out = out.filter(l =>
-        (l.body || '').toLowerCase().includes(q) ||
-        (l.serviceName || '').toLowerCase().includes(q),
-      );
-    }
-    return out;
-  }, [logs, severityFilter, logQuery]);
-
-  // Errors histogram is derived client-side because span_errors lives in a
-  // different table than log_records (the Logs sub-tab's data source). Aligns
-  // to the same bucket grid as the logs histogram so switching sub-tabs
-  // doesn't shift the time axis.
-  const errorsHistogram = useMemo<Histogram | null>(() => {
-    if (!histogram || !histogram.buckets.length || !histogram.bucketSizeMs) return null;
-    const start = histogram.bucketStartMs;
-    const size = histogram.bucketSizeMs;
-    const n = histogram.buckets.length;
-    const out: Histogram['buckets'] = histogram.buckets.map(b => ({ tsMs: b.tsMs, total: 0, error: 0 }));
-    for (const e of errors) {
-      const idx = Math.floor((e.received_at - start) / size);
-      if (idx < 0 || idx >= n) continue;
-      out[idx].total++;
-      out[idx].error = (out[idx].error || 0) + 1;
-    }
-    return { bucketStartMs: start, bucketEndMs: histogram.bucketEndMs, bucketSizeMs: size, buckets: out };
-  }, [errors, histogram]);
-
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
-        <div className="flex items-end gap-3 flex-wrap">
-          <div className="flex flex-col gap-1">
-            <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Stream</label>
-            <button
-              onClick={() => setPaused(p => !p)}
-              title={paused ? 'Resume live updates' : 'Pause incoming logs and errors so the list stops moving'}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border bg-gray-1000 text-tiny uppercase tracking-wider font-semibold transition-colors ${
-                paused
-                  ? 'border-warning/40 text-warning hover:border-warning'
-                  : streamConnected
-                    ? 'border-gray-800 text-[#5eead4] hover:border-success/40'
-                    : 'border-gray-800 text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${
-                paused ? 'bg-warning' : streamConnected ? 'bg-success animate-pulse' : 'bg-gray-600'
-              }`} />
-              {paused ? 'Paused' : streamConnected ? 'Live' : 'Reconnecting…'}
-            </button>
-          </div>
-          <div className="flex border-b border-gray-800 -mb-px">
-            <button
-              onClick={() => setSubTab('logs')}
-              className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-                subTab === 'logs' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              Logs <span className="ml-1.5 text-tiny font-mono px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{logs.length}</span>
-            </button>
-            <button
-              onClick={() => setSubTab('errors')}
-              className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-                subTab === 'errors' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              Errors <span className={`ml-1.5 text-tiny font-mono px-1.5 py-0.5 rounded ${errors.length ? 'bg-danger/20 text-[#ff8a8a]' : 'bg-gray-800 text-gray-400'}`}>{errors.length}</span>
-            </button>
-          </div>
-        </div>
-        <div className="flex items-end gap-3 flex-wrap">
-          {subTab === 'logs' && (
-            <>
-              <div className="flex flex-col gap-1">
-                <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Severity</label>
-                <select
-                  value={severityFilter}
-                  onChange={(e) => setSeverityFilter(e.target.value)}
-                  className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
-                >
-                  {SEVERITY_OPTIONS.map(s => (
-                    <option key={s} value={s}>{s ? s : 'All severities'}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1 w-64">
-                <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Search</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={logQuery}
-                    onChange={(e) => setLogQuery(e.target.value)}
-                    placeholder="message body or service…"
-                    className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active pr-8"
-                  />
-                  {logQuery && (
-                    <button
-                      onClick={() => setLogQuery('')}
-                      aria-label="Clear search"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {(() => {
-        const chart = subTab === 'logs' ? histogram : errorsHistogram;
-        if (!chart || chart.buckets.length === 0) return null;
-        return (
-          <div className="adapt-card !p-3 mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">
-                {subTab === 'logs' ? 'Log volume by severity' : 'Errors over time'}
-              </div>
-              {customRange && (
-                <button
-                  onClick={onClearCustomRange}
-                  className="text-tiny text-active hover:underline font-semibold uppercase tracking-wider"
-                >Clear time selection</button>
-              )}
-            </div>
-            <TimelineChart
-              buckets={chart.buckets as any}
-              bucketSizeMs={chart.bucketSizeMs}
-              height={84}
-              segments={subTab === 'logs' ? [
-                { key: 'debug', label: 'Debug', fill: TIMELINE_COLORS.debug },
-                { key: 'info', label: 'Info', fill: TIMELINE_COLORS.info },
-                { key: 'warn', label: 'Warn', fill: TIMELINE_COLORS.warn },
-                { key: 'error', label: 'Error', fill: TIMELINE_COLORS.error },
-              ] : [
-                { key: 'error', label: 'Error', fill: TIMELINE_COLORS.error },
-              ]}
-              selectedRange={customRange}
-              onBucketClick={onBucketClick}
-            />
-          </div>
-        );
-      })()}
-
-      {subTab === 'logs' && <LogsView logs={filteredLogs} onJumpToTrace={onJumpToTrace} totalUnfiltered={logs.length} helixEnv={helixEnv} />}
-      {subTab === 'errors' && <ErrorsView errors={errors} onJumpToTrace={onJumpToTrace} helixEnv={helixEnv} />}
-    </div>
-  );
-};
-
-const LogsView: React.FC<{
-  logs: LogRecord[];
-  onJumpToTrace: (traceId: string) => void;
-  totalUnfiltered: number;
-  helixEnv: HelixEnv | null;
-}> = ({ logs, onJumpToTrace, totalUnfiltered, helixEnv }) => {
-  if (logs.length === 0) {
-    return (
-      <div className="flex-1 overflow-auto adapt-card !p-0">
-        <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
-          <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
-            <AlertTriangle className="w-6 h-6 text-gray-500" />
-          </div>
-          <h3 className="text-base font-semibold text-gray-200 mb-2">
-            {totalUnfiltered > 0 ? 'No logs match these filters' : 'No logs received yet'}
-          </h3>
-          <p className="text-sm text-gray-400 max-w-md leading-relaxed">
-            {totalUnfiltered > 0
-              ? 'Try clearing the severity or search filter.'
-              : 'helix-gateway fans the OTel logs pipeline to /api/otlp/logs. If you don\'t see anything here, check that your app emits log records (separate from span events) and that the gateway is on the same network as your app.'}
-          </p>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex-1 overflow-auto adapt-card !p-0">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 bg-gray-900 border-b border-gray-800 z-10">
-          <tr className="text-left text-tiny text-gray-400 uppercase tracking-wider">
-            <th className="px-4 py-2 font-semibold">Time</th>
-            <th className="px-4 py-2 font-semibold">Service</th>
-            <th className="px-4 py-2 font-semibold">Severity</th>
-            <th className="px-4 py-2 font-semibold">Body</th>
-            <th className="px-4 py-2 font-semibold text-right">Trace</th>
-          </tr>
-        </thead>
-        <tbody>
-          {logs.map(l => (
-            <tr key={l.id} className="border-b border-gray-800 hover:bg-gray-800/50">
-              <td className="px-4 py-2 text-tiny text-gray-500 whitespace-nowrap">{formatTime(l.receivedAt)}</td>
-              <td className="px-4 py-2 text-gray-200 whitespace-nowrap">{l.serviceName}</td>
-              <td className="px-4 py-2">
-                <span className={severityBadgeClass(l.severity)}>{normalizeSeverity(l.severity)}</span>
-              </td>
-              <td className="px-4 py-2 text-gray-300 font-mono text-tiny break-all">
-                {l.body || <em className="text-gray-500 not-italic">(empty)</em>}
-              </td>
-              <td className="px-4 py-2 text-right whitespace-nowrap">
-                {l.traceId ? (
-                  <span className="inline-flex items-center gap-2">
-                    <button
-                      onClick={() => onJumpToTrace(l.traceId)}
-                      className="text-active hover:text-[#a5baff] text-tiny font-semibold uppercase tracking-wider"
-                    >
-                      Open trace →
-                    </button>
-                    {(() => {
-                      const url = buildHelixTraceUrl(helixEnv, {
-                        traceId: l.traceId,
-                        serviceName: l.serviceName,
-                        timeNs: l.timeUnixNano,
-                      });
-                      if (!url) return null;
-                      return (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Open in Helix"
-                          className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200"
-                        >
-                          <BmcChevron className="h-3.5 w-auto" />
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      );
-                    })()}
-                  </span>
-                ) : (
-                  <span className="text-tiny text-gray-600">—</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
-const OperationsTab: React.FC<{
-  operations: OperationStat[];
-  loading: boolean;
-  range: TimeRange;
-  setRange: (r: TimeRange) => void;
-  onJumpToOperation: (op: string) => void;
-}> = ({ operations, loading, range, setRange, onJumpToOperation }) => {
-  const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'count' | 'errors' | 'service'>('p95');
-  const sorted = useMemo(() => {
-    const arr = operations.slice();
-    switch (sortBy) {
-      case 'p95': arr.sort((a, b) => b.p95_ms - a.p95_ms); break;
-      case 'p50': arr.sort((a, b) => b.p50_ms - a.p50_ms); break;
-      case 'count': arr.sort((a, b) => b.trace_count - a.trace_count); break;
-      case 'errors': arr.sort((a, b) => (b.error_count / Math.max(1, b.trace_count)) - (a.error_count / Math.max(1, a.trace_count))); break;
-      case 'service': arr.sort((a, b) => a.service_name.localeCompare(b.service_name) || a.root_operation.localeCompare(b.root_operation)); break;
-    }
-    return arr;
-  }, [operations, sortBy]);
-
-  const Sortable: React.FC<{ id: typeof sortBy; align?: 'left' | 'right'; children: React.ReactNode }> = ({ id, align = 'right', children }) => (
-    <button
-      onClick={() => setSortBy(id)}
-      className={`w-full ${align === 'right' ? 'text-right' : 'text-left'} font-semibold uppercase tracking-wider text-tiny ${sortBy === id ? 'text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
-    >
-      {children}{sortBy === id && ' ▾'}
-    </button>
-  );
-
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-end gap-3 mb-4 flex-wrap">
-        <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Time range</label>
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value as TimeRange)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
-          >
-            {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-          </select>
-        </div>
-        <div className="ml-auto text-tiny text-gray-500 pb-1">
-          {operations.length} operation{operations.length === 1 ? '' : 's'}
-        </div>
-      </div>
-      <div className="flex-1 overflow-auto adapt-card !p-0">
-        {loading ? (
-          <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
-            <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading operations…
-          </div>
-        ) : sorted.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
-            <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
-              <Server className="w-6 h-6 text-gray-500" />
-            </div>
-            <h3 className="text-base font-semibold text-gray-200 mb-2">No operations in this window</h3>
-            <p className="text-sm text-gray-400 max-w-md leading-relaxed">
-              Aggregates over root-span (service + operation) for the selected time range. Widen the range above to see more.
-            </p>
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-gray-900 border-b border-gray-800 z-10">
-              <tr>
-                <th className="px-4 py-2"><Sortable id="service" align="left">Service · Operation</Sortable></th>
-                <th className="px-4 py-2 w-20"><Sortable id="count">Count</Sortable></th>
-                <th className="px-4 py-2 w-24"><Sortable id="p50">p50</Sortable></th>
-                <th className="px-4 py-2 w-24"><Sortable id="p95">p95</Sortable></th>
-                <th className="px-4 py-2 w-24 text-right text-tiny font-semibold text-gray-400 uppercase tracking-wider">Max</th>
-                <th className="px-4 py-2 w-24"><Sortable id="errors">Error %</Sortable></th>
-                <th className="px-4 py-2 w-24 text-right text-tiny font-semibold text-gray-400 uppercase tracking-wider">Slow</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map(op => {
-                const errPct = op.trace_count ? (op.error_count / op.trace_count) * 100 : 0;
-                const slowPct = op.trace_count ? (op.slow_count / op.trace_count) * 100 : 0;
-                return (
-                  <tr key={`${op.service_name}|${op.root_operation}`} className="border-b border-gray-800 hover:bg-gray-800/50">
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => onJumpToOperation(op.root_operation)}
-                        title="Filter the trace list to this operation"
-                        className="text-left hover:underline"
-                      >
-                        <span className="text-gray-200 font-mono">{op.service_name}</span>
-                        <span className="text-gray-500"> · </span>
-                        <span className="text-gray-300 font-mono text-tiny">{op.root_operation}</span>
-                      </button>
-                    </td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-300">{op.trace_count}</td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-300">{formatDuration(op.p50_ms)}</td>
-                    <td className={`px-4 py-2 text-right font-mono ${op.p95_ms > SLOW_THRESHOLD_MS ? 'text-warning font-semibold' : 'text-gray-300'}`}>{formatDuration(op.p95_ms)}</td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-400">{formatDuration(op.max_ms)}</td>
-                    <td className={`px-4 py-2 text-right font-mono ${errPct > 0 ? 'text-[#ff8a8a]' : 'text-gray-500'}`}>
-                      {errPct > 0 ? `${errPct.toFixed(1)}%` : '—'}
-                      <span className="text-tiny text-gray-600 ml-1">({op.error_count})</span>
-                    </td>
-                    <td className={`px-4 py-2 text-right font-mono ${slowPct > 0 ? 'text-warning' : 'text-gray-500'}`}>
-                      {slowPct > 0 ? `${slowPct.toFixed(1)}%` : '—'}
-                      <span className="text-tiny text-gray-600 ml-1">({op.slow_count})</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const ErrorsView: React.FC<{
-  errors: ErrorRecord[];
-  onJumpToTrace: (traceId: string) => void;
-  helixEnv: HelixEnv | null;
-}> = ({ errors, onJumpToTrace, helixEnv }) => {
-  const [grouped, setGrouped] = useState<boolean>(true);
-
-  // Item 7: Group errors by exception_type × service_name. The flat view is
-  // still available — toggle in the header — for users who want raw timeline.
-  const groups = useMemo(() => {
-    const map = new Map<string, { key: string; type: string; service: string; count: number; firstSeen: number; lastSeen: number; samples: ErrorRecord[] }>();
-    for (const e of errors) {
-      const key = `${e.exception_type || '(none)'}|${e.service_name || '(unknown)'}`;
-      const g = map.get(key);
-      if (g) {
-        g.count += 1;
-        if (e.received_at < g.firstSeen) g.firstSeen = e.received_at;
-        if (e.received_at > g.lastSeen) g.lastSeen = e.received_at;
-        if (g.samples.length < 5) g.samples.push(e);
-      } else {
-        map.set(key, {
-          key,
-          type: e.exception_type || '(none)',
-          service: e.service_name || '(unknown)',
-          count: 1,
-          firstSeen: e.received_at,
-          lastSeen: e.received_at,
-          samples: [e],
-        });
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => b.count - a.count || b.lastSeen - a.lastSeen);
-  }, [errors]);
-
-  if (errors.length === 0) {
-    return (
-      <div className="flex-1 overflow-auto adapt-card !p-0">
-        <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
-          <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
-            <AlertTriangle className="w-6 h-6 text-gray-500" />
-          </div>
-          <h3 className="text-base font-semibold text-gray-200 mb-2">No errors yet</h3>
-          <p className="text-sm text-gray-400 max-w-md leading-relaxed">
-            Span exception events from your application's telemetry will appear here. Distinct from the
-            container-level Diagnostic Log Stream on the configurator dashboard.
-          </p>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex-1 overflow-auto adapt-card !p-0">
-      <div className="px-4 py-2 border-b border-gray-800 bg-gray-900 flex items-center justify-between sticky top-0 z-10">
-        <span className="text-tiny text-gray-500">
-          {grouped ? `${groups.length} group${groups.length === 1 ? '' : 's'} • ${errors.length} total` : `${errors.length} error${errors.length === 1 ? '' : 's'}`}
-        </span>
-        <div className="flex gap-1">
-          <button
-            onClick={() => setGrouped(true)}
-            className={`px-2 py-0.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${grouped ? 'bg-primary text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-          >Grouped</button>
-          <button
-            onClick={() => setGrouped(false)}
-            className={`px-2 py-0.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${!grouped ? 'bg-primary text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-          >Flat</button>
-        </div>
-      </div>
-      {grouped ? (
-        <div className="divide-y divide-gray-800">
-          {groups.map(g => (
-            <ErrorGroupRow key={g.key} group={g} onJumpToTrace={onJumpToTrace} helixEnv={helixEnv} />
-          ))}
-        </div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-gray-900 border-b border-gray-800 z-10">
-            <tr className="text-left text-tiny text-gray-400 uppercase tracking-wider">
-              <th className="px-4 py-2 font-semibold">Time</th>
-              <th className="px-4 py-2 font-semibold">Service</th>
-              <th className="px-4 py-2 font-semibold">Type</th>
-              <th className="px-4 py-2 font-semibold">Message</th>
-              <th className="px-4 py-2 font-semibold text-right">Trace</th>
-            </tr>
-          </thead>
-          <tbody>
-            {errors.map(e => (
-              <tr key={`${e.id}-${e.received_at}`} className="border-b border-gray-800 hover:bg-gray-800/50">
-                <td className="px-4 py-2 text-tiny text-gray-500 whitespace-nowrap">{formatTime(e.received_at)}</td>
-                <td className="px-4 py-2 text-gray-200 whitespace-nowrap">{e.service_name}</td>
-                <td className="px-4 py-2">
-                  <span className="adapt-badge-danger font-mono">{e.exception_type}</span>
-                </td>
-                <td className="px-4 py-2 text-gray-300 font-mono text-tiny break-all">{e.message || <em className="text-gray-500 not-italic">(no message)</em>}</td>
-                <td className="px-4 py-2 text-right whitespace-nowrap">
-                  <span className="inline-flex items-center gap-2">
-                    <button
-                      onClick={() => onJumpToTrace(e.trace_id)}
-                      className="text-active hover:text-[#a5baff] text-tiny font-semibold uppercase tracking-wider"
-                    >
-                      Open trace →
-                    </button>
-                    {(() => {
-                      const url = buildHelixTraceUrl(helixEnv, {
-                        traceId: e.trace_id,
-                        serviceName: e.service_name,
-                        timeNs: e.ts_ns,
-                      });
-                      if (!url) return null;
-                      return (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Open in Helix"
-                          className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200"
-                        >
-                          <BmcChevron className="h-3.5 w-auto" />
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      );
-                    })()}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
-};
-
-const ErrorGroupRow: React.FC<{
-  group: { key: string; type: string; service: string; count: number; firstSeen: number; lastSeen: number; samples: ErrorRecord[] };
-  onJumpToTrace: (traceId: string) => void;
-  helixEnv: HelixEnv | null;
-}> = ({ group, onJumpToTrace, helixEnv }) => {
-  const [open, setOpen] = useState(false);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-800/40 transition-colors"
-      >
-        {open ? <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
-        <span className="adapt-badge-danger font-mono flex-shrink-0">{group.type}</span>
-        <span className="text-gray-200 font-mono text-tiny truncate flex-shrink min-w-0">{group.service}</span>
-        <span className="ml-auto flex items-center gap-3 text-tiny text-gray-500 flex-shrink-0">
-          <span><span className="text-[#ff8a8a] font-mono font-semibold">{group.count}</span> hits</span>
-          <span>first {formatRelative(group.firstSeen)}</span>
-          <span>last {formatRelative(group.lastSeen)}</span>
-        </span>
-      </button>
-      {open && (
-        <div className="px-4 pb-3 pl-10 space-y-1.5 bg-gray-900/40">
-          {group.samples.map(e => (
-            <div key={`${e.id}-${e.received_at}`} className="flex items-start gap-3 text-tiny">
-              <span className="text-gray-500 font-mono w-20 flex-shrink-0">{formatTime(e.received_at)}</span>
-              <span className="text-gray-300 font-mono break-all flex-1 min-w-0">{e.message || <em className="text-gray-500 not-italic">(no message)</em>}</span>
-              <span className="inline-flex items-center gap-2 flex-shrink-0">
-                <button
-                  onClick={() => onJumpToTrace(e.trace_id)}
-                  className="text-active hover:text-[#a5baff] font-semibold uppercase tracking-wider"
-                >Open trace →</button>
-                {(() => {
-                  const url = buildHelixTraceUrl(helixEnv, { traceId: e.trace_id, serviceName: e.service_name, timeNs: e.ts_ns });
-                  if (!url) return null;
-                  return (
-                    <a href={url} target="_blank" rel="noopener noreferrer" title="Open in Helix" className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200">
-                      <BmcChevron className="h-3.5 w-auto" />
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  );
-                })()}
-              </span>
-            </div>
-          ))}
-          {group.count > group.samples.length && (
-            <div className="text-tiny text-gray-500 italic">+ {group.count - group.samples.length} more not shown</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
 
 const TraceDetailDrawer: React.FC<{
   traceId: string;
@@ -2315,11 +1280,6 @@ const RollupPanel: React.FC<{
 // Tailwind sizing the same way (browser was rendering the standalone .svg
 // file at its intrinsic 20×32 viewBox dimensions instead of honoring
 // h-3.5 / h-4 from className, making it tower over the trailing link icon).
-const BmcChevron: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 32" className={className} aria-hidden="true">
-    <path fill="#FF5A4D" d="M2.61,31.91c-1.29,0-2.61-1-2.61-2.92V24.5c0-1.78,1.16-3.81,2.69-4.71l6.27-3.71l-6.27-3.73c-1.53-0.91-2.67-2.93-2.67-4.71V3.09c0-1.89,1.31-2.9,2.59-2.9c0.55,0,1.12,0.17,1.67,0.49l14.16,8.43C19.43,9.69,20,10.6,20,11.59s-0.57,1.89-1.55,2.48l-3.39,2.01l3.39,2.01c0.98,0.59,1.55,1.5,1.55,2.48s-0.57,1.89-1.55,2.48L4.28,31.43C3.71,31.73,3.16,31.91,2.61,31.91z M12,17.86l-7.73,4.58c-0.59,0.34-1.16,1.36-1.16,2.04v4.01l13.41-7.95L12,17.86z M3.12,3.6v4.05c0,0.68,0.57,1.69,1.16,2.04L12,14.28l4.53-2.69L3.12,3.6z"/>
-  </svg>
-);
 
 // Stable color for a service name across renders. Hash → palette index. Same
 // service always gets the same swatch so the breakdown bar matches the

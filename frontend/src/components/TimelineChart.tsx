@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 export type TimelineBucket = {
   tsMs: number;
@@ -30,6 +30,20 @@ type Props = {
   /** Currently zoomed-in bucket window, in ms. Used to highlight + reflect the active filter. */
   selectedRange?: { sinceMs: number; untilMs: number } | null;
   onBucketClick?: (bucketStartMs: number, bucketEndMs: number) => void;
+  /** Press-drag-to-zoom: called on mouseup if the drag spans >=1 bucket. */
+  onRangeSelect?: (sinceMs: number, untilMs: number) => void;
+  /** Shared crosshair: external time (ms) to draw a vertical guide at, regardless of local hover. */
+  hoveredTimeMs?: number | null;
+  /** Shared crosshair: notify the page so sibling charts can sync their guide. */
+  onHoverTimeChange?: (ms: number | null) => void;
+  /** Vertical annotation markers (e.g. gateway restart events). 1px dashed guides. */
+  annotations?: Array<{ tsMs: number; label: string; tone?: 'info' | 'warning' | 'danger' }>;
+  /** Horizontal reference lines on the latency axis (ms). Dashed; data crossing the line is the signal. */
+  latencyThresholdsMs?: Array<{ value: number; label?: string }>;
+  /** AppDynamics-style baseline band on the count axis. lo/hi are bucket-total values; rendered as a translucent rect. */
+  baselineBand?: { lo: number; hi: number; label?: string } | null;
+  /** Per-bucket totals from the prior window, aligned by index. Drawn as a dashed muted polyline. */
+  priorTotals?: number[] | null;
 };
 
 // Compact, hex-style color tokens that match the project's Tailwind palette.
@@ -68,10 +82,22 @@ export const TimelineChart: React.FC<Props> = ({
   percentiles,
   selectedRange,
   onBucketClick,
+  onRangeSelect,
+  hoveredTimeMs,
+  onHoverTimeChange,
+  annotations,
+  latencyThresholdsMs,
+  baselineBand,
+  priorTotals,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  // Drag-to-zoom: dragStartIdx is set on mousedown, dragEndIdx tracks the
+  // current pointer position while held. Released as a range on mouseup; ESC
+  // cancels without applying.
+  const [dragStartIdx, setDragStartIdx] = useState<number | null>(null);
+  const [dragEndIdx, setDragEndIdx] = useState<number | null>(null);
 
   // Resize observer so the chart scales with the container, not just the
   // initial mount width.
@@ -105,20 +131,79 @@ export const TimelineChart: React.FC<Props> = ({
   const yOfCount = (count: number) => padding.top + innerH - (innerH * (count / maxTotal));
   const yOfLatency = (ms: number) => padding.top + innerH - (innerH * (ms / maxLatencyMs));
 
-  const onMove = (e: React.MouseEvent<SVGElement>) => {
-    if (!buckets.length || bucketWidth <= 0) return;
+  const idxFromEvent = (e: React.MouseEvent<SVGElement>): number | null => {
+    if (!buckets.length || bucketWidth <= 0) return null;
     const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
     const x = e.clientX - rect.left - padding.left;
-    const idx = Math.max(0, Math.min(buckets.length - 1, Math.floor(x / bucketWidth)));
-    setHoverIdx(idx);
+    return Math.max(0, Math.min(buckets.length - 1, Math.floor(x / bucketWidth)));
   };
-  const onLeave = () => setHoverIdx(null);
 
-  const handleBucketClick = (idx: number) => {
-    if (!onBucketClick) return;
-    const b = buckets[idx];
-    onBucketClick(b.tsMs, b.tsMs + bucketSizeMs);
+  const onMove = (e: React.MouseEvent<SVGElement>) => {
+    const idx = idxFromEvent(e);
+    if (idx == null) return;
+    setHoverIdx(idx);
+    if (dragStartIdx != null) setDragEndIdx(idx);
+    if (onHoverTimeChange && buckets[idx]) onHoverTimeChange(buckets[idx].tsMs + bucketSizeMs / 2);
   };
+  const onLeave = () => {
+    setHoverIdx(null);
+    if (dragStartIdx == null && onHoverTimeChange) onHoverTimeChange(null);
+  };
+
+  const onMouseDown = (e: React.MouseEvent<SVGElement>) => {
+    if (!onRangeSelect || e.button !== 0) return;
+    const idx = idxFromEvent(e);
+    if (idx == null) return;
+    setDragStartIdx(idx);
+    setDragEndIdx(idx);
+  };
+  const onMouseUp = (e: React.MouseEvent<SVGElement>) => {
+    if (dragStartIdx == null) {
+      // Plain click on a bucket — keep the existing single-bucket zoom behavior.
+      const idx = idxFromEvent(e);
+      if (idx != null && onBucketClick) {
+        const b = buckets[idx];
+        onBucketClick(b.tsMs, b.tsMs + bucketSizeMs);
+      }
+      return;
+    }
+    const end = dragEndIdx ?? dragStartIdx;
+    const lo = Math.min(dragStartIdx, end);
+    const hi = Math.max(dragStartIdx, end);
+    setDragStartIdx(null);
+    setDragEndIdx(null);
+    if (lo === hi) {
+      // Treat as a click on that bucket.
+      if (onBucketClick && buckets[lo]) onBucketClick(buckets[lo].tsMs, buckets[lo].tsMs + bucketSizeMs);
+      return;
+    }
+    if (onRangeSelect && buckets[lo] && buckets[hi]) {
+      onRangeSelect(buckets[lo].tsMs, buckets[hi].tsMs + bucketSizeMs);
+    }
+  };
+
+  // ESC cancels an in-progress drag without applying.
+  useEffect(() => {
+    if (dragStartIdx == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDragStartIdx(null);
+        setDragEndIdx(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [dragStartIdx]);
+
+  // Translate the page-wide shared-hover time-X into a bucket index for guide
+  // rendering. null when the time is outside this chart's window.
+  const externalHoverIdx = (() => {
+    if (typeof hoveredTimeMs !== 'number' || !buckets.length || bucketSizeMs <= 0) return null;
+    const first = buckets[0].tsMs;
+    const last = buckets[buckets.length - 1].tsMs + bucketSizeMs;
+    if (hoveredTimeMs < first || hoveredTimeMs > last) return null;
+    return Math.min(buckets.length - 1, Math.max(0, Math.floor((hoveredTimeMs - first) / bucketSizeMs)));
+  })();
 
   // Build the polyline points for the percentile overlay (only buckets where
   // we have a value contribute; gaps are bridged so the line stays continuous
@@ -153,9 +238,11 @@ export const TimelineChart: React.FC<Props> = ({
       <svg
         width={width}
         height={height}
-        className="block"
+        className={`block ${onRangeSelect ? 'cursor-crosshair' : ''}`}
         onMouseMove={onMove}
         onMouseLeave={onLeave}
+        onMouseDown={onMouseDown}
+        onMouseUp={onMouseUp}
       >
         {/* X axis baseline */}
         <line
@@ -166,6 +253,60 @@ export const TimelineChart: React.FC<Props> = ({
           stroke="#393b46"
           strokeWidth={1}
         />
+
+        {/* Baseline band (AppDynamics-style expected-range overlay). Drawn
+            under the bars so live data crossing the band is the signal. */}
+        {baselineBand && baselineBand.hi > baselineBand.lo && (() => {
+          const yHi = yOfCount(baselineBand.hi);
+          const yLo = yOfCount(baselineBand.lo);
+          const top = Math.min(yHi, yLo);
+          const h = Math.max(1, Math.abs(yLo - yHi));
+          return (
+            <g>
+              <rect
+                x={padding.left}
+                y={top}
+                width={innerW}
+                height={h}
+                fill="#8c8fa1"
+                fillOpacity={0.08}
+                pointerEvents="none"
+              />
+              {baselineBand.label && (
+                <text
+                  x={padding.left + 4}
+                  y={Math.max(8, top - 2)}
+                  fill="#8c8fa1"
+                  fontSize={9}
+                  fontFamily="'Source Code Pro', monospace"
+                  pointerEvents="none"
+                >{baselineBand.label}</text>
+              )}
+            </g>
+          );
+        })()}
+
+        {/* Prior-window polyline (AppDynamics-style "same time, prior period"
+            comparison). Dashed, muted; doesn't compete with live data. */}
+        {priorTotals && priorTotals.length === buckets.length && (() => {
+          const pts: string[] = [];
+          for (let i = 0; i < priorTotals.length; i++) {
+            const v = priorTotals[i];
+            if (typeof v === 'number') pts.push(`${xOf(i)},${yOfCount(v)}`);
+          }
+          if (pts.length < 2) return null;
+          return (
+            <polyline
+              fill="none"
+              stroke="#8c8fa1"
+              strokeOpacity={0.55}
+              strokeWidth={1}
+              strokeDasharray="2 3"
+              points={pts.join(' ')}
+              pointerEvents="none"
+            />
+          );
+        })()}
 
         {/* Selected range shading (covers the active sinceMs..untilMs window) */}
         {selectedRange && buckets.length > 0 && bucketSizeMs > 0 && (() => {
@@ -185,7 +326,7 @@ export const TimelineChart: React.FC<Props> = ({
           if (!b.total) return null;
           let yCursor = padding.top + innerH;
           return (
-            <g key={i} onClick={() => handleBucketClick(i)} className={onBucketClick ? 'cursor-pointer' : ''}>
+            <g key={i} className={onBucketClick ? 'cursor-pointer' : ''}>
               {segments.map(seg => {
                 const v = Number(b[seg.key] || 0);
                 if (v <= 0) return null;
@@ -204,6 +345,36 @@ export const TimelineChart: React.FC<Props> = ({
                   />
                 );
               })}
+            </g>
+          );
+        })}
+
+        {/* Latency threshold reference lines (only when percentile overlay is on) */}
+        {showPercentiles && (latencyThresholdsMs || []).map((t, i) => {
+          if (!(t.value > 0) || t.value > maxLatencyMs) return null;
+          const y = yOfLatency(t.value);
+          return (
+            <g key={`thr-${i}`} pointerEvents="none">
+              <line
+                x1={padding.left}
+                x2={padding.left + innerW}
+                y1={y}
+                y2={y}
+                stroke="#8c8fa1"
+                strokeOpacity={0.55}
+                strokeWidth={1}
+                strokeDasharray="3 3"
+              />
+              {t.label && (
+                <text
+                  x={padding.left + innerW - 4}
+                  y={y - 3}
+                  fill="#8c8fa1"
+                  fontSize={9}
+                  textAnchor="end"
+                  fontFamily="'Source Code Pro', monospace"
+                >{t.label}</text>
+              )}
             </g>
           );
         })}
@@ -227,7 +398,73 @@ export const TimelineChart: React.FC<Props> = ({
           </>
         )}
 
-        {/* Hover vertical guide */}
+        {/* Annotations — vertical event markers (gateway restart, config save, etc.) */}
+        {(annotations || []).map((a, i) => {
+          if (!buckets.length || bucketSizeMs <= 0) return null;
+          const first = buckets[0].tsMs;
+          const last = buckets[buckets.length - 1].tsMs + bucketSizeMs;
+          if (a.tsMs < first || a.tsMs > last) return null;
+          const frac = (a.tsMs - first) / (last - first);
+          const x = padding.left + innerW * frac;
+          const stroke =
+            a.tone === 'danger' ? '#b2001e' :
+            a.tone === 'warning' ? '#d9ae00' :
+            '#8c8fa1';
+          return (
+            <line
+              key={`ann-${i}`}
+              x1={x}
+              x2={x}
+              y1={padding.top}
+              y2={padding.top + innerH}
+              stroke={stroke}
+              strokeOpacity={a.tone ? 0.7 : 0.5}
+              strokeWidth={1}
+              strokeDasharray="2 2"
+              pointerEvents="none"
+            >
+              <title>{`${a.label} · ${new Date(a.tsMs).toLocaleTimeString([], { hour12: false })}`}</title>
+            </line>
+          );
+        })}
+
+        {/* Drag-to-zoom selection rectangle */}
+        {dragStartIdx != null && dragEndIdx != null && Math.abs(dragStartIdx - dragEndIdx) >= 1 && (() => {
+          const lo = Math.min(dragStartIdx, dragEndIdx);
+          const hi = Math.max(dragStartIdx, dragEndIdx);
+          const x = padding.left + lo * bucketWidth;
+          const w = (hi - lo + 1) * bucketWidth;
+          return (
+            <rect
+              x={x}
+              y={padding.top}
+              width={w}
+              height={innerH}
+              fill="#3759d8"
+              fillOpacity={0.16}
+              stroke="#3759d8"
+              strokeOpacity={0.5}
+              strokeWidth={1}
+              pointerEvents="none"
+            />
+          );
+        })()}
+
+        {/* Shared-crosshair guide (only when the local hover doesn't already cover this position) */}
+        {externalHoverIdx != null && hoverIdx == null && (
+          <line
+            x1={xOf(externalHoverIdx)}
+            x2={xOf(externalHoverIdx)}
+            y1={padding.top}
+            y2={padding.top + innerH}
+            stroke="#ffffff"
+            strokeOpacity={0.18}
+            strokeWidth={1}
+            pointerEvents="none"
+          />
+        )}
+
+        {/* Hover vertical guide (local) */}
         {hoverIdx != null && (
           <line
             x1={xOf(hoverIdx)}
