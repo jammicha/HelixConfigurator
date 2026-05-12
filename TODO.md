@@ -8,19 +8,12 @@ resolve in a way that changes the project's scope.
 
 ---
 
-## 1. Extract `TraceDetailDrawer` + waterfall subsystem
+## 1. Extract `TraceDetailDrawer` + waterfall subsystem — DONE (2026-05-12)
 
-**Why:** `frontend/src/components/OtelDataPage.tsx` is still ~1724 lines.
-About a thousand of those are the trace detail viewer (`TraceDetailDrawer`,
-`Waterfall`, `RollupPanel`, `ServiceBreakdownPanel`, `FlameView`, `SpanRow`,
-`SummaryCell`, `LogLine`, `SERVICE_PALETTE`, `colorForService`) — same
-pattern as the sub-tabs we already pulled out into `components/otel-data/`.
-
-**Plan:** Move the above into `components/otel-data/trace-detail/`. Pure
-mechanical refactor, no logic changes. Drops `OtelDataPage.tsx` to ~700
-lines.
-
-**Risk:** Low. Same shape as the sub-tab extraction done in `059c2f5`.
+**Status:** Shipped. Subsystem extracted into
+`components/otel-data/trace-detail/` (TraceDetailDrawer, Waterfall +
+SummaryCell + RollupPanel + ServiceBreakdownPanel, SpanRow, FlameView,
+LogLine, palette). `OtelDataPage.tsx` dropped from 1929 → 901 lines.
 
 ---
 
@@ -247,12 +240,18 @@ configurator's standalone story rather than something AIOps mandates.
 
 ## 8. Helix CTA promotion (positioning follow-on)
 
-**Why:** Current Helix deep-links live in three places (trace detail
-drawer header, per-row chevrons in Logs and Errors) and are easy to
-miss. Under the Preflight positioning, the CTA should be unmissable on
-every Bridge surface.
+**Status (2026-05-12):** Partially shipped. The trace detail drawer
+now carries a prominent "Send to AIOps" / "Send anomaly to AIOps"
+button that converts the trace into a Helix Event via the Events API
+(commit `d9fb3de`). The drawer also has a one-time "Provision event
+class" affordance on Settings. The remaining items are smaller and
+ship independently.
 
-**Plan:**
+**Why:** Helix deep-links / actions on `/otel-data` should be
+unmissable on every Bridge surface. The drawer is now covered; the
+Overview header and per-surface chrome aren't.
+
+**Still pending:**
 - **Overview banner:** When `helixEnv.endpoint` and `helixEnv.tenantId`
   are both set and non-placeholder, render a top-of-Overview banner:
   "Telemetry is flowing — continue in Helix AIOps →" linking to the
@@ -264,6 +263,9 @@ every Bridge surface.
 - **Trace-row chevrons:** Apply the `hasRealHelixEndpoint` guard from
   the existing #4 backlog item to Traces/Logs/Errors row-level
   chevrons. (Already in scope; flagging the dependency.)
+- **Insights cards → AIOps:** the #3 "Reframe" note (Investigate
+  `<service>` in Helix AIOps →) hasn't shipped yet — wire that up at
+  the same time as the per-surface CTAs.
 
 **Risk:** Low. The banner is the only new affordance; everything else
 is a guard fix or a one-line link.
@@ -304,30 +306,40 @@ visibility" pattern that defines the Preflight positioning.
 **Symptom (from review):** "OTel data doesn't seem to stream in very
 consistently."
 
+**Status (2026-05-12):** Partially mitigated by the unified stream
+mode (commit `e74e77b`). Users can now pick `Live / 30s / 1m / 5m /
+Paused`, so the "quick win" of shorter polling is now self-service —
+no more hardcoded 60s. Live mode = SSE + 30 s rollup poll. Background
+tab throttling and SSE reconnect gaps (causes 5 and 3 below) are
+unchanged. The dominant cause (#1) is still pending and requires #2.
+
 **Root causes, ranked by likely impact:**
 
 1. **Overview surfaces are polled, not pushed.** SSE
    (`/api/traces/stream`) only emits `trace`, `error_record`, `log`,
    `trace_counts_update`. The Overview stat cards, volume chart, latency
    heatmap, and service map all come from `/api/overview-bundle`, which
-   is polled on a hardcoded `setInterval(refresh, 60_000)` in
-   `OtelDataPage.tsx:141`. The trace *list* feels live (SSE) but every
-   aggregate visualization can be up to 60s stale. This is almost
-   certainly the dominant cause of "inconsistent" — adjacent surfaces
-   are on different cadences. Fix path: item #2 in this doc (SSE
-   coverage for Overview charts), or shorten the polling interval.
+   is polled on the page-wide `usePageRefresh` cadence. The trace
+   *list* feels live (SSE) but every aggregate visualization is at
+   best 30 s stale. Fix path: item #2 in this doc (SSE coverage for
+   Overview charts). The stream mode UI partially mitigates by letting
+   the user pick a faster poll, but the underlying mismatch remains.
 2. **Collector batches with `timeout: 1s, send_batch_size: 1024`**
-   (`backend/index.js:335`). Traces arrive in ≤1s bursts, not
+   (`helix-otel-collector.yaml`). Traces arrive in ≤1s bursts, not
    continuously. Looks jagged on a high-resolution timeline.
 3. **No replay on SSE reconnect.** Server doesn't set `id:` on events
    and ignores `Last-Event-ID`. When the browser auto-reconnects after
    a network blip or tab-throttle, anything emitted during the gap is
-   missing from the live list (still in the backend store). Indicator
-   stays at "Reconnecting…" since `streamConnected` only resets when
-   the next `connected` event arrives.
-4. **Operations tab polls every 60s** with no SSE coverage
-   (`OtelDataPage.tsx:377`). Same lag class as Overview but more
-   visible because Operations is a deep-dive surface.
+   missing from the live list (still in the backend store). The
+   "Reconnecting…" pill that surfaced this state was removed when
+   stream mode shipped — silent gaps now, no UI signal of an active
+   reconnect. (Worth restoring the badge if SSE reliability becomes a
+   recurring complaint.)
+4. **Operations tab polls every 60s.** Unchanged — Operations refresh
+   doesn't yet honor stream mode for its private interval (the cadence
+   is hardcoded inside `refreshOperations`'s `setInterval`). Same lag
+   class as Overview but more visible because Operations is a
+   deep-dive surface.
 5. **Backgrounded-tab throttling.** `usePageRefresh` pauses polling
    when `document.visibilityState === 'hidden'` (correct), but SSE is
    browser-throttled in background tabs too. Coming back from a long
@@ -338,11 +350,11 @@ consistently."
    but worth knowing.
 
 **Recommended fix path:**
-- Quick win: drop the hardcoded 60s polling intervals to 10s for
-  Overview/Operations to mask the lag. Cheap.
-- Medium: ship #2 (SSE coverage for Overview charts) and remove the
-  Operations polling entirely once those events flow.
+- Medium: ship #2 (SSE coverage for Overview charts) and have
+  Operations honor the stream-mode cadence (or get its own SSE).
 - Optional: add SSE `id:` + `Last-Event-ID` replay on reconnect.
+- Optional: restore a "reconnecting…" indicator in some form (was
+  visible on the Traces / Logs tabs before the stream-mode unifier).
 
 ---
 
