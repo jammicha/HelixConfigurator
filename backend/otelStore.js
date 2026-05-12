@@ -12,6 +12,18 @@ const EventEmitter = require('events');
 const Database = require('better-sqlite3');
 
 const TRACE_CAP = 500;
+
+// Services emitted by the configurator/sidecar pipeline itself. The Traces
+// tab's frontend filter hides these (see frontend/src/components/otel-data/
+// constants.ts:INTERNAL_SERVICES — must stay in sync), so the histogram and
+// overview totals must hide them too or the chart total disagrees with the
+// visible trace count.
+const INTERNAL_SERVICES = [
+  'helix-gateway',
+  'helix-configurator',
+  'helix-configurator-verify',
+  'otelcol-contrib',
+];
 // Log records (severity-tagged log lines) are stored separately from traces
 // because OTel logs frequently arrive without a trace_id. Without a count
 // cap they grew unbounded — we hit 1M+ rows / 11 GB on disk before this fix.
@@ -403,8 +415,21 @@ class OtelStore {
     });
     tx();
 
+    // One participant-list query covers both jobs: (a) skip self-only
+    // pipeline traces so synthetic verify/etc. don't appear in the live
+    // list, and (b) annotate the emitted summary with its participating
+    // services so the frontend can honor an active service filter when
+    // merging SSE events (otherwise long-lived traces from other services
+    // bypass the filter and dominate the list).
+    const getParticipants = this.db.prepare(
+      `SELECT DISTINCT service_name FROM spans
+         WHERE trace_id = ? AND service_name IS NOT NULL`,
+    );
     for (const summary of summaries) {
-      if (summary) this.events.emit('trace', summary);
+      if (!summary) continue;
+      const participants = getParticipants.all(summary.trace_id).map(r => r.service_name);
+      if (!participants.some(s => !INTERNAL_SERVICES.includes(s))) continue;
+      this.events.emit('trace', { ...summary, participating_services: participants });
     }
     for (const err of errorEvents) {
       // Note: NOT 'error' — that's a reserved EventEmitter channel that
@@ -476,7 +501,8 @@ class OtelStore {
   // Computes p50/p95 from raw durations in JS — the trace cap (500) keeps
   // the result set small enough that a sort-and-index is faster than wiring
   // SQLite window functions.
-  listOperations({ sinceMs, untilMs } = {}) {
+  listOperations({ sinceMs, untilMs, slowThresholdMs } = {}) {
+    const SLOW_MS = Number.isFinite(slowThresholdMs) && slowThresholdMs > 0 ? slowThresholdMs : 1000;
     const params = [];
     const where = [];
     if (sinceMs) { where.push('received_at >= ?'); params.push(sinceMs); }
@@ -500,7 +526,7 @@ class OtelStore {
       }
       g.durations.push(r.duration_ms);
       if (r.has_error) g.error_count += 1;
-      if (r.duration_ms > 1000) g.slow_count += 1;
+      if (r.duration_ms > SLOW_MS) g.slow_count += 1;
     }
     const percentile = (sorted, p) => {
       if (sorted.length === 0) return 0;
@@ -566,7 +592,7 @@ class OtelStore {
     ).run(overflow);
   }
 
-  listTraces({ service, sinceMs, untilMs, limit = 200 }) {
+  listTraces({ service, sinceMs, untilMs, q, limit = 200 }) {
     const params = [];
     const where = [];
     // Filter by participant, not just by root service. Otherwise services
@@ -578,6 +604,21 @@ class OtelStore {
     }
     if (sinceMs) { where.push('t.received_at >= ?'); params.push(sinceMs); }
     if (untilMs) { where.push('t.received_at <= ?'); params.push(untilMs); }
+    // Search across root_operation, service_name (root), and trace_id.
+    // Runs server-side so it queries the full window — otherwise traces
+    // matching the search but past the LIMIT cap are invisible.
+    if (q && typeof q === 'string' && q.trim()) {
+      const needle = `%${q.trim().toLowerCase()}%`;
+      where.push('(LOWER(t.root_operation) LIKE ? OR LOWER(t.service_name) LIKE ? OR LOWER(t.trace_id) LIKE ?)');
+      params.push(needle, needle, needle);
+    }
+    // Drop traces that are *entirely* internal-service pipeline self-telemetry
+    // (cheap to compute since spans is indexed on trace_id). Filtering on
+    // t.service_name (the root) instead would silently hide real app traces
+    // in pipelines that re-root every forwarded trace at helix-gateway.
+    where.push(`EXISTS (SELECT 1 FROM spans s WHERE s.trace_id = t.trace_id
+                        AND s.service_name NOT IN (${INTERNAL_SERVICES.map(() => '?').join(',')}))`);
+    params.push(...INTERNAL_SERVICES);
     // Subquery rollups: log_count and error_count are cheap (indexed on
     // trace_id). db_call_count uses json_extract on the spans attributes
     // blob — fine for the 200-row cap, but watch this if the cap grows.
@@ -624,13 +665,22 @@ class OtelStore {
   }
 
   listServices() {
-    // Count each service by how many traces it participates in (any span),
-    // not by how many traces it roots. Mirrors what the user expects from
-    // Jaeger/Tempo: every service that touches a trace is a valid filter.
-    return this.db.prepare(
-      `SELECT service_name AS name, COUNT(DISTINCT trace_id) AS traceCount FROM spans
-       WHERE service_name IS NOT NULL GROUP BY service_name ORDER BY service_name ASC`
-    ).all();
+    // Lifetime counts — not windowed. Earlier attempt at windowing made the
+    // dropdown empty whenever the user paused or their workload went quiet,
+    // because the spans table had no rows in the recent window even though
+    // the chart still showed frozen data. The dropdown is a service picker;
+    // it should always offer the services that have ever sent traces. Counts
+    // are best-effort and may overstate "currently active" — that's a known
+    // trade-off, less bad than a vanishing dropdown.
+    const params = [];
+    const where = ['s.service_name IS NOT NULL'];
+    where.push(`s.service_name NOT IN (${INTERNAL_SERVICES.map(() => '?').join(',')})`);
+    params.push(...INTERNAL_SERVICES);
+    const sql = `SELECT s.service_name AS name, COUNT(DISTINCT s.trace_id) AS traceCount
+                 FROM spans s
+                 WHERE ${where.join(' AND ')}
+                 GROUP BY s.service_name ORDER BY s.service_name ASC`;
+    return this.db.prepare(sql).all(...params);
   }
 
   listErrors({ limit = 200 } = {}) {
@@ -710,7 +760,7 @@ const computePercentiles = (arr) => {
 // reports total/ok/slow/error counts plus p50/p95 of duration. Used by the
 // Traces timeline chart on /otel-data. Service filter matches the trace-list
 // behavior (any participant, not just root).
-OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, service }) {
+OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, service, slowThresholdMs }) {
   const now = Date.now();
   const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : now - 60 * 60 * 1000;
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
@@ -725,6 +775,11 @@ OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, ser
     where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
     params.push(service);
   }
+  // Same "any non-internal participant" rule as listTraces — see the comment
+  // there for why we don't filter on t.service_name (root) directly.
+  where.push(`EXISTS (SELECT 1 FROM spans s WHERE s.trace_id = t.trace_id
+                      AND s.service_name NOT IN (${INTERNAL_SERVICES.map(() => '?').join(',')}))`);
+  params.push(...INTERNAL_SERVICES);
   const sql = `
     SELECT t.received_at AS ts, t.duration_ms AS dur, t.has_error AS err
     FROM traces t
@@ -742,7 +797,7 @@ OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, ser
       _durs: [],
     });
   }
-  const SLOW_MS = 1000; // matches the frontend SLOW_THRESHOLD_MS constant
+  const SLOW_MS = Number.isFinite(slowThresholdMs) && slowThresholdMs > 0 ? slowThresholdMs : 1000;
   for (const r of rows) {
     const idx = Math.min(n - 1, Math.max(0, Math.floor((r.ts - start) / bucketSize)));
     const b = out[idx];

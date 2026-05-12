@@ -41,6 +41,8 @@ type Args = {
   untilMs?: number;
   /** Optional service filter applied to the trace/overview windowing. */
   service?: string;
+  /** Threshold (ms) for classifying traces as "slow" in the histogram buckets. */
+  slowThresholdMs?: number;
 };
 
 export type UseOverview = {
@@ -66,7 +68,7 @@ export type UseOverview = {
  * Re-fetches automatically when any input arg changes; the imperative
  * `refresh()` is what the page-level refresh-interval timer calls to poll.
  */
-export function useOverview({ sinceMs, untilMs, service }: Args): UseOverview {
+export function useOverview({ sinceMs, untilMs, service, slowThresholdMs }: Args): UseOverview {
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [tracesHistogram, setTracesHistogram] = useState<TracesHistogram | null>(null);
   const [logsHistogram, setLogsHistogram] = useState<LogsHistogram | null>(null);
@@ -89,6 +91,7 @@ export function useOverview({ sinceMs, untilMs, service }: Args): UseOverview {
     if (sinceMs != null) params.set('sinceMs', String(sinceMs));
     if (untilMs != null) params.set('untilMs', String(untilMs));
     if (service) params.set('service', service);
+    if (slowThresholdMs != null) params.set('slowThresholdMs', String(slowThresholdMs));
     const myToken = ++inflightRef.current;
     setLoading(true);
     try {
@@ -115,7 +118,7 @@ export function useOverview({ sinceMs, untilMs, service }: Args): UseOverview {
     } catch { /* non-fatal */ } finally {
       if (myToken === inflightRef.current) setLoading(false);
     }
-  }, [sinceMs, untilMs, service]);
+  }, [sinceMs, untilMs, service, slowThresholdMs]);
 
   // Auto-fetch when inputs change. The poll-on-interval is left to the
   // caller (usePageRefresh) so the page-wide refresh selector controls all

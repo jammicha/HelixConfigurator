@@ -20,9 +20,9 @@ export const formatRelative = (epochMs: number) => {
 export const formatTime = (epochMs: number) =>
   new Date(epochMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-export const traceStatus = (trace: TraceSummary): TraceStatus => {
+export const traceStatus = (trace: TraceSummary, slowThresholdMs: number = SLOW_THRESHOLD_MS): TraceStatus => {
   if (trace.has_error) return 'error';
-  if (trace.duration_ms > SLOW_THRESHOLD_MS) return 'slow';
+  if (trace.duration_ms > slowThresholdMs) return 'slow';
   return 'ok';
 };
 

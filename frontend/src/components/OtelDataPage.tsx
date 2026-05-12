@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -21,13 +21,16 @@ import { TimelineChart, TIMELINE_COLORS } from './TimelineChart';
 import { OverviewTab } from './OverviewTab';
 import { useOverview } from '../hooks/useOverview';
 import { usePageRefresh, REFRESH_INTERVAL_MS } from '../hooks/usePageRefresh';
-import type { RefreshInterval } from '../hooks/usePageRefresh';
+import type { StreamMode } from '../hooks/usePageRefresh';
+import { isStreamLive } from '../hooks/usePageRefresh';
 import { useLocalStorageState } from '../hooks/useLocalStorageState';
 
 // Shared types/utilities + sub-tab components — moved out of this file to
 // keep OtelDataPage focused on page-level wiring rather than per-tab UI.
 import type { HelixEnv, OperationStat, TraceDetail, TraceStatus, TraceSummary, TimeRange, LogRecord, ErrorRecord, SpanDetail } from './otel-data/types';
 import { TIME_RANGES, SLOW_THRESHOLD_MS, INTERNAL_SERVICES } from './otel-data/constants';
+import { SlowThresholdProvider, useSlowThreshold } from './otel-data/SlowThresholdContext';
+// useSlowThreshold is used in Waterfall + SpanRow (subcomponents below).
 import { buildHelixTraceUrl, detectNPlusOne, formatDuration, formatRelative, formatTime, normalizeSeverity, severityBadgeClass, traceStatus } from './otel-data/utils';
 import { BmcChevron } from './otel-data/BmcChevron';
 import { CustomRangePopover } from './otel-data/CustomRangePopover';
@@ -102,10 +105,9 @@ export const OtelDataPage: React.FC = () => {
   const [range, setRange] = useState<TimeRange>(initial.range);
   const [searchQuery, setSearchQuery] = useState<string>(initial.q);
   const [minMs, setMinMs] = useState<number>(initial.minMs);
-  // Pause is per-tab so the user can freeze one feed while watching the
-  // other (e.g. read a trace without the logs view scrolling underneath).
-  const [tracesPaused, setTracesPaused] = useState<boolean>(false);
-  const [logsPaused, setLogsPaused] = useState<boolean>(false);
+  // Pause state now derives from the single streamMode below — see the
+  // ALLOWED_MODES localStorage state. Both feeds are paused together;
+  // splitting them out per-tab was a quirk no one used.
   const [helixEnv, setHelixEnv] = useState<HelixEnv | null>(null);
   // Detected upstream OTel collectors and the "stream stalled? restart it"
   // affordance. Populated on mount + every 60s so the menu always reflects
@@ -120,11 +122,24 @@ export const OtelDataPage: React.FC = () => {
   // chart — it zooms the trace/log list into that bucket's window while the
   // chart itself stays at the broader `range` and shades the selection.
   const [customRange, setCustomRange] = useState<{ sinceMs: number; untilMs: number } | null>(null);
-  const ALLOWED_REFRESH: RefreshInterval[] = ['off', '10s', '30s', '60s', '5m'];
-  const [refreshInterval, setRefreshInterval] = useLocalStorageState<RefreshInterval>(
-    'helix-otel.refreshInterval',
-    '60s',
-    (v): v is RefreshInterval => typeof v === 'string' && ALLOWED_REFRESH.includes(v as RefreshInterval),
+  const ALLOWED_MODES: StreamMode[] = ['live', '30s', '1m', '5m', 'paused'];
+  const [streamMode, setStreamMode] = useLocalStorageState<StreamMode>(
+    'helix-otel.streamMode',
+    'live',
+    (v): v is StreamMode => typeof v === 'string' && ALLOWED_MODES.includes(v as StreamMode),
+  );
+  // Derived: are we paused for the purposes of SSE merge / poll skipping?
+  // Anything other than 'live' freezes SSE; 'paused' also stops polling.
+  const streamLive = isStreamLive(streamMode);
+  const tracesPaused = !streamLive;
+  const logsPaused = !streamLive;
+  // User-configurable "slow" threshold. Default mirrors the historical
+  // SLOW_THRESHOLD_MS constant. Validate as a positive finite number so a
+  // corrupted localStorage value doesn't break rendering.
+  const [slowThresholdMs, setSlowThresholdMs] = useLocalStorageState<number>(
+    'helix-otel.slowThresholdMs',
+    SLOW_THRESHOLD_MS,
+    (v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0,
   );
   const [customRangePopoverOpen, setCustomRangePopoverOpen] = useState(false);
   const customRangePopoverRef = useRef<HTMLDivElement | null>(null);
@@ -212,11 +227,15 @@ export const OtelDataPage: React.FC = () => {
   const [traceDetail, setTraceDetail] = useState<TraceDetail | null>(null);
   const [traceLogs, setTraceLogs] = useState<LogRecord[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [streamConnected, setStreamConnected] = useState(false);
   const [tracesLoading, setTracesLoading] = useState(true);
 
   const visibleTraces = useMemo(() => {
-    let out = traces.filter(t => !INTERNAL_SERVICES.has(t.service_name));
+    // Backend listTraces / tracesHistogram already filter out all-internal
+    // traces via the "any non-internal participating span" rule. Filtering
+    // here on t.service_name (root) would incorrectly hide app traces in
+    // pipelines that re-root every forwarded trace at helix-gateway —
+    // which is exactly what we saw in testing.
+    let out = traces.slice();
     if (statusFilter === 'outlier') {
       // Outlier = trace's duration > 2× its operation's p95. Build the map
       // only when the filter is active; depends on the same operations data
@@ -227,19 +246,12 @@ export const OtelDataPage: React.FC = () => {
         return p95 > 0 && t.duration_ms > p95 * 2;
       });
     } else if (statusFilter) {
-      out = out.filter(t => traceStatus(t) === statusFilter);
+      out = out.filter(t => traceStatus(t, slowThresholdMs) === statusFilter);
     }
     if (minMs > 0) out = out.filter(t => t.duration_ms >= minMs);
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      out = out.filter(t =>
-        (t.root_operation || '').toLowerCase().includes(q) ||
-        (t.service_name || '').toLowerCase().includes(q) ||
-        (t.trace_id || '').toLowerCase().includes(q),
-      );
-    }
+    // searchQuery is applied server-side in refreshTraces.
     return out;
-  }, [traces, statusFilter, minMs, searchQuery, operations]);
+  }, [traces, statusFilter, minMs, operations, slowThresholdMs]);
   const visibleServices = useMemo(
     () => services.filter(s => !INTERNAL_SERVICES.has(s.name)),
     [services],
@@ -258,6 +270,12 @@ export const OtelDataPage: React.FC = () => {
   // the EventSource — the closure captures the refs, not the booleans.
   const tracesPausedRef = useRef(tracesPaused);
   const logsPausedRef = useRef(logsPaused);
+  // serviceFilter is also read inside the SSE handler so the live merge
+  // skips traces that don't participate in the active filter (otherwise
+  // long-lived traces from other services bypass the filter on the bulk
+  // /api/traces query).
+  const serviceFilterRef = useRef(serviceFilter);
+  useEffect(() => { serviceFilterRef.current = serviceFilter; }, [serviceFilter]);
   useEffect(() => { tracesPausedRef.current = tracesPaused; }, [tracesPaused]);
   useEffect(() => { logsPausedRef.current = logsPaused; }, [logsPaused]);
 
@@ -303,6 +321,7 @@ export const OtelDataPage: React.FC = () => {
     const w = resolveWindow();
     if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
     if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+    if (searchQuery.trim()) params.set('q', searchQuery.trim());
     const res = await fetch(`/api/traces?${params}`);
     if (res.ok) {
       const j = await res.json();
@@ -316,11 +335,27 @@ export const OtelDataPage: React.FC = () => {
   // one composite round-trip via useOverview. Auto-refreshes when serviceFilter
   // or chart window changes; refresh() below is what the page-wide refresh
   // interval calls to poll.
-  const overviewWindow = resolveChartWindow();
+  //
+  // The window MUST be memoized — resolveChartWindow uses Date.now(), so
+  // computing it inline produces new sinceMs/untilMs on every render. That
+  // makes useOverview's deps unstable and causes a fetch-on-every-render
+  // loop (observed at ~50 req/s, 22% CPU, 1.8 MB/s network). refreshNonce
+  // is bumped on explicit refresh ticks so the window does advance when
+  // we actually want fresh data.
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const overviewWindow = useMemo<{ sinceMs?: number; untilMs?: number }>(() => {
+    const r = TIME_RANGES.find(x => x.value === range);
+    if (!r?.ms) return {};
+    const now = Date.now();
+    return { sinceMs: now - r.ms, untilMs: now };
+    // refreshNonce intentionally drives the recompute alongside range.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, refreshNonce]);
   const ov = useOverview({
     sinceMs: overviewWindow.sinceMs,
     untilMs: overviewWindow.untilMs,
     service: serviceFilter || undefined,
+    slowThresholdMs,
   });
 
   const refreshServices = async () => {
@@ -357,6 +392,7 @@ export const OtelDataPage: React.FC = () => {
       const w = resolveWindow();
       if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
       if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+      params.set('slowThresholdMs', String(slowThresholdMs));
       const res = await fetch(`/api/operations?${params}`);
       if (res.ok) {
         const j = await res.json();
@@ -373,12 +409,12 @@ export const OtelDataPage: React.FC = () => {
   // operation (Item 3: outlier highlighting).
   useEffect(() => {
     if (activeTab === 'operations') refreshOperations();
-  }, [activeTab, range]);
+  }, [activeTab, range, slowThresholdMs]);
   useEffect(() => {
     refreshOperations();
     const id = setInterval(refreshOperations, 60_000);
     return () => clearInterval(id);
-  }, [range]);
+  }, [range, slowThresholdMs]);
 
   const operationP95 = useMemo(() => {
     const m = new Map<string, number>();
@@ -394,6 +430,16 @@ export const OtelDataPage: React.FC = () => {
     setTracesLoading(true);
     refreshTraces();
   }, [serviceFilter, range, customRange]);
+
+  // Search runs server-side now, so it has to trigger a refetch. Debounced
+  // so typing doesn't hammer the backend on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setTracesLoading(true);
+      refreshTraces();
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // Reload logs whenever the active time window changes (including click-zoom).
   useEffect(() => {
@@ -414,8 +460,17 @@ export const OtelDataPage: React.FC = () => {
 
   // Page-wide refresh cadence. useOverview auto-fetches when its inputs
   // (serviceFilter, chart window) change; this hook drives the periodic
-  // re-poll cadence. Auto-pauses when the tab is hidden.
-  usePageRefresh(refreshInterval, ov.refresh);
+  // re-poll cadence. Auto-pauses when the tab is hidden, and now also
+  // when the stream is manually paused — otherwise the chart kept
+  // sliding even though the trace list was frozen, which felt buggy.
+  const pausedAwareRefresh = useCallback(() => {
+    if (tracesPausedRef.current) return;
+    // Bump the nonce so overviewWindow advances; useOverview's effect will
+    // pick up the new args and refetch. Avoids calling ov.refresh() directly
+    // (which would fetch with the OLD window).
+    setRefreshNonce(n => n + 1);
+  }, []);
+  usePageRefresh(streamMode, pausedAwareRefresh);
 
   // Clearing the customRange when the user switches the relative range keeps
   // the two pickers consistent — the new range implies "show everything in
@@ -428,10 +483,9 @@ export const OtelDataPage: React.FC = () => {
     refreshServices();
     refreshErrors();
     refreshLogs();
-    // The service list now reflects every service that participates in any
-    // trace (spans table), so it can grow as new downstream services emit
-    // their first span. Refresh every 30s so the dropdown picks them up
-    // without a full page reload.
+    // The service list reflects every service that participates in any trace
+    // (spans table, lifetime). 30 s tick picks up new services emitting their
+    // first span without a full page reload.
     const id = setInterval(refreshServices, 30_000);
     return () => clearInterval(id);
   }, []);
@@ -441,14 +495,23 @@ export const OtelDataPage: React.FC = () => {
   useEffect(() => {
     const es = new EventSource('/api/traces/stream');
     eventSourceRef.current = es;
-    es.addEventListener('connected', () => setStreamConnected(true));
     es.addEventListener('trace', (evt: MessageEvent) => {
       // Pause: stop merging incoming traces so the user's view stays stable
       // while they read. Unpausing resumes the live feed; a fresh /api/traces
       // call would be needed to backfill what was missed (we don't bother).
       if (tracesPausedRef.current) return;
       try {
-        const summary: TraceSummary = JSON.parse(evt.data);
+        const summary: TraceSummary & { participating_services?: string[] } = JSON.parse(evt.data);
+        // Honor the active service filter on the live merge. /api/traces
+        // filters by participant; SSE must too, or long-lived traces from
+        // other services (e.g. flagd EventStreams) bypass the filter and
+        // dominate the list. Backend tags each summary with the
+        // participating_services array exactly for this check.
+        const activeFilter = serviceFilterRef.current;
+        if (activeFilter) {
+          const participants = summary.participating_services;
+          if (!participants || !participants.includes(activeFilter)) return;
+        }
         setTraces(prev => {
           const filtered = prev.filter(t => t.trace_id !== summary.trace_id);
           // Keep newest first, cap at 200 to mirror server query.
@@ -512,7 +575,7 @@ export const OtelDataPage: React.FC = () => {
         setLogs(prev => [record, ...prev].slice(0, 500));
       } catch { /* ignore */ }
     });
-    es.onerror = () => setStreamConnected(false);
+    es.onerror = () => { /* connection state was used by the per-tab Live/Paused pill; no longer rendered */ };
     return () => {
       es.close();
       eventSourceRef.current = null;
@@ -540,6 +603,7 @@ export const OtelDataPage: React.FC = () => {
   }, [selectedTraceId]);
 
   return (
+    <SlowThresholdProvider value={slowThresholdMs}>
     <div className="flex h-screen w-full overflow-hidden bg-gray-1000 font-sans text-gray-100 flex-col">
       <header className="bg-helixNav flex items-center px-4 py-3 font-helix w-full justify-between flex-shrink-0 sticky top-0 z-40 border-b border-[#0f1620]">
         <div className="flex items-center">
@@ -603,30 +667,27 @@ export const OtelDataPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-3 pb-2">
-            <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
-              <Clock className="w-3.5 h-3.5" />
-              Range
-              <select
-                value={range}
-                onChange={(e) => setRange(e.target.value as TimeRange)}
-                disabled={!!customRange}
-                title={customRange ? 'Custom window is active — clear it to use a preset range' : 'Time range — persists across tabs'}
-                className="bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny text-gray-200 focus:outline-none focus:border-active normal-case tracking-normal font-normal disabled:opacity-50"
-              >
-                {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-            </label>
             <div ref={customRangePopoverRef} className="relative">
-              <button
-                onClick={() => setCustomRangePopoverOpen(o => !o)}
-                title={customRange ? 'Edit custom time window' : 'Set an explicit start/end window'}
-                className={`inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold transition-colors ${
-                  customRange ? 'text-active hover:text-active-hover' : 'text-gray-400 hover:text-gray-200'
-                }`}
-              >
+              <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
                 <Clock className="w-3.5 h-3.5" />
-                {customRange ? 'Custom window' : 'Custom range…'}
-              </button>
+                Range
+                <select
+                  value={customRange ? 'custom' : range}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === 'custom') {
+                      setCustomRangePopoverOpen(true);
+                    } else {
+                      setRange(v as TimeRange);
+                    }
+                  }}
+                  title={customRange ? 'Custom window active — pick a preset to clear, or re-select Custom… to edit' : 'Time range — persists across tabs'}
+                  className={`bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${customRange ? 'text-active' : 'text-gray-200'}`}
+                >
+                  {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  <option value="custom">{customRange ? 'Custom window' : 'Custom…'}</option>
+                </select>
+              </label>
               {customRangePopoverOpen && (
                 <CustomRangePopover
                   initial={customRange}
@@ -642,19 +703,58 @@ export const OtelDataPage: React.FC = () => {
                 />
               )}
             </div>
+            {customRange && (
+              <button
+                onClick={() => { setCustomRange(null); setRange('1h'); }}
+                title="Clear custom window and reset to default (1h)"
+                className="inline-flex items-center gap-1 text-tiny uppercase tracking-wider font-semibold text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear
+              </button>
+            )}
             <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
               <RefreshCw className="w-3.5 h-3.5" />
               Auto-refresh
               <select
-                value={refreshInterval}
-                onChange={(e) => setRefreshInterval(e.target.value as RefreshInterval)}
+                value={streamMode}
+                onChange={(e) => setStreamMode(e.target.value as StreamMode)}
+                title="Live = realtime SSE + 30s rollup poll. 30s/1m/5m = snapshot poll at that cadence (no realtime). Paused = freeze the view."
+                className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${
+                  streamMode === 'paused'
+                    ? 'border-warning/60 text-warning'
+                    : streamMode === 'live'
+                      ? 'border-gray-800 text-[#5eead4]'
+                      : 'border-gray-800 text-gray-200'
+                }`}
+              >
+                <option value="live">Live</option>
+                <option value="30s">30s</option>
+                <option value="1m">1m</option>
+                <option value="5m">5m</option>
+                <option value="paused">Paused</option>
+              </select>
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
+              <Clock className="w-3.5 h-3.5" />
+              Slow threshold
+              <select
+                value={String(slowThresholdMs)}
+                onChange={(e) => setSlowThresholdMs(parseInt(e.target.value, 10) || SLOW_THRESHOLD_MS)}
+                title="Duration above which traces and spans are flagged as slow. Affects the Slow status filter, duration coloring, and the histogram's ok/slow segmentation."
                 className="bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny text-gray-200 focus:outline-none focus:border-active normal-case tracking-normal font-normal"
               >
-                <option value="off">Off</option>
-                <option value="10s">10s</option>
-                <option value="30s">30s</option>
-                <option value="60s">60s</option>
-                <option value="5m">5m</option>
+                <option value="250">250ms</option>
+                <option value="500">500ms</option>
+                <option value="1000">1s</option>
+                <option value="2000">2s</option>
+                <option value="5000">5s</option>
+                <option value="10000">10s</option>
+                {/* Render any non-preset persisted value (e.g. set via URL or
+                    older session) so users can see + clear it. */}
+                {![250, 500, 1000, 2000, 5000, 10000].includes(slowThresholdMs) && (
+                  <option value={slowThresholdMs}>{slowThresholdMs}ms (custom)</option>
+                )}
               </select>
             </label>
             <div ref={diagRef} className="relative">
@@ -753,9 +853,6 @@ export const OtelDataPage: React.FC = () => {
             setSearchQuery={setSearchQuery}
             minMs={minMs}
             setMinMs={setMinMs}
-            paused={tracesPaused}
-            setPaused={setTracesPaused}
-            streamConnected={streamConnected}
             helixEnv={helixEnv}
             operationP95={operationP95}
             tracesLoading={tracesLoading}
@@ -780,9 +877,6 @@ export const OtelDataPage: React.FC = () => {
           <LogsAndErrorsTab
             logs={visibleLogs}
             errors={visibleErrors}
-            paused={logsPaused}
-            setPaused={setLogsPaused}
-            streamConnected={streamConnected}
             helixEnv={helixEnv}
             onJumpToTrace={(traceId) => {
               setActiveTab('traces');
@@ -807,6 +901,7 @@ export const OtelDataPage: React.FC = () => {
         />
       )}
     </div>
+    </SlowThresholdProvider>
   );
 };
 
@@ -883,6 +978,7 @@ const TraceDetailDrawer: React.FC<{
 
 const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = ({ detail, logs }) => {
   const { spans, summary } = detail;
+  const slowThresholdMs = useSlowThreshold();
   const [criticalPathOnly, setCriticalPathOnly] = useState(false);
   const [traceView, setTraceView] = useState<'waterfall' | 'flame'>('waterfall');
   const traceStartNs = useMemo(() => {
@@ -1091,7 +1187,7 @@ const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = ({ detai
       {/* Trace summary row */}
       <div className="grid grid-cols-4 gap-4 mb-5">
         <SummaryCell label="Service" value={summary.service_name} icon={<Server className="w-3.5 h-3.5" />} />
-        <SummaryCell label="Duration" value={formatDuration(summary.duration_ms)} icon={<Clock className="w-3.5 h-3.5" />} tone={summary.duration_ms > SLOW_THRESHOLD_MS ? 'warning' : undefined} />
+        <SummaryCell label="Duration" value={formatDuration(summary.duration_ms)} icon={<Clock className="w-3.5 h-3.5" />} tone={summary.duration_ms > slowThresholdMs ? 'warning' : undefined} />
         <SummaryCell label="Spans" value={String(summary.span_count)} icon={<Activity className="w-3.5 h-3.5" />} />
         <SummaryCell label="Status" value={summary.has_error ? 'Error' : 'OK'} icon={<AlertTriangle className="w-3.5 h-3.5" />} tone={summary.has_error ? 'danger' : 'success'} />
       </div>
@@ -1121,7 +1217,7 @@ const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = ({ detai
               icon={<Database className="w-3.5 h-3.5" />}
               title="SQL"
               subtitle={`${sqlTotalCount} call${sqlTotalCount === 1 ? '' : 's'} • ${formatDuration(sqlTotalMs)} total`}
-              tone={sqlRollup.some(b => b.maxMs > SLOW_THRESHOLD_MS) ? 'warning' : 'info'}
+              tone={sqlRollup.some(b => b.maxMs > slowThresholdMs) ? 'warning' : 'info'}
               columns={['Query', 'Count', 'Total', 'Slowest']}
               rows={sqlRollup.slice(0, 10).map(b => ({
                 key: b.key,
@@ -1131,7 +1227,7 @@ const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = ({ detai
                   </span>,
                   String(b.count),
                   formatDuration(b.totalMs),
-                  <span className={b.maxMs > SLOW_THRESHOLD_MS ? 'text-warning font-semibold' : ''}>{formatDuration(b.maxMs)}</span>,
+                  <span className={b.maxMs > slowThresholdMs ? 'text-warning font-semibold' : ''}>{formatDuration(b.maxMs)}</span>,
                 ],
               }))}
               footer={sqlRollup.length > 10 ? `+ ${sqlRollup.length - 10} more` : null}
@@ -1142,7 +1238,7 @@ const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = ({ detai
               icon={<Activity className="w-3.5 h-3.5" />}
               title="HTTP outbound"
               subtitle={`${httpTotalCount} call${httpTotalCount === 1 ? '' : 's'} • ${formatDuration(httpTotalMs)} total`}
-              tone={httpHasError ? 'danger' : httpRollup.some(b => b.maxMs > SLOW_THRESHOLD_MS) ? 'warning' : 'info'}
+              tone={httpHasError ? 'danger' : httpRollup.some(b => b.maxMs > slowThresholdMs) ? 'warning' : 'info'}
               columns={['Endpoint', 'Count', 'Total', 'Status']}
               rows={httpRollup.slice(0, 10).map(b => ({
                 key: b.key,
@@ -1384,6 +1480,7 @@ const SpanRow: React.FC<{
   isOnCriticalPath: boolean;
   criticalInterval: { startNs: number; endNs: number } | null;
 }> = ({ span, depth, traceStartNs, traceDurationNs, logs, isOnCriticalPath, criticalInterval }) => {
+  const slowThresholdMs = useSlowThreshold();
   const [open, setOpen] = useState(false);
   const offsetNs = Math.max(0, span.startTimeNs - traceStartNs);
   const widthNs = Math.max(1, span.endTimeNs - span.startTimeNs);
@@ -1391,7 +1488,7 @@ const SpanRow: React.FC<{
   const widthPct = Math.max(0.5, (widthNs / traceDurationNs) * 100);
 
   const isError = span.statusCode === 2 || span.events.some(e => e.name === 'exception');
-  const isSlow = span.durationMs > SLOW_THRESHOLD_MS;
+  const isSlow = span.durationMs > slowThresholdMs;
   // OTel renamed several DB attributes in semconv 1.27+. Read both old and
   // new keys so spans from either era render the same way.
   const dbSystem = span.attributes['db.system'] || span.attributes['db.system.name'];
@@ -1425,7 +1522,7 @@ const SpanRow: React.FC<{
     }
     return out;
   }, [span.attributes, dbSystem]);
-  const isSlowDb = !!dbSystem && span.durationMs > SLOW_THRESHOLD_MS;
+  const isSlowDb = !!dbSystem && span.durationMs > slowThresholdMs;
 
   // Off-path spans dim so the critical-path chain reads as a band of more-
   // saturated bars connecting through the waterfall (the Elastic / Lightstep

@@ -14,3 +14,4 @@ data/
 backend/data/
 docs/
 prompt.txt
+.env.predemo-bak

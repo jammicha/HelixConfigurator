@@ -9,16 +9,13 @@ import type { ErrorRecord, HelixEnv, Histogram, LogRecord } from './types';
 export const LogsAndErrorsTab: React.FC<{
   logs: LogRecord[];
   errors: ErrorRecord[];
-  paused: boolean;
-  setPaused: React.Dispatch<React.SetStateAction<boolean>>;
-  streamConnected: boolean;
   helixEnv: HelixEnv | null;
   onJumpToTrace: (traceId: string) => void;
   histogram: Histogram | null;
   customRange: { sinceMs: number; untilMs: number } | null;
   onBucketClick: (sinceMs: number, untilMs: number) => void;
   onClearCustomRange: () => void;
-}> = ({ logs, errors, paused, setPaused, streamConnected, helixEnv, onJumpToTrace, histogram, customRange, onBucketClick, onClearCustomRange }) => {
+}> = ({ logs, errors, helixEnv, onJumpToTrace, histogram, customRange, onBucketClick, onClearCustomRange }) => {
   const [subTab, setSubTab] = useState<'logs' | 'errors'>('logs');
   const [severityFilter, setSeverityFilter] = useState<string>('');
   const [logQuery, setLogQuery] = useState<string>('');
@@ -58,25 +55,6 @@ export const LogsAndErrorsTab: React.FC<{
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
         <div className="flex items-end gap-3 flex-wrap">
-          <div className="flex flex-col gap-1">
-            <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Stream</label>
-            <button
-              onClick={() => setPaused(p => !p)}
-              title={paused ? 'Resume live updates' : 'Pause incoming logs and errors so the list stops moving'}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border bg-gray-1000 text-tiny uppercase tracking-wider font-semibold transition-colors ${
-                paused
-                  ? 'border-warning/40 text-warning hover:border-warning'
-                  : streamConnected
-                    ? 'border-gray-800 text-[#5eead4] hover:border-success/40'
-                    : 'border-gray-800 text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${
-                paused ? 'bg-warning' : streamConnected ? 'bg-success animate-pulse' : 'bg-gray-600'
-              }`} />
-              {paused ? 'Paused' : streamConnected ? 'Live' : 'Reconnecting…'}
-            </button>
-          </div>
           <div className="flex border-b border-gray-800 -mb-px">
             <button
               onClick={() => setSubTab('logs')}

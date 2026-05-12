@@ -3,7 +3,8 @@ import { Activity, AlertTriangle, Database, ExternalLink, FileText, Loader2, Ser
 import { TimelineChart, TIMELINE_COLORS } from '../TimelineChart';
 import { BmcChevron } from './BmcChevron';
 import { StatusPill } from './StatusPill';
-import { MIN_DURATION_PRESETS, SLOW_THRESHOLD_MS } from './constants';
+import { MIN_DURATION_PRESETS } from './constants';
+import { useSlowThreshold } from './SlowThresholdContext';
 import { buildHelixTraceUrl, formatDuration, formatRelative } from './utils';
 import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
 
@@ -18,9 +19,6 @@ export const TracesTab: React.FC<{
   setSearchQuery: (s: string) => void;
   minMs: number;
   setMinMs: (n: number) => void;
-  paused: boolean;
-  setPaused: React.Dispatch<React.SetStateAction<boolean>>;
-  streamConnected: boolean;
   helixEnv: HelixEnv | null;
   operationP95: Map<string, number>;
   tracesLoading: boolean;
@@ -32,9 +30,10 @@ export const TracesTab: React.FC<{
 }> = ({
   traces, services, serviceFilter, setServiceFilter, statusFilter, setStatusFilter,
   searchQuery, setSearchQuery, minMs, setMinMs,
-  paused, setPaused, streamConnected, helixEnv, operationP95, tracesLoading, onSelect,
+  helixEnv, operationP95, tracesLoading, onSelect,
   histogram, customRange, onBucketClick, onClearCustomRange,
 }) => {
+  const slowThresholdMs = useSlowThreshold();
   // Column sort. Default 'received' desc matches the SSE merge order; opting
   // into 'duration' / 'spans' is a deliberate analytical re-sort.
   type SortKey = 'received' | 'duration' | 'spans';
@@ -67,25 +66,6 @@ export const TracesTab: React.FC<{
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-end gap-3 mb-4 flex-wrap">
         <div className="flex flex-col gap-1">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Stream</label>
-          <button
-            onClick={() => setPaused(p => !p)}
-            title={paused ? 'Resume live updates' : 'Pause incoming traces so the list stops moving'}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border bg-gray-1000 text-tiny uppercase tracking-wider font-semibold transition-colors ${
-              paused
-                ? 'border-warning/40 text-warning hover:border-warning'
-                : streamConnected
-                  ? 'border-gray-800 text-[#5eead4] hover:border-success/40'
-                  : 'border-gray-800 text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${
-              paused ? 'bg-warning' : streamConnected ? 'bg-success animate-pulse' : 'bg-gray-600'
-            }`} />
-            {paused ? 'Paused' : streamConnected ? 'Live' : 'Reconnecting…'}
-          </button>
-        </div>
-        <div className="flex flex-col gap-1">
           <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Service</label>
           <select
             value={serviceFilter}
@@ -107,7 +87,7 @@ export const TracesTab: React.FC<{
           >
             <option value="">All statuses</option>
             <option value="error">Error</option>
-            <option value="slow">Slow (&gt;{SLOW_THRESHOLD_MS}ms)</option>
+            <option value="slow">Slow (&gt;{slowThresholdMs}ms)</option>
             <option value="ok">OK</option>
             <option value="outlier">Outlier (&gt;2× p95)</option>
           </select>
@@ -117,11 +97,19 @@ export const TracesTab: React.FC<{
           <select
             value={String(minMs)}
             onChange={(e) => setMinMs(parseInt(e.target.value, 10) || 0)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
+            className={`bg-gray-1000 border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-active ${
+              minMs > 0 ? 'border-warning/60 text-warning' : 'border-gray-800 text-gray-100'
+            }`}
           >
             {MIN_DURATION_PRESETS.map(p => (
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
+            {/* Custom value from URL state or drag-zoom that doesn't match a
+                preset — render as its own option so the select doesn't silently
+                fall back to "Any duration" and hide an active filter. */}
+            {minMs > 0 && !MIN_DURATION_PRESETS.some(p => p.value === minMs) && (
+              <option value={minMs}>≥ {minMs}ms (custom)</option>
+            )}
           </select>
         </div>
         <div className="flex flex-col gap-1 flex-1 min-w-[16rem]">
@@ -276,7 +264,7 @@ export const TracesTab: React.FC<{
                       {t.root_operation}
                     </button>
                   </td>
-                  <td className={`px-4 py-2 text-right tabular-nums ${t.duration_ms > SLOW_THRESHOLD_MS ? 'text-warning font-semibold' : 'text-gray-300'}`}>
+                  <td className={`px-4 py-2 text-right tabular-nums ${t.duration_ms > slowThresholdMs ? 'text-warning font-semibold' : 'text-gray-300'}`}>
                     {formatDuration(t.duration_ms)}
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums text-gray-400">{t.span_count}</td>

@@ -51,7 +51,7 @@ export const Step3: React.FC<Props> = ({
   return (
     <div className="adapt-card">
       <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 3: Connect your collector to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-bridge</code></h2>
-      <p className="text-sm text-gray-400 mb-4">helix-gateway and your collector need to share a Docker network. We tried to wire it up automatically — finish the job here if needed.</p>
+      <p className="text-sm text-gray-400 mb-4">helix-gateway and your collector need to share a Docker network.</p>
 
       {bridgeStatus?.kind === 'success' && (
         <div className="mb-4 flex items-start gap-3 p-3 bg-success/10 border border-success/40 rounded text-sm">

@@ -1260,11 +1260,16 @@ app.use('/api', requireAuth);
 
 // --- OTel trace query endpoints (auth-gated) ------------------------------
 app.get('/api/traces', (req, res) => {
-  const { service, sinceMs, untilMs, limit } = req.query;
+  const { service, sinceMs, untilMs, limit, q } = req.query;
+  const svc = typeof service === 'string' && service ? service : undefined;
+  const since = sinceMs ? Number(sinceMs) : undefined;
+  const until = untilMs ? Number(untilMs) : undefined;
+  const query = typeof q === 'string' && q ? q : undefined;
   const traces = otelStore.listTraces({
-    service: typeof service === 'string' && service ? service : undefined,
-    sinceMs: sinceMs ? Number(sinceMs) : undefined,
-    untilMs: untilMs ? Number(untilMs) : undefined,
+    service: svc,
+    sinceMs: since,
+    untilMs: until,
+    q: query,
     limit: limit ? Number(limit) : 200,
   });
   res.json({ traces });
@@ -1321,11 +1326,12 @@ app.get('/api/traces/stream', (req, res) => {
 
 // Item 8: per-(service, root_operation) aggregates for the new Operations tab.
 app.get('/api/operations', (req, res) => {
-  const { sinceMs, untilMs } = req.query;
+  const { sinceMs, untilMs, slowThresholdMs } = req.query;
   res.json({
     operations: otelStore.listOperations({
       sinceMs: sinceMs ? Number(sinceMs) : undefined,
       untilMs: untilMs ? Number(untilMs) : undefined,
+      slowThresholdMs: slowThresholdMs ? Number(slowThresholdMs) : undefined,
     }),
   });
 });
@@ -1364,12 +1370,13 @@ app.get('/api/overview', async (req, res) => {
 // and service map. Replaces six separate fetches the frontend was firing in
 // lockstep on every refresh tick.
 app.get('/api/overview-bundle', async (req, res) => {
-  const { sinceMs, untilMs, buckets, service } = req.query;
+  const { sinceMs, untilMs, buckets, service, slowThresholdMs } = req.query;
   const since = sinceMs ? Number(sinceMs) : undefined;
   const until = untilMs ? Number(untilMs) : undefined;
   const svc = typeof service === 'string' && service ? service : undefined;
+  const slow = slowThresholdMs ? Number(slowThresholdMs) : undefined;
   const bucketCount = buckets ? Number(buckets) : 60;
-  const tracesHist = otelStore.tracesHistogram({ sinceMs: since, untilMs: until, buckets: bucketCount, service: svc });
+  const tracesHist = otelStore.tracesHistogram({ sinceMs: since, untilMs: until, buckets: bucketCount, service: svc, slowThresholdMs: slow });
   // Prior window = same-duration window immediately preceding the requested one.
   let priorTracesHist = null;
   if (since != null && until != null) {
@@ -1379,6 +1386,7 @@ app.get('/api/overview-bundle', async (req, res) => {
       untilMs: until - span,
       buckets: bucketCount,
       service: svc,
+      slowThresholdMs: slow,
     });
   }
   const overview = otelStore.overview({ sinceMs: since, untilMs: until, service: svc });
@@ -1451,12 +1459,13 @@ app.get('/api/traces/latency-heatmap', (req, res) => {
 // Time-binned aggregates for the timeline chart on the Traces tab. Each bucket
 // reports total / ok / slow / error counts plus p50 + p95 duration in ms.
 app.get('/api/traces/histogram', (req, res) => {
-  const { sinceMs, untilMs, buckets, service } = req.query;
+  const { sinceMs, untilMs, buckets, service, slowThresholdMs } = req.query;
   res.json(otelStore.tracesHistogram({
     sinceMs: sinceMs ? Number(sinceMs) : undefined,
     untilMs: untilMs ? Number(untilMs) : undefined,
     buckets: buckets ? Number(buckets) : undefined,
     service: typeof service === 'string' && service ? service : undefined,
+    slowThresholdMs: slowThresholdMs ? Number(slowThresholdMs) : undefined,
   }));
 });
 

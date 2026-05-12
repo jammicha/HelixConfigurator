@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Loader2, Server } from 'lucide-react';
-import { SLOW_THRESHOLD_MS } from './constants';
+import { useSlowThreshold } from './SlowThresholdContext';
 import { formatDuration } from './utils';
 import type { OperationStat } from './types';
 
@@ -9,6 +9,7 @@ export const OperationsTab: React.FC<{
   loading: boolean;
   onJumpToOperation: (op: string) => void;
 }> = ({ operations, loading, onJumpToOperation }) => {
+  const slowThresholdMs = useSlowThreshold();
   const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'max' | 'count' | 'errors' | 'slow' | 'service'>('p95');
   const sorted = useMemo(() => {
     const arr = operations.slice();
@@ -29,7 +30,7 @@ export const OperationsTab: React.FC<{
   // the visual signal is readable without bright fills.
   const latencyTone = (ms: number): string => {
     if (ms <= 200) return 'bg-success/10 text-success';
-    if (ms <= SLOW_THRESHOLD_MS) return 'bg-warning/10 text-warning';
+    if (ms <= slowThresholdMs) return 'bg-warning/10 text-warning';
     return 'bg-danger/15 text-[#ff8a8a]';
   };
   const errorPctTone = (pct: number): string => {
