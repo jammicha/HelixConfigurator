@@ -36,8 +36,17 @@ APP_URL=http://localhost:8080
 
 # Optional: deep-link to AIOps Business Service. Paste the opaque key from
 # https://<tenant>/aiops/#/entities/service/<KEY>?type=key — you can also paste
-# the full URL and the UI will extract the key.
+# the full URL and the UI will extract the key. Also used as the topology
+# pin (`service_id` / `business_service_key` slots) on Helix Events sent
+# from the trace detail drawer's "Send to AIOps" action, so a single trace
+# lands on this Business Service instead of duplicating across every
+# service that shares its OTel `service.name`.
 BUSINESS_SERVICE_KEY=
+
+# Optional: BMC Helix events-service base URL. Only needed when your tenant
+# serves Events on a different host than `HELIX_ENDPOINT` (the OTLP ingest
+# host). Default behavior is to use the origin of `HELIX_ENDPOINT`.
+HELIX_EVENTS_ENDPOINT=
 
 # Optional: require sign-in to the configurator UI. Leave blank for open access.
 UI_AUTH_PASSWORD=
@@ -99,7 +108,7 @@ After onboarding, the dashboard provides:
   - **Helix OTel Dashboard** — deep-link to the namespace overview dashboard.
   - **AIOps Business Service** — deep-link to the configured business service in AIOps (requires `BUSINESS_SERVICE_KEY`).
   - **Application UI** — opens `APP_URL`.
-- **Helix Connection Settings** — edit env vars in-place; saving triggers a gateway restart so changes take effect immediately. The Settings card also displays whether the UI is open access or password-required.
+- **Helix Connection Settings** — edit env vars in-place; saving triggers a gateway restart so changes take effect immediately. The Settings card also displays whether the UI is open access or password-required, and includes a one-time **Provision event class** button that creates the `OTEL_TRACE_ANOMALY` custom event class on your tenant — required for the trace drawer's *Send to AIOps* dedup to work (re-sends update the existing Event instead of duplicating).
 - **Gateway Config (YAML)** — Monaco-based editor with syntax highlighting, save-time validation (line-precise parse errors plus structural-lint warnings for typos like `recievers`, undefined pipeline references, missing `service` block), and `Cmd+S` / `Ctrl+S` to save.
   - **Load Template** — picker modal with built-in starting points: Default Sidecar, Prometheus Scrape, Tail Sampling for High-Volume Tracing, and Kubernetes Attribute Enrichment. Selecting a template loads its content into the editor with current env vars substituted; click Save Config to apply.
 - **Diagnostic Log Stream**
@@ -112,14 +121,22 @@ After onboarding, the dashboard provides:
 
 Open the **View OTel Data** nav item or visit `/otel-data` to explore traces, logs, and errors locally — no Jaeger or external trace store required. The gateway fan-outs traces and logs to the configurator over the local network and the page renders them via SSE.
 
+Page-level controls (top-right of the header) apply to every tab:
+
+- **Range** — relative ranges (`5m` / `15m` / `1h` / `6h` / `24h`) plus a `Custom…` option for explicit start/end windows.
+- **Stream mode** — `Live` (SSE + 30 s rollup poll), `30s` / `1m` / `5m` (snapshot polls, no realtime), or `Paused` (frozen view for reading). Replaces the previous separate Pause toggle and auto-refresh selector.
+- **Slow threshold** — duration above which traces and spans are flagged slow (250 ms / 500 ms / 1 s / 2 s / 5 s / 10 s presets). Drives the *Slow* status filter, duration coloring, and the histogram's ok/slow segmentation.
+
 Three top-level tabs:
 
-- **Traces.** Realtime list with filters for service, status (Error / Slow / OK / **Outlier** — traces > 2× p95 of their operation), min duration, time range, and free-text search across operation/service/trace ID. The Stream pill pauses the live feed without disconnecting it. Each row carries inline rollup badges for errors, DB calls, and log records, plus a one-click **View in Helix** deep-link to the `OTelTraceDetails` dashboard with the trace pre-selected. URL state is shareable: filters and the selected trace persist across reloads.
+- **Traces.** Realtime list with filters for service, status (Error / Slow / OK / **Outlier** — traces > 2× p95 of their operation), min duration, and a server-side search across operation / service / trace-id (debounced; matches past the 200-row cap stay reachable). Each row carries inline rollup badges for errors, DB calls, and log records, plus a one-click **View in Helix** deep-link to the `OTelTraceDetails` dashboard with the trace pre-selected. URL state is shareable: filters and the selected trace persist across reloads.
 - **Operations.** Per `service · operation` aggregates over the selected time range: count, p50, p95, max, error %, slow %. Sortable by every column. Click an operation to jump to the Traces tab pre-filtered for it.
-- **Logs & Errors.** Two sub-tabs: **Logs** (severity filter, body+service search) and **Errors** (grouped by `exception_type × service` by default with first-seen / last-seen / sample expander; toggle Flat for the chronological timeline). Both pause independently from the Traces feed.
+- **Logs & Errors.** Two sub-tabs: **Logs** (severity filter, body+service search) and **Errors** (grouped by `exception_type × service` by default with first-seen / last-seen / sample expander; toggle Flat for the chronological timeline).
 
 Trace detail (click a row in Traces):
 
+- **Send to AIOps.** Top-right of the drawer: posts the trace into BMC Helix as an Event via the Events API. Severity is derived from the trace itself — `CRITICAL` when there's an error span, `MAJOR` when duration > 2× the operation's p95, `MINOR` otherwise. The button label changes accordingly (*Send anomaly to AIOps* vs *Send to AIOps as event*), and the icon is colored to match. Sends are deduped on `helix_trace_id` server-side; re-clicks are warned about in the UI (the button reads *Sent — send again?* with a relative timestamp). Pinning to one Business Service requires `BUSINESS_SERVICE_KEY` to be set and the `OTEL_TRACE_ANOMALY` event class to be provisioned (one-time button on the Settings card — see Features above).
+- **View in Helix.** Deep-link to the `OTelTraceDetails` dashboard for this trace.
 - **Service breakdown.** Stacked bar showing wall-clock time per service in the trace, with intervals merged so parallel spans don't double-count.
 - **SQL rollup.** DB spans grouped by system + statement (or operation if no statement was captured) with count, total time, slowest exemplar. N+1 detection alert fires when 5+ spans share a `db.operation`.
 - **HTTP outbound rollup.** Client-kind spans grouped by method + normalized path, with status pills color-coded by class.
