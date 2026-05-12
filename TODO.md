@@ -184,7 +184,14 @@ downgraded):**
 
 ## 7. Make the demo/real plumbing boundary explicit in code
 
-**Status:** Code hygiene; matters more the longer this codebase lives.
+**Status (2026-05-12):** Step 1 shipped — every AIOps install/demo
+route is now under `/api/_demo/aiops/...`. Frontend `AiopsPage`, the
+generated bash/PowerShell installer scripts, and the four route
+handlers all updated. The boundary is now visible in URLs. Steps 2-5
+(env-flag gate, module split, README addendum, optional separate
+compose service) are still open.
+
+**Original framing — code hygiene; matters more the longer this codebase lives.**
 
 **The concern:** Routes labeled as demo simulations (`/api/aiops/configure`,
 `/api/aiops/package/:token`, `/api/aiops/install/:token.{sh,ps1}`) sit
@@ -198,10 +205,11 @@ versa) and ships a bug.
 
 **Plan (incremental, each step independently shippable):**
 
-1. **Namespace prefix.** Move every demo-only route under `/api/_demo/`.
-   `/api/aiops/configure` → `/api/_demo/aiops/configure`, etc. Frontend
-   updates are mechanical. The underscore prefix is conventional for
-   "internal / non-product" namespaces (Google APIs, Kubernetes).
+1. **Namespace prefix.** ✅ DONE (2026-05-12, commit pending). All
+   AIOps install routes moved to `/api/_demo/aiops/*`; the generated
+   bash/PowerShell installer scripts reference the new path. The
+   underscore prefix is conventional for "internal / non-product"
+   namespaces (Google APIs, Kubernetes).
 2. **Env flag.** Add `IS_DEMO_INSTALL=true` to `.env.example`. Gate the
    `/api/_demo/*` routes behind it — return 404 when the flag is false.
    Default to true for the in-repo `.env` so existing demo flows keep

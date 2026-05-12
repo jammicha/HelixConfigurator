@@ -897,7 +897,7 @@ fi
 # leave a corrupt Dockerfile (etc.) that survives unzip -o.
 rm -rf helix-configurator
 echo "Downloading package..."
-curl -fsSL "$BASE_URL/api/aiops/package/$TOKEN" -o package.zip
+curl -fsSL "$BASE_URL/api/_demo/aiops/package/$TOKEN" -o package.zip
 echo "Extracting..."
 unzip -oq package.zip
 rm package.zip
@@ -1046,7 +1046,7 @@ if (Test-Path "helix-configurator") {
 # Force a clean slate so a partial/stale extract can't leave a corrupt file behind.
 if (Test-Path "helix-configurator") { Remove-Item -Recurse -Force "helix-configurator" }
 Write-Host "Downloading package..."
-Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/api/aiops/package/$Token" -OutFile "package.zip"
+Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/api/_demo/aiops/package/$Token" -OutFile "package.zip"
 Write-Host "Extracting..."
 Expand-Archive -Force -Path "package.zip" -DestinationPath "."
 Remove-Item "package.zip"
@@ -1126,8 +1126,8 @@ Write-Host "Stop with:    cd $Target\\helix-configurator; docker compose down"
 `;
 };
 
-// POST /api/aiops/configure — create a session, return token + simulated key.
-app.post('/api/aiops/configure', (req, res) => {
+// POST /api/_demo/aiops/configure — create a session, return token + simulated key.
+app.post('/api/_demo/aiops/configure', (req, res) => {
   const { xSource } = req.body || {};
   if (typeof xSource !== 'string' || !xSource.trim()) {
     return res.status(400).json({ error: 'xSource is required' });
@@ -1152,8 +1152,8 @@ app.post('/api/aiops/configure', (req, res) => {
   });
 });
 
-// GET /api/aiops/package/:token — stream the configured zip.
-app.get('/api/aiops/package/:token', (req, res) => {
+// GET /api/_demo/aiops/package/:token — stream the configured zip.
+app.get('/api/_demo/aiops/package/:token', (req, res) => {
   const session = aiopsSessions.get(req.params.token);
   if (!session) return res.status(404).json({ error: 'Session expired or not found' });
   const safeName = session.xSource.replace(/[^A-Za-z0-9._-]+/g, '-');
@@ -1170,8 +1170,8 @@ app.get('/api/aiops/package/:token', (req, res) => {
   archive.finalize();
 });
 
-// GET /api/aiops/install/:token.sh — bash one-liner installer.
-app.get('/api/aiops/install/:token.sh', (req, res) => {
+// GET /api/_demo/aiops/install/:token.sh — bash one-liner installer.
+app.get('/api/_demo/aiops/install/:token.sh', (req, res) => {
   const session = aiopsSessions.get(req.params.token);
   if (!session) {
     return res.status(404).type('text/plain').send('# Session expired or not found\nexit 1\n');
@@ -1181,8 +1181,8 @@ app.get('/api/aiops/install/:token.sh', (req, res) => {
   res.send(renderBashInstaller({ token: req.params.token, baseUrl, xSource: session.xSource }));
 });
 
-// GET /api/aiops/install/:token.ps1 — PowerShell one-liner installer.
-app.get('/api/aiops/install/:token.ps1', (req, res) => {
+// GET /api/_demo/aiops/install/:token.ps1 — PowerShell one-liner installer.
+app.get('/api/_demo/aiops/install/:token.ps1', (req, res) => {
   const session = aiopsSessions.get(req.params.token);
   if (!session) {
     return res.status(404).type('text/plain').send('# Session expired or not found\nexit 1\n');

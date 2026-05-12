@@ -78,8 +78,8 @@ export const AiopsPage: React.FC = () => {
   // localhost so the command works when pasted on a different machine.
   const installCmd = configured
     ? platform === 'windows'
-      ? `iwr -useb ${configured.installBaseUrl}/api/aiops/install/${configured.token}.ps1 | iex`
-      : `curl -sSL ${configured.installBaseUrl}/api/aiops/install/${configured.token}.sh | bash`
+      ? `iwr -useb ${configured.installBaseUrl}/api/_demo/aiops/install/${configured.token}.ps1 | iex`
+      : `curl -sSL ${configured.installBaseUrl}/api/_demo/aiops/install/${configured.token}.sh | bash`
     : '';
 
   const canConfigure = xSource.trim().length > 0 && !generating;
@@ -89,7 +89,7 @@ export const AiopsPage: React.FC = () => {
     setGenerating(true);
     setError('');
     try {
-      const res = await fetch('/api/aiops/configure', {
+      const res = await fetch('/api/_demo/aiops/configure', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ xSource: xSource.trim() }),
@@ -110,7 +110,7 @@ export const AiopsPage: React.FC = () => {
 
   const downloadZip = () => {
     if (!configured) return;
-    window.location.href = `/api/aiops/package/${configured.token}`;
+    window.location.href = `/api/_demo/aiops/package/${configured.token}`;
   };
 
   const copy = async (id: string, text: string) => {
