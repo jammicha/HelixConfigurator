@@ -406,6 +406,12 @@ const ErrorGroupRow: React.FC<{
   helixEnv: HelixEnv | null;
 }> = ({ group, onJumpToTrace, helixEnv }) => {
   const [open, setOpen] = useState(false);
+  // Show the most-recent sample's message inline so users don't have to expand
+  // the row just to see what the exception said. Samples are pushed in order,
+  // last entry is the freshest.
+  const previewMessage = group.samples.length
+    ? (group.samples[group.samples.length - 1].message || '').trim()
+    : '';
   return (
     <div>
       <button
@@ -415,8 +421,11 @@ const ErrorGroupRow: React.FC<{
       >
         {open ? <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
         <span className="adapt-badge-danger font-mono flex-shrink-0">{group.type}</span>
-        <span className="text-gray-200 font-mono text-tiny truncate flex-shrink min-w-0">{group.service}</span>
-        <span className="ml-auto flex items-center gap-3 text-tiny text-gray-500 flex-shrink-0">
+        <span className="text-gray-200 font-mono text-tiny flex-shrink-0">{group.service}</span>
+        <span className="text-gray-400 font-mono text-tiny truncate flex-1 min-w-0">
+          {previewMessage || <em className="text-gray-600 not-italic">(no message)</em>}
+        </span>
+        <span className="flex items-center gap-3 text-tiny text-gray-500 flex-shrink-0">
           <span><span className="text-[#ff8a8a] font-mono font-semibold">{group.count}</span> hits</span>
           <span>first {formatRelative(group.firstSeen)}</span>
           <span>last {formatRelative(group.lastSeen)}</span>

@@ -75,6 +75,15 @@ export const buildHelixLandingUrl = (env: HelixEnv | null): string | null => {
   return env!.tenantId ? `${base}/?orgId=${encodeURIComponent(env!.tenantId)}` : base;
 };
 
+// Best-guess AIOps Topology deep-link. Real path may differ — refine when the
+// actual Helix AIOps topology URL is known.
+export const buildHelixTopologyUrl = (env: HelixEnv | null): string | null => {
+  if (!hasRealHelixEndpoint(env)) return null;
+  const base = env!.endpoint.replace(/\/+$/, '');
+  const qs = env!.tenantId ? `?orgId=${encodeURIComponent(env!.tenantId)}` : '';
+  return `${base}/aiops/#/topology${qs}`;
+};
+
 export const buildHelixTraceUrl = (
   env: HelixEnv | null,
   { traceId, serviceName, timeNs }: { traceId: string; serviceName: string; timeNs: number },

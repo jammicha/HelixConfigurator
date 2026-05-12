@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { ExternalLink, Loader2 } from 'lucide-react';
+import { buildHelixTopologyUrl } from './otel-data/utils';
 import { StatCard } from './StatCard';
 import { TopList } from './TopList';
 import type { TopListRow } from './TopList';
@@ -311,8 +312,25 @@ export const OverviewTab: React.FC<Props> = ({
       {/* Service map (Datadog-style topology) */}
       {serviceMap && serviceMap.nodes.length > 0 && (
         <div className="adapt-card !p-3 mb-4">
-          <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-            Service map <span className="normal-case tracking-normal text-gray-500 font-normal">— inter-service calls from spans · click a node to filter traces</span>
+          <div className="flex items-center justify-between gap-3 mb-1.5">
+            <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider min-w-0 truncate">
+              Service map <span className="normal-case tracking-normal text-gray-500 font-normal">— inter-service calls from spans · click a node to filter traces</span>
+            </div>
+            {(() => {
+              const url = buildHelixTopologyUrl(helixEnv);
+              if (!url) return null;
+              return (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-tiny text-active hover:text-white inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider whitespace-nowrap"
+                >
+                  Open in AIOps Topology
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              );
+            })()}
           </div>
           <ServiceMap data={serviceMap} onNodeClick={onDrilldownService} />
         </div>

@@ -595,8 +595,9 @@ export const OtelDataPage: React.FC = () => {
               onClick={() => setActiveTab('errors')}
               icon={<AlertTriangle className="w-4 h-4" />}
               label="Logs & Errors"
-              count={visibleLogs.length + visibleErrors.length}
-              countTone={visibleErrors.length ? 'danger' : 'neutral'}
+              count={visibleLogs.length}
+              countTone="neutral"
+              errorCount={visibleErrors.length}
             />
           </div>
           <div className="flex items-center gap-3 pb-2">
