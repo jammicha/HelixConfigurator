@@ -1,4 +1,5 @@
 import React from 'react';
+import { Check } from 'lucide-react';
 
 const STEPS = [
   { n: 1, label: 'Configure' },
@@ -35,7 +36,7 @@ export const Stepper: React.FC<Props> = ({ current, onJump }) => (
                     : 'bg-gray-1000 border-gray-700 text-gray-400'
               }`}
             >
-              {isCompleted ? '✓' : s.n}
+              {isCompleted ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : s.n}
             </span>
             <span className={`text-tiny font-semibold uppercase tracking-wider ${isCurrent ? 'text-gray-100' : isCompleted ? 'text-gray-300' : 'text-gray-500'}`}>
               {s.label}

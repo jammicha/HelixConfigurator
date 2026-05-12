@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 
 type Props = {
   onLogin: (password: string) => Promise<{ ok: boolean; error?: string }>;
@@ -44,7 +44,7 @@ export const LoginScreen: React.FC<Props> = ({ onLogin }) => {
         </div>
         {error && (
           <div className="flex gap-3 p-3 bg-[#f5bcc6]/20 border border-danger/40 rounded text-sm items-start" role="alert">
-            <span className="text-danger font-bold flex-shrink-0">×</span>
+            <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
             <span className="text-gray-300">{error}</span>
           </div>
         )}

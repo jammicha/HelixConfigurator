@@ -208,7 +208,7 @@ export const ServiceMap: React.FC<Props> = ({ data, height: heightProp, onNodeCl
                 y={18}
                 fill="#f1f1f4"
                 fontSize={12}
-                fontFamily="'Source Code Pro', monospace"
+                fontFamily="'Open Sans', sans-serif"
                 style={{ pointerEvents: 'none' }}
               >
                 {n.name.length > 18 ? n.name.slice(0, 17) + '…' : n.name}
@@ -218,7 +218,7 @@ export const ServiceMap: React.FC<Props> = ({ data, height: heightProp, onNodeCl
                 y={34}
                 fill="#8c8fa1"
                 fontSize={10}
-                fontFamily="'Source Code Pro', monospace"
+                fontFamily="'Open Sans', sans-serif"
                 style={{ pointerEvents: 'none' }}
               >
                 {n.traceCount} • {formatDuration(n.avgMs)}
@@ -230,7 +230,7 @@ export const ServiceMap: React.FC<Props> = ({ data, height: heightProp, onNodeCl
                   fill={n.errorRate >= 0.05 ? '#ff8a8a' : '#d9ae00'}
                   fontSize={10}
                   textAnchor="end"
-                  fontFamily="'Source Code Pro', monospace"
+                  fontFamily="'Open Sans', sans-serif"
                   style={{ pointerEvents: 'none' }}
                 >
                   {(n.errorRate * 100).toFixed(1)}% err
@@ -256,13 +256,13 @@ export const ServiceMap: React.FC<Props> = ({ data, height: heightProp, onNodeCl
             className="absolute z-10 pointer-events-none bg-gray-1000 border border-gray-700 rounded px-2.5 py-1.5 shadow-4 text-tiny text-gray-200"
             style={{ left: Math.min(width - 200, Math.max(0, midX - 90)), top: midY - 8, transform: 'translateY(-100%)', minWidth: 180 }}
           >
-            <div className="font-mono text-gray-400 text-[10px] mb-1">{src} → {tgt}</div>
-            <div className="flex items-baseline justify-between gap-3"><span className="text-gray-500">Calls</span><span className="font-mono">{e.callCount.toLocaleString()}</span></div>
-            <div className="flex items-baseline justify-between gap-3"><span className="text-gray-500">Avg</span><span className="font-mono">{formatDuration(e.avgMs)}</span></div>
+            <div className="text-gray-400 text-[10px] mb-1">{src} → {tgt}</div>
+            <div className="flex items-baseline justify-between gap-3"><span className="text-gray-500">Calls</span><span className="tabular-nums">{e.callCount.toLocaleString()}</span></div>
+            <div className="flex items-baseline justify-between gap-3"><span className="text-gray-500">Avg</span><span className="tabular-nums">{formatDuration(e.avgMs)}</span></div>
             {e.errorRate > 0 && (
               <div className="flex items-baseline justify-between gap-3">
                 <span className="text-gray-500">Error %</span>
-                <span className="font-mono text-[#ff8a8a]">{(e.errorRate * 100).toFixed(1)}%</span>
+                <span className="tabular-nums text-[#ff8a8a]">{(e.errorRate * 100).toFixed(1)}%</span>
               </div>
             )}
           </div>
@@ -279,13 +279,13 @@ export const ServiceMap: React.FC<Props> = ({ data, height: heightProp, onNodeCl
             className="absolute z-10 pointer-events-none bg-gray-1000 border border-gray-700 rounded px-2.5 py-1.5 shadow-4 text-tiny text-gray-200"
             style={{ left: Math.min(width - 200, Math.max(0, p.x + NODE_W / 2 - 90)), top: p.y - 8, transform: 'translateY(-100%)', minWidth: 180 }}
           >
-            <div className="font-mono text-gray-200 text-tiny mb-1">{n.name}</div>
-            <div className="flex items-baseline justify-between gap-3"><span className="text-gray-500">Traces</span><span className="font-mono">{n.traceCount.toLocaleString()}</span></div>
-            <div className="flex items-baseline justify-between gap-3"><span className="text-gray-500">Avg span</span><span className="font-mono">{formatDuration(n.avgMs)}</span></div>
+            <div className="text-gray-200 text-tiny mb-1">{n.name}</div>
+            <div className="flex items-baseline justify-between gap-3"><span className="text-gray-500">Traces</span><span className="tabular-nums">{n.traceCount.toLocaleString()}</span></div>
+            <div className="flex items-baseline justify-between gap-3"><span className="text-gray-500">Avg span</span><span className="tabular-nums">{formatDuration(n.avgMs)}</span></div>
             {n.errorRate > 0 && (
               <div className="flex items-baseline justify-between gap-3">
                 <span className="text-gray-500">Error %</span>
-                <span className="font-mono text-[#ff8a8a]">{(n.errorRate * 100).toFixed(1)}%</span>
+                <span className="tabular-nums text-[#ff8a8a]">{(n.errorRate * 100).toFixed(1)}%</span>
               </div>
             )}
             {onNodeClick && <div className="text-[10px] text-gray-500 mt-1">click to filter traces</div>}

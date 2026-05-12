@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertTriangle, Hexagon } from 'lucide-react';
+import { Check, CheckCircle2, AlertTriangle, Hexagon, X } from 'lucide-react';
 import { SnippetBlock } from '../SnippetBlock';
 
 export type DetectedCollector = {
@@ -103,12 +103,16 @@ export const Step3: React.FC<Props> = ({
                     : 'bg-primary hover:bg-primary-hover text-white disabled:opacity-60'
                 }`}
               >
-                {k8sApplying ? 'Applying…' : k8sApplyResult === 'applied' ? '✓ Applied' : 'Apply template'}
+                {k8sApplying
+                  ? 'Applying…'
+                  : k8sApplyResult === 'applied'
+                    ? (<><Check className="w-3.5 h-3.5 inline" aria-hidden="true" /> Applied</>)
+                    : 'Apply template'}
               </button>
             </div>
           )}
           {k8sApplyResult === 'failed' && (
-            <div className="mb-3 text-tiny text-danger">× Could not apply template — retry or apply it from the YAML editor on the dashboard.</div>
+            <div className="mb-3 text-tiny text-danger inline-flex items-center gap-1.5"><X className="w-3.5 h-3.5" aria-hidden="true" /> Could not apply template — retry or apply it from the YAML editor on the dashboard.</div>
           )}
 
           {detectedCollectors.length === 0 ? (
@@ -170,8 +174,11 @@ export const Step3: React.FC<Props> = ({
                 );
               })}
               {attachResult && (
-                <div className={`text-tiny ${attachResult.ok ? 'text-success' : 'text-danger'}`}>
-                  {attachResult.ok ? '✓' : '×'} {attachResult.message}
+                <div className={`text-tiny inline-flex items-center gap-1.5 ${attachResult.ok ? 'text-success' : 'text-danger'}`}>
+                  {attachResult.ok
+                    ? <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                    : <X className="w-3.5 h-3.5" aria-hidden="true" />}
+                  {attachResult.message}
                 </div>
               )}
             </div>

@@ -286,7 +286,7 @@ export const TimelineChart: React.FC<Props> = ({
                   y={Math.max(8, top - 2)}
                   fill="#8c8fa1"
                   fontSize={9}
-                  fontFamily="'Source Code Pro', monospace"
+                  fontFamily="'Open Sans', sans-serif"
                   pointerEvents="none"
                 >{baselineBand.label}</text>
               )}
@@ -380,7 +380,7 @@ export const TimelineChart: React.FC<Props> = ({
                   fill="#8c8fa1"
                   fontSize={9}
                   textAnchor="end"
-                  fontFamily="'Source Code Pro', monospace"
+                  fontFamily="'Open Sans', sans-serif"
                 >{t.label}</text>
               )}
             </g>
@@ -505,7 +505,7 @@ export const TimelineChart: React.FC<Props> = ({
             fill="#8c8fa1"
             fontSize={10}
             textAnchor={i === 0 ? 'start' : i === axisTicks.length - 1 ? 'end' : 'middle'}
-            fontFamily="'Source Code Pro', monospace"
+            fontFamily="'Open Sans', sans-serif"
           >
             {t.label}
           </text>
@@ -553,7 +553,7 @@ export const TimelineChart: React.FC<Props> = ({
             minWidth: 180,
           }}
         >
-          <div className="font-mono text-gray-400 text-[10px]">
+          <div className="tabular-nums text-gray-400 text-[10px]">
             {formatTime(hover.tsMs)} – {formatTime(hover.tsMs + bucketSizeMs)}
           </div>
           {hover.total > 0 ? (
@@ -567,14 +567,14 @@ export const TimelineChart: React.FC<Props> = ({
                       <span className="inline-block w-2 h-2 rounded-sm" style={{ background: seg.fill }} />
                       {seg.label}
                     </span>
-                    <span className="font-mono">{v.toLocaleString()}</span>
+                    <span className="tabular-nums">{v.toLocaleString()}</span>
                   </div>
                 );
               })}
               {!isLatency && (
                 <div className="border-t border-gray-800 mt-1 pt-1 flex items-center justify-between text-gray-400">
                   <span>Total</span>
-                  <span className="font-mono">{hover.total.toLocaleString()}</span>
+                  <span className="tabular-nums">{hover.total.toLocaleString()}</span>
                 </div>
               )}
               {hoverPct && (hoverPct.p50 != null || hoverPct.p95 != null || hoverPct.p99 != null) && (
@@ -585,7 +585,7 @@ export const TimelineChart: React.FC<Props> = ({
                         <span className="inline-block w-3 h-px" style={{ borderTop: `1px dashed ${TIMELINE_COLORS.p50}` }} />
                         p50
                       </span>
-                      <span className="font-mono">{formatDuration(hoverPct.p50)}</span>
+                      <span className="tabular-nums">{formatDuration(hoverPct.p50)}</span>
                     </div>
                   )}
                   {hoverPct.p95 != null && (
@@ -594,7 +594,7 @@ export const TimelineChart: React.FC<Props> = ({
                         <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p95 }} />
                         p95
                       </span>
-                      <span className="font-mono">{formatDuration(hoverPct.p95)}</span>
+                      <span className="tabular-nums">{formatDuration(hoverPct.p95)}</span>
                     </div>
                   )}
                   {hoverPct.p99 != null && (
@@ -603,7 +603,7 @@ export const TimelineChart: React.FC<Props> = ({
                         <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p99 }} />
                         p99
                       </span>
-                      <span className="font-mono">{formatDuration(hoverPct.p99)}</span>
+                      <span className="tabular-nums">{formatDuration(hoverPct.p99)}</span>
                     </div>
                   )}
                 </div>

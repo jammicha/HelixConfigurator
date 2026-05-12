@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Check } from 'lucide-react';
 
 // Code/config snippet block with a corner Copy button. Text remains selectable
 // (no whole-block click handler) so users can highlight just a section.
@@ -20,9 +21,10 @@ export const SnippetBlock: React.FC<{ text: string }> = ({ text }) => {
       <button
         type="button"
         onClick={onCopy}
-        className={`absolute top-2 right-2 px-2 py-1 text-tiny rounded border transition-colors ${copied ? 'bg-success/20 text-[#5eead4] border-success/50' : 'bg-gray-900 hover:bg-gray-800 text-gray-300 border-gray-700'}`}
+        className={`absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-1 text-tiny rounded border transition-colors ${copied ? 'bg-success/20 text-[#5eead4] border-success/50' : 'bg-gray-900 hover:bg-gray-800 text-gray-300 border-gray-700'}`}
       >
-        {copied ? '✓ Copied' : 'Copy'}
+        {copied && <Check className="w-3 h-3" aria-hidden="true" />}
+        {copied ? 'Copied' : 'Copy'}
       </button>
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor, { useMonaco } from '@monaco-editor/react';
-import { Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown } from 'lucide-react';
+import { Check, Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
 import { useSmartAdd } from './hooks/useSmartAdd';
 import { LoginScreen } from './components/LoginScreen';
@@ -1304,7 +1304,7 @@ ${logsData.logs || '(no logs available)'}
       <div key={container.name} className={`border border-gray-800 p-4 rounded-lg flex items-center justify-between transition-colors ${isCore ? 'bg-blue-500/5' : 'bg-gray-900'}`}>
         <div className="flex flex-col min-w-0">
           <span className="font-bold text-gray-200 text-sm truncate">{container.name}</span>
-          <span className="text-[10px] text-gray-500 font-mono truncate">{container.image}</span>
+          <span className="text-[10px] text-gray-500 truncate">{container.image}</span>
         </div>
         <div className="flex items-center gap-3">
           {container.networks.includes('helix-bridge') ? (
@@ -1763,7 +1763,7 @@ ${logsData.logs || '(no logs available)'}
                     <div className="mt-5 pt-4 border-t border-gray-800 flex items-center gap-2 text-tiny">
                       <span className="font-semibold text-gray-400 uppercase tracking-wider">Access:</span>
                       {authStatus?.required ? (
-                        <span className="text-success">Password required ✓</span>
+                        <span className="text-success inline-flex items-center gap-1.5">Password required <Check className="w-3.5 h-3.5" aria-hidden="true" /></span>
                       ) : (
                         <>
                           <span className="text-warning">Open (no password)</span>
@@ -1931,12 +1931,12 @@ ${logsData.logs || '(no logs available)'}
                             <>
                               <div className="bg-gray-800 border-l-2 border-info px-3 py-1.5 rounded-r min-w-[88px]">
                                 <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Received</div>
-                                <div className="text-lg font-bold text-info leading-tight">{liveMetrics.received}</div>
+                                <div className="text-xl font-semibold text-info leading-none tabular-nums">{liveMetrics.received}</div>
                                 {renderSpark(ratesFor('received'), '#3759d8')}
                               </div>
                               <div className="bg-gray-800 border-l-2 border-success px-3 py-1.5 rounded-r min-w-[88px]">
                                 <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Sent</div>
-                                <div className="text-lg font-bold text-success leading-tight">{liveMetrics.sent}</div>
+                                <div className="text-xl font-semibold text-success leading-none tabular-nums">{liveMetrics.sent}</div>
                                 {renderSpark(ratesFor('sent'), '#11845b')}
                               </div>
                               {(() => {
@@ -1955,7 +1955,7 @@ ${logsData.logs || '(no logs available)'}
                                     title={breakdown}
                                   >
                                     <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Dropped</div>
-                                    <div className="text-lg font-bold text-danger leading-tight">{droppedHeadline}</div>
+                                    <div className="text-xl font-semibold text-danger leading-none tabular-nums">{droppedHeadline}</div>
                                     {liveMetrics.failed !== diagAlertCount && (
                                       <div className="text-[9px] text-gray-500 leading-tight">
                                         {diagAlertCount} log · {liveMetrics.failed} metric
@@ -2025,7 +2025,7 @@ ${logsData.logs || '(no logs available)'}
                     <div
                       ref={logContainerRef}
                       onScroll={handleLogScroll}
-                      className="bg-gray-1000 p-4 rounded border border-gray-800 h-64 overflow-y-auto font-mono text-sm text-green-400"
+                      className="bg-gray-1000 p-4 rounded border border-gray-800 h-64 overflow-y-auto font-mono text-sm text-success"
                       style={{fontFamily: "'Source Code Pro', monospace"}}
                     >
                       {visibleLogs.map((log, idx) => (

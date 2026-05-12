@@ -101,20 +101,20 @@ export const OperationsTab: React.FC<{
                         title="Filter the trace list to this operation"
                         className="text-left hover:underline"
                       >
-                        <span className="text-gray-200 font-mono">{op.service_name}</span>
+                        <span className="text-gray-200">{op.service_name}</span>
                         <span className="text-gray-500"> · </span>
-                        <span className="text-gray-300 font-mono text-tiny">{op.root_operation}</span>
+                        <span className="text-gray-300 text-tiny">{op.root_operation}</span>
                       </button>
                     </td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-300">{op.trace_count}</td>
-                    <td className={`px-4 py-2 text-right font-mono ${latencyTone(op.p50_ms)}`}>{formatDuration(op.p50_ms)}</td>
-                    <td className={`px-4 py-2 text-right font-mono font-semibold ${latencyTone(op.p95_ms)}`}>{formatDuration(op.p95_ms)}</td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-400">{formatDuration(op.max_ms)}</td>
-                    <td className={`px-4 py-2 text-right font-mono ${errorPctTone(errPct)}`}>
+                    <td className="px-4 py-2 text-right tabular-nums text-gray-300">{op.trace_count}</td>
+                    <td className={`px-4 py-2 text-right tabular-nums ${latencyTone(op.p50_ms)}`}>{formatDuration(op.p50_ms)}</td>
+                    <td className={`px-4 py-2 text-right tabular-nums font-semibold ${latencyTone(op.p95_ms)}`}>{formatDuration(op.p95_ms)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-gray-400">{formatDuration(op.max_ms)}</td>
+                    <td className={`px-4 py-2 text-right tabular-nums ${errorPctTone(errPct)}`}>
                       {errPct > 0 ? `${errPct.toFixed(1)}%` : '—'}
                       <span className="text-tiny opacity-70 ml-1">({op.error_count})</span>
                     </td>
-                    <td className={`px-4 py-2 text-right font-mono ${slowPctTone(slowPct)}`}>
+                    <td className={`px-4 py-2 text-right tabular-nums ${slowPctTone(slowPct)}`}>
                       {slowPct > 0 ? `${slowPct.toFixed(1)}%` : '—'}
                       <span className="text-tiny opacity-70 ml-1">({op.slow_count})</span>
                     </td>

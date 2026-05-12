@@ -12,6 +12,7 @@ import {
   Loader2,
   RefreshCw,
   Repeat,
+  Check,
   Server,
   Wrench,
   X,
@@ -680,7 +681,7 @@ export const OtelDataPage: React.FC = () => {
                       {detectedCollectors.map(c => (
                         <div key={c.name} className="flex items-center justify-between gap-3 px-3 py-2">
                           <div className="min-w-0">
-                            <div className="text-gray-200 font-mono text-tiny truncate">{c.name}</div>
+                            <div className="text-gray-200 text-tiny truncate">{c.name}</div>
                             <div className="text-tiny text-gray-500 truncate" title={c.image}>{c.image}</div>
                           </div>
                           <button
@@ -696,8 +697,11 @@ export const OtelDataPage: React.FC = () => {
                     </div>
                   )}
                   {restartResult && (
-                    <div className={`px-3 py-2 border-t border-gray-800 text-tiny ${restartResult.ok ? 'text-[#5eead4]' : 'text-danger'}`}>
-                      {restartResult.ok ? '✓' : '×'} {restartResult.message}
+                    <div className={`px-3 py-2 border-t border-gray-800 text-tiny inline-flex items-center gap-1.5 ${restartResult.ok ? 'text-[#5eead4]' : 'text-danger'}`}>
+                      {restartResult.ok
+                        ? <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                        : <X className="w-3.5 h-3.5" aria-hidden="true" />}
+                      {restartResult.message}
                     </div>
                   )}
                   <div className="px-3 py-2 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">
@@ -1152,7 +1156,7 @@ const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = ({ detai
                     {Array.from(b.statuses.entries()).sort((a, b2) => a[0] - b2[0]).map(([code, n]) => (
                       <span
                         key={code}
-                        className={`text-tiny font-mono px-1 rounded ${code >= 500 ? 'bg-danger/20 text-[#ff8a8a]' : code >= 400 ? 'bg-warning/20 text-warning' : 'bg-gray-800 text-gray-300'}`}
+                        className={`text-tiny tabular-nums px-1 rounded ${code >= 500 ? 'bg-danger/20 text-[#ff8a8a]' : code >= 400 ? 'bg-warning/20 text-warning' : 'bg-gray-800 text-gray-300'}`}
                       >
                         {code}{n > 1 ? `×${n}` : ''}
                       </span>
@@ -1272,7 +1276,7 @@ const RollupPanel: React.FC<{
           {rows.map(r => (
             <tr key={r.key} className="border-t border-gray-800">
               {r.cells.map((c, i) => (
-                <td key={i} className={`px-3 py-1 ${i === 0 ? 'text-gray-200' : 'text-right text-gray-300 font-mono'}`}>{c}</td>
+                <td key={i} className={`px-3 py-1 ${i === 0 ? 'text-gray-200' : 'text-right text-gray-300 tabular-nums'}`}>{c}</td>
               ))}
             </tr>
           ))}
@@ -1338,8 +1342,8 @@ const ServiceBreakdownPanel: React.FC<{
         {breakdown.map(b => (
           <div key={b.name} className="inline-flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: colorForService(b.name) }} />
-            <span className="text-gray-300 font-mono">{b.name}</span>
-            <span className="text-gray-500 font-mono">{formatDuration(b.totalMs)}</span>
+            <span className="text-gray-300">{b.name}</span>
+            <span className="text-gray-500 tabular-nums">{formatDuration(b.totalMs)}</span>
             <span className="text-gray-600">({(b.totalMs / denom * 100).toFixed(0)}%)</span>
           </div>
         ))}
@@ -1366,7 +1370,7 @@ const SummaryCell: React.FC<{
       <div className="flex items-center gap-1.5 text-tiny text-gray-500 uppercase tracking-wider font-semibold">
         {icon} {label}
       </div>
-      <div className={`mt-1 font-mono text-base ${toneClasses}`}>{value}</div>
+      <div className={`mt-1 tabular-nums text-base ${toneClasses}`}>{value}</div>
     </div>
   );
 };
@@ -1480,7 +1484,7 @@ const SpanRow: React.FC<{
               )}
             </div>
             <div className="text-tiny text-gray-500 truncate">
-              <span className="font-mono">{span.serviceName}</span>
+              <span>{span.serviceName}</span>
               {dbStatement && (
                 <>
                   {' · '}
@@ -1514,7 +1518,7 @@ const SpanRow: React.FC<{
             );
           })()}
         </div>
-        <div className={`w-20 text-right font-mono text-tiny ${isSlow ? 'text-warning font-semibold' : 'text-gray-300'}`}>
+        <div className={`w-20 text-right tabular-nums text-tiny ${isSlow ? 'text-warning font-semibold' : 'text-gray-300'}`}>
           {formatDuration(span.durationMs)}
         </div>
       </button>
@@ -1527,12 +1531,12 @@ const SpanRow: React.FC<{
                 <div key={i} className="border border-danger/40 bg-danger/10 rounded p-2.5">
                   <div className="flex items-center gap-2 mb-1">
                     <AlertTriangle className="w-3.5 h-3.5 text-[#ff8a8a]" />
-                    <span className="text-tiny font-semibold text-[#ff8a8a] font-mono">
+                    <span className="text-tiny font-semibold text-[#ff8a8a]">
                       {ev.attributes['exception.type'] || 'exception'}
                     </span>
                   </div>
                   {ev.attributes['exception.message'] && (
-                    <div className="text-sm text-gray-200 font-mono">{ev.attributes['exception.message']}</div>
+                    <div className="text-sm text-gray-200">{ev.attributes['exception.message']}</div>
                   )}
                   {ev.attributes['exception.stacktrace'] && (
                     <pre className="mt-2 text-tiny text-gray-400 font-mono whitespace-pre-wrap break-all bg-gray-1000 rounded p-2 max-h-48 overflow-auto" style={{ fontFamily: "'Source Code Pro', monospace" }}>
@@ -1703,9 +1707,9 @@ const FlameView: React.FC<{
             className="fixed z-50 pointer-events-none bg-gray-900 border border-gray-700 rounded px-2 py-1.5 shadow-4 text-tiny"
             style={{ left, top, maxWidth: TIP_W }}
           >
-            <div className="text-gray-100 font-mono break-all">{hover.span.name}</div>
+            <div className="text-gray-100 break-all">{hover.span.name}</div>
             <div className="text-gray-400 mt-0.5">
-              <span className="font-mono">{hover.span.serviceName}</span>
+              <span>{hover.span.serviceName}</span>
               <span className="mx-1.5">·</span>
               <span>{formatDuration(hover.span.durationMs)}</span>
               {criticalPath.has(hover.span.spanId) && <><span className="mx-1.5">·</span><span className="text-warning">on critical path</span></>}

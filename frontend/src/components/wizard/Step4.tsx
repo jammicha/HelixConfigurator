@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertTriangle, Hexagon, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Hexagon, Loader2, X } from 'lucide-react';
 import type { BridgeStatus, DetectedCollector } from './Step3';
 import type { EnvVars } from './Step1';
 
@@ -36,7 +36,7 @@ const delta = (now: number | undefined, base: number | undefined) =>
 const CounterCard: React.FC<{ label: string; value: number }> = ({ label, value }) => (
   <div className="bg-gray-1000 border border-gray-800 rounded px-3 py-2.5">
     <div className="text-tiny text-gray-500 uppercase tracking-wider">{label}</div>
-    <div className={`font-mono text-xl mt-1 ${value > 0 ? 'text-success' : 'text-gray-300'}`}>{value > 0 ? '+' : ''}{value}</div>
+    <div className={`text-xl font-semibold tabular-nums mt-1 ${value > 0 ? 'text-success' : 'text-gray-300'}`}>{value > 0 ? '+' : ''}{value}</div>
   </div>
 );
 
@@ -140,7 +140,7 @@ export const Step4: React.FC<Props> = ({
           </div>
         ) : traceVerifyResult && traceVerifyResult.status === 'rejected' ? (
           <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
-            <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
+            <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
             <div>
               <span className="text-gray-200 font-semibold">Helix rejected the trace.</span>
               <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
@@ -158,7 +158,7 @@ export const Step4: React.FC<Props> = ({
           </div>
         ) : traceVerifyResult && traceVerifyResult.status === 'error' ? (
           <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
-            <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
+            <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
             <div>
               <span className="text-gray-200 font-semibold">Verification failed.</span>
               <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>

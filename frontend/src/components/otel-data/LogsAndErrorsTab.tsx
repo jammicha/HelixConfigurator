@@ -84,7 +84,7 @@ export const LogsAndErrorsTab: React.FC<{
                 subTab === 'logs' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
               }`}
             >
-              Logs <span className="ml-1.5 text-tiny font-mono px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{logs.length}</span>
+              Logs <span className="ml-1.5 text-tiny tabular-nums px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{logs.length}</span>
             </button>
             <button
               onClick={() => setSubTab('errors')}
@@ -92,7 +92,7 @@ export const LogsAndErrorsTab: React.FC<{
                 subTab === 'errors' ? 'border-active text-gray-100' : 'border-transparent text-gray-400 hover:text-gray-200'
               }`}
             >
-              Errors <span className={`ml-1.5 text-tiny font-mono px-1.5 py-0.5 rounded ${errors.length ? 'bg-danger/20 text-[#ff8a8a]' : 'bg-gray-800 text-gray-400'}`}>{errors.length}</span>
+              Errors <span className={`ml-1.5 text-tiny tabular-nums px-1.5 py-0.5 rounded ${errors.length ? 'bg-danger/20 text-[#ff8a8a]' : 'bg-gray-800 text-gray-400'}`}>{errors.length}</span>
             </button>
           </div>
         </div>
@@ -224,7 +224,7 @@ const LogsView: React.FC<{
               <td className="px-4 py-2">
                 <span className={severityBadgeClass(l.severity)}>{normalizeSeverity(l.severity)}</span>
               </td>
-              <td className="px-4 py-2 text-gray-300 font-mono text-tiny break-all">
+              <td className="px-4 py-2 text-gray-300 text-tiny break-all">
                 {l.body || <em className="text-gray-500 not-italic">(empty)</em>}
               </td>
               <td className="px-4 py-2 text-right whitespace-nowrap">
@@ -359,9 +359,9 @@ const ErrorsView: React.FC<{
                 <td className="px-4 py-2 text-tiny text-gray-500 whitespace-nowrap">{formatTime(e.received_at)}</td>
                 <td className="px-4 py-2 text-gray-200 whitespace-nowrap">{e.service_name}</td>
                 <td className="px-4 py-2">
-                  <span className="adapt-badge-danger font-mono">{e.exception_type}</span>
+                  <span className="adapt-badge-danger">{e.exception_type}</span>
                 </td>
-                <td className="px-4 py-2 text-gray-300 font-mono text-tiny break-all">{e.message || <em className="text-gray-500 not-italic">(no message)</em>}</td>
+                <td className="px-4 py-2 text-gray-300 text-tiny break-all">{e.message || <em className="text-gray-500 not-italic">(no message)</em>}</td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
                   <span className="inline-flex items-center gap-2">
                     <button
@@ -421,13 +421,13 @@ const ErrorGroupRow: React.FC<{
         className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-800/40 transition-colors"
       >
         {open ? <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
-        <span className="adapt-badge-danger font-mono flex-shrink-0">{group.type}</span>
-        <span className="text-gray-200 font-mono text-tiny flex-shrink-0">{group.service}</span>
-        <span className="text-gray-400 font-mono text-tiny truncate flex-1 min-w-0">
+        <span className="adapt-badge-danger flex-shrink-0">{group.type}</span>
+        <span className="text-gray-200 text-tiny flex-shrink-0">{group.service}</span>
+        <span className="text-gray-400 text-tiny truncate flex-1 min-w-0">
           {previewMessage || <em className="text-gray-600 not-italic">(no message)</em>}
         </span>
         <span className="flex items-center gap-3 text-tiny text-gray-500 flex-shrink-0">
-          <span><span className="text-[#ff8a8a] font-mono font-semibold">{group.count}</span> hits</span>
+          <span><span className="text-[#ff8a8a] tabular-nums font-semibold">{group.count}</span> hits</span>
           <span>first {formatRelative(group.firstSeen)}</span>
           <span>last {formatRelative(group.lastSeen)}</span>
         </span>
@@ -436,8 +436,8 @@ const ErrorGroupRow: React.FC<{
         <div className="px-4 pb-3 pl-10 space-y-1.5 bg-gray-900/40">
           {group.samples.map(e => (
             <div key={`${e.id}-${e.received_at}`} className="flex items-start gap-3 text-tiny">
-              <span className="text-gray-500 font-mono w-20 flex-shrink-0">{formatTime(e.received_at)}</span>
-              <span className="text-gray-300 font-mono break-all flex-1 min-w-0">{e.message || <em className="text-gray-500 not-italic">(no message)</em>}</span>
+              <span className="text-gray-500 tabular-nums w-20 flex-shrink-0">{formatTime(e.received_at)}</span>
+              <span className="text-gray-300 break-all flex-1 min-w-0">{e.message || <em className="text-gray-500 not-italic">(no message)</em>}</span>
               <span className="inline-flex items-center gap-2 flex-shrink-0">
                 <button
                   onClick={() => onJumpToTrace(e.trace_id)}

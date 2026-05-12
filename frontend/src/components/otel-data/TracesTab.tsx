@@ -267,7 +267,7 @@ export const TracesTab: React.FC<{
                       })()}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-gray-300 font-mono text-tiny">
+                  <td className="px-4 py-2 text-gray-300 text-tiny">
                     <button
                       onClick={(e) => { e.stopPropagation(); setSearchQuery(t.root_operation || ''); }}
                       title="Filter list to this operation"
@@ -276,10 +276,10 @@ export const TracesTab: React.FC<{
                       {t.root_operation}
                     </button>
                   </td>
-                  <td className={`px-4 py-2 text-right font-mono ${t.duration_ms > SLOW_THRESHOLD_MS ? 'text-warning font-semibold' : 'text-gray-300'}`}>
+                  <td className={`px-4 py-2 text-right tabular-nums ${t.duration_ms > SLOW_THRESHOLD_MS ? 'text-warning font-semibold' : 'text-gray-300'}`}>
                     {formatDuration(t.duration_ms)}
                   </td>
-                  <td className="px-4 py-2 text-right font-mono text-gray-400">{t.span_count}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-400">{t.span_count}</td>
                   <td className="px-4 py-2 text-tiny text-gray-500">{formatRelative(t.received_at)}</td>
                   {helixEnv?.endpoint && (
                     <td className="px-4 py-2 text-right">

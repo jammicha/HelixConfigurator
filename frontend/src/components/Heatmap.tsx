@@ -155,7 +155,7 @@ export const Heatmap: React.FC<Props> = ({ data, height = 220, fillHigh = '#3759
             fill="#8c8fa1"
             fontSize={10}
             textAnchor="end"
-            fontFamily="'Source Code Pro', monospace"
+            fontFamily="'Open Sans', sans-serif"
           >
             {formatDuration(durationEdgesMs[idx])}
           </text>
@@ -169,7 +169,7 @@ export const Heatmap: React.FC<Props> = ({ data, height = 220, fillHigh = '#3759
             fill="#8c8fa1"
             fontSize={10}
             textAnchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
-            fontFamily="'Source Code Pro', monospace"
+            fontFamily="'Open Sans', sans-serif"
           >
             {t.label}
           </text>
@@ -204,15 +204,15 @@ export const Heatmap: React.FC<Props> = ({ data, height = 220, fillHigh = '#3759
             minWidth: 200,
           }}
         >
-          <div className="font-mono text-gray-400 text-[10px]">
+          <div className="tabular-nums text-gray-400 text-[10px]">
             {formatDuration(durationEdgesMs[hover.d])} – {formatDuration(durationEdgesMs[hover.d + 1])}
           </div>
-          <div className="font-mono text-gray-400 text-[10px] mb-1">
+          <div className="tabular-nums text-gray-400 text-[10px] mb-1">
             {formatTime(hoverTimeStart)} – {formatTime(hoverTimeStart + data.timeBucketSizeMs)}
           </div>
           <div className="flex items-baseline justify-between gap-3">
             <span className="text-gray-500">Traces</span>
-            <span className="font-mono text-base text-gray-100 tabular-nums">{hoverCount.toLocaleString()}</span>
+            <span className="text-base text-gray-100 tabular-nums">{hoverCount.toLocaleString()}</span>
           </div>
           {onCellClick && hoverCount > 0 && <div className="text-[10px] text-gray-500 mt-1">click to drill down</div>}
         </div>

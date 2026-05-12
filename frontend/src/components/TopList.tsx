@@ -70,7 +70,7 @@ export const TopList: React.FC<Props> = ({
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="text-sm text-gray-100 font-mono truncate">{r.primary}</span>
+                    <span className="text-sm text-gray-100 truncate">{r.primary}</span>
                     {r.secondary && <span className="text-tiny text-gray-500 truncate">{r.secondary}</span>}
                     {allTags.map((t, i) => (
                       <span
@@ -89,7 +89,7 @@ export const TopList: React.FC<Props> = ({
                 {r.sparkline && r.sparkline.length > 0 && (
                   <Sparkline data={r.sparkline} width={64} height={20} stroke={barColor} />
                 )}
-                <div className="text-sm font-mono text-gray-200 tabular-nums w-16 text-right">{r.metricLabel}</div>
+                <div className="text-sm text-gray-200 tabular-nums w-16 text-right">{r.metricLabel}</div>
                 {onRowClick && <ChevronRight className="w-4 h-4 text-gray-600 flex-shrink-0" />}
               </RowEl>
             );

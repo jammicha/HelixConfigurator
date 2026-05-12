@@ -1,4 +1,5 @@
 import React from 'react';
+import { Check, X } from 'lucide-react';
 import { parseHelixKeyBundle } from '../../utils/helixKey';
 
 export type EnvVars = {
@@ -74,7 +75,7 @@ export const Step1: React.FC<Props> = ({
         <div className="space-y-1">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             Helix Endpoint
-            {!errors.HELIX_ENDPOINT && envVars.HELIX_ENDPOINT && <span className="text-success normal-case tracking-normal">✓</span>}
+            {!errors.HELIX_ENDPOINT && envVars.HELIX_ENDPOINT && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
           </label>
           <input
             type="url"
@@ -96,7 +97,7 @@ export const Step1: React.FC<Props> = ({
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2 flex-wrap">
             <span className="flex items-center gap-2">
               X-Source
-              {!errors.X_SOURCE && envVars.X_SOURCE && <span className="text-success normal-case tracking-normal">✓</span>}
+              {!errors.X_SOURCE && envVars.X_SOURCE && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
             </span>
             <span className="normal-case tracking-normal text-gray-500 font-normal">— Business Service name in Helix topology &amp; AIOps</span>
           </label>
@@ -120,7 +121,7 @@ export const Step1: React.FC<Props> = ({
         <div className="space-y-1">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             X-API Key
-            {!errors.HELIX_API_KEY && envVars.HELIX_API_KEY && <span className="text-success normal-case tracking-normal">✓</span>}
+            {!errors.HELIX_API_KEY && envVars.HELIX_API_KEY && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
           </label>
           <div className="relative">
             <input
@@ -177,7 +178,7 @@ export const Step1: React.FC<Props> = ({
 
       {setupError && (
         <div className="mb-4 flex gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm items-start">
-          <span className="text-danger font-bold flex-shrink-0 leading-tight">×</span>
+          <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
           <div><span className="text-danger font-semibold">Verification failed:</span> <span className="text-gray-300">{setupError}</span></div>
         </div>
       )}
