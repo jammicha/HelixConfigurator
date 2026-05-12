@@ -17,6 +17,8 @@ export type TimelinePercentile = {
   p50?: number | null;
   /** ms */
   p95?: number | null;
+  /** ms */
+  p99?: number | null;
 };
 
 type Props = {
@@ -44,6 +46,9 @@ type Props = {
   baselineBand?: { lo: number; hi: number; label?: string } | null;
   /** Per-bucket totals from the prior window, aligned by index. Drawn as a dashed muted polyline. */
   priorTotals?: number[] | null;
+  /** Rendering mode. 'volume' (default) stacks segment bars + percentile overlay.
+   *  'latency' drops the bars entirely and renders p50/p95/p99 as full-height lines. */
+  mode?: 'volume' | 'latency';
 };
 
 // Compact, hex-style color tokens that match the project's Tailwind palette.
@@ -60,6 +65,7 @@ export const TIMELINE_COLORS = {
   warn: '#ffd200',
   p50: '#8c8fa1',
   p95: '#389be1',
+  p99: '#ff8a8a',
 };
 
 const formatTime = (ms: number) => {
@@ -89,7 +95,9 @@ export const TimelineChart: React.FC<Props> = ({
   latencyThresholdsMs,
   baselineBand,
   priorTotals,
+  mode = 'volume',
 }) => {
+  const isLatency = mode === 'latency';
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -119,9 +127,9 @@ export const TimelineChart: React.FC<Props> = ({
 
   // Derived scale ranges
   const maxTotal = Math.max(1, ...buckets.map(b => b.total || 0));
-  const showPercentiles = !!percentiles && percentiles.some(p => p && (p.p50 != null || p.p95 != null));
+  const showPercentiles = !!percentiles && percentiles.some(p => p && (p.p50 != null || p.p95 != null || p.p99 != null));
   const maxLatencyMs = showPercentiles
-    ? Math.max(1, ...(percentiles || []).map(p => Math.max(p?.p50 || 0, p?.p95 || 0)))
+    ? Math.max(1, ...(percentiles || []).map(p => Math.max(p?.p50 || 0, p?.p95 || 0, p?.p99 || 0)))
     : 0;
 
   const bucketWidth = buckets.length ? innerW / buckets.length : 0;
@@ -208,7 +216,7 @@ export const TimelineChart: React.FC<Props> = ({
   // Build the polyline points for the percentile overlay (only buckets where
   // we have a value contribute; gaps are bridged so the line stays continuous
   // and matches Stackify's "always there" feel).
-  const polylinePoints = (key: 'p50' | 'p95') => {
+  const polylinePoints = (key: 'p50' | 'p95' | 'p99') => {
     if (!percentiles) return '';
     const pts: string[] = [];
     for (let i = 0; i < percentiles.length; i++) {
@@ -256,7 +264,7 @@ export const TimelineChart: React.FC<Props> = ({
 
         {/* Baseline band (AppDynamics-style expected-range overlay). Drawn
             under the bars so live data crossing the band is the signal. */}
-        {baselineBand && baselineBand.hi > baselineBand.lo && (() => {
+        {!isLatency && baselineBand && baselineBand.hi > baselineBand.lo && (() => {
           const yHi = yOfCount(baselineBand.hi);
           const yLo = yOfCount(baselineBand.lo);
           const top = Math.min(yHi, yLo);
@@ -288,7 +296,7 @@ export const TimelineChart: React.FC<Props> = ({
 
         {/* Prior-window polyline (AppDynamics-style "same time, prior period"
             comparison). Dashed, muted; doesn't compete with live data. */}
-        {priorTotals && priorTotals.length === buckets.length && (() => {
+        {!isLatency && priorTotals && priorTotals.length === buckets.length && (() => {
           const pts: string[] = [];
           for (let i = 0; i < priorTotals.length; i++) {
             const v = priorTotals[i];
@@ -322,7 +330,7 @@ export const TimelineChart: React.FC<Props> = ({
         })()}
 
         {/* Stacked bars per bucket */}
-        {buckets.map((b, i) => {
+        {!isLatency && buckets.map((b, i) => {
           if (!b.total) return null;
           let yCursor = padding.top + innerH;
           return (
@@ -379,7 +387,9 @@ export const TimelineChart: React.FC<Props> = ({
           );
         })}
 
-        {/* Percentile overlay (p50 dashed, p95 solid) */}
+        {/* Percentile overlay (p50 dashed, p95 solid, p99 solid). In volume
+            mode p99 only renders if explicitly provided so we don't clutter
+            the existing trace timeline. */}
         {showPercentiles && (
           <>
             <polyline
@@ -395,6 +405,14 @@ export const TimelineChart: React.FC<Props> = ({
               strokeWidth={1.5}
               points={polylinePoints('p95')}
             />
+            {(percentiles || []).some(p => p?.p99 != null) && (
+              <polyline
+                fill="none"
+                stroke={TIMELINE_COLORS.p99}
+                strokeWidth={1.5}
+                points={polylinePoints('p99')}
+              />
+            )}
           </>
         )}
 
@@ -494,9 +512,9 @@ export const TimelineChart: React.FC<Props> = ({
         ))}
       </svg>
 
-      {/* Top-right meta: total count + percentile legend */}
+      {/* Top-right meta: total count (volume mode) + percentile legend */}
       <div className="absolute top-0.5 right-2 flex items-center gap-3 text-tiny text-gray-500 font-semibold uppercase tracking-wider pointer-events-none">
-        <span>{totalCount.toLocaleString()} total</span>
+        {!isLatency && <span>{totalCount.toLocaleString()} total</span>}
         {showPercentiles && (
           <>
             <span className="inline-flex items-center gap-1">
@@ -507,6 +525,12 @@ export const TimelineChart: React.FC<Props> = ({
               <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p95 }} />
               p95
             </span>
+            {(percentiles || []).some(p => p?.p99 != null) && (
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p99 }} />
+                p99
+              </span>
+            )}
           </>
         )}
       </div>
@@ -534,7 +558,7 @@ export const TimelineChart: React.FC<Props> = ({
           </div>
           {hover.total > 0 ? (
             <>
-              {segments.map(seg => {
+              {!isLatency && segments.map(seg => {
                 const v = Number(hover[seg.key] || 0);
                 if (v <= 0) return null;
                 return (
@@ -547,12 +571,14 @@ export const TimelineChart: React.FC<Props> = ({
                   </div>
                 );
               })}
-              <div className="border-t border-gray-800 mt-1 pt-1 flex items-center justify-between text-gray-400">
-                <span>Total</span>
-                <span className="font-mono">{hover.total.toLocaleString()}</span>
-              </div>
-              {hoverPct && (hoverPct.p50 != null || hoverPct.p95 != null) && (
-                <div className="border-t border-gray-800 mt-1 pt-1">
+              {!isLatency && (
+                <div className="border-t border-gray-800 mt-1 pt-1 flex items-center justify-between text-gray-400">
+                  <span>Total</span>
+                  <span className="font-mono">{hover.total.toLocaleString()}</span>
+                </div>
+              )}
+              {hoverPct && (hoverPct.p50 != null || hoverPct.p95 != null || hoverPct.p99 != null) && (
+                <div className={`${isLatency ? '' : 'border-t border-gray-800 mt-1 pt-1'}`}>
                   {hoverPct.p50 != null && (
                     <div className="flex items-center justify-between gap-3 text-gray-400">
                       <span className="inline-flex items-center gap-1.5">
@@ -569,6 +595,15 @@ export const TimelineChart: React.FC<Props> = ({
                         p95
                       </span>
                       <span className="font-mono">{formatDuration(hoverPct.p95)}</span>
+                    </div>
+                  )}
+                  {hoverPct.p99 != null && (
+                    <div className="flex items-center justify-between gap-3 text-gray-400">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p99 }} />
+                        p99
+                      </span>
+                      <span className="font-mono">{formatDuration(hoverPct.p99)}</span>
                     </div>
                   )}
                 </div>

@@ -10,7 +10,7 @@ type TracesHistogram = {
   buckets: Array<{
     tsMs: number; total: number;
     ok?: number; slow?: number; error?: number;
-    p50?: number | null; p95?: number | null;
+    p50?: number | null; p95?: number | null; p99?: number | null;
   }>;
 };
 

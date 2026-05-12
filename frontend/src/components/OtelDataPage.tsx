@@ -700,7 +700,6 @@ export const OtelDataPage: React.FC = () => {
             data={ov.overview}
             heatmap={ov.heatmap}
             tracesHistogram={ov.tracesHistogram}
-            priorTotals={ov.priorTotals}
             serviceMap={ov.serviceMap}
             loading={ov.loading}
             customRange={customRange}

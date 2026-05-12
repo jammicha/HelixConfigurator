@@ -703,7 +703,7 @@ const computePercentiles = (arr) => {
     const idx = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p));
     return sorted[idx];
   };
-  return { p50: at(0.5), p95: at(0.95) };
+  return { p50: at(0.5), p95: at(0.95), p99: at(0.99) };
 };
 
 // Bin trace rows into a fixed number of equal-width time buckets. Each bucket
@@ -738,7 +738,7 @@ OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, ser
     out.push({
       tsMs: start + i * bucketSize,
       total: 0, ok: 0, slow: 0, error: 0,
-      p50: null, p95: null,
+      p50: null, p95: null, p99: null,
       _durs: [],
     });
   }
@@ -754,7 +754,7 @@ OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, ser
   }
   for (const b of out) {
     const pct = computePercentiles(b._durs);
-    if (pct) { b.p50 = pct.p50; b.p95 = pct.p95; }
+    if (pct) { b.p50 = pct.p50; b.p95 = pct.p95; b.p99 = pct.p99; }
     delete b._durs;
   }
   return { bucketStartMs: start, bucketEndMs: end, bucketSizeMs: bucketSize, buckets: out };

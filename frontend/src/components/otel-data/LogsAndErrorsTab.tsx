@@ -167,6 +167,7 @@ export const LogsAndErrorsTab: React.FC<{
               ]}
               selectedRange={customRange}
               onBucketClick={onBucketClick}
+              onRangeSelect={onBucketClick}
             />
           </div>
         );

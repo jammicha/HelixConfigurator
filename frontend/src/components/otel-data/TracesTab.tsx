@@ -159,6 +159,7 @@ export const TracesTab: React.FC<{
             percentiles={histogram.buckets.map(b => ({ p50: b.p50 ?? null, p95: b.p95 ?? null }))}
             selectedRange={customRange}
             onBucketClick={onBucketClick}
+            onRangeSelect={onBucketClick}
           />
         </div>
       )}

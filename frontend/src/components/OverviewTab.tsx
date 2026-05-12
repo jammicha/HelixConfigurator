@@ -42,7 +42,7 @@ export type HeatmapData = HeatmapDataInternal;
 type TracesHistogramRow = {
   tsMs: number; total: number;
   ok?: number; slow?: number; error?: number;
-  p50?: number | null; p95?: number | null;
+  p50?: number | null; p95?: number | null; p99?: number | null;
 };
 type TracesHistogram = {
   bucketStartMs: number;
@@ -55,8 +55,6 @@ type Props = {
   data: OverviewData | null;
   heatmap: HeatmapData | null;
   tracesHistogram: TracesHistogram | null;
-  /** Prior-window per-bucket totals, aligned by index with tracesHistogram.buckets. */
-  priorTotals: number[] | null;
   serviceMap: ServiceMapData | null;
   loading: boolean;
   customRange: { sinceMs: number; untilMs: number } | null;
@@ -115,7 +113,6 @@ export const OverviewTab: React.FC<Props> = ({
   data,
   heatmap,
   tracesHistogram,
-  priorTotals,
   serviceMap,
   loading,
   customRange,
@@ -247,44 +244,33 @@ export const OverviewTab: React.FC<Props> = ({
         />
       </div>
 
-      {/* Trace volume chart — same data the Traces tab uses */}
+      {/* Latency percentile band — p50/p95/p99 over time. Replaces the
+          earlier trace-volume bar chart; volume is implied by the stat
+          cards above and the Traces tab still shows the stacked-status
+          timeline. */}
       {tracesHistogram && tracesHistogram.buckets.length > 0 && (
         <div className="adapt-card !p-3 mb-4">
           <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-            Trace volume <span className="normal-case tracking-normal text-gray-500 font-normal">— click a bucket to zoom</span>
+            Latency <span className="normal-case tracking-normal text-gray-500 font-normal">— p50/p95/p99 · click or drag to zoom</span>
           </div>
           <TimelineChart
+            mode="latency"
             buckets={tracesHistogram.buckets as any}
             bucketSizeMs={tracesHistogram.bucketSizeMs}
             height={108}
-            segments={[
-              { key: 'ok', label: 'OK', fill: TIMELINE_COLORS.ok },
-              { key: 'slow', label: 'Slow', fill: TIMELINE_COLORS.slow },
-              { key: 'error', label: 'Error', fill: TIMELINE_COLORS.error },
-            ]}
-            percentiles={tracesHistogram.buckets.map(b => ({ p50: b.p50 ?? null, p95: b.p95 ?? null }))}
+            segments={[]}
+            percentiles={tracesHistogram.buckets.map(b => ({
+              p50: b.p50 ?? null,
+              p95: b.p95 ?? null,
+              p99: b.p99 ?? null,
+            }))}
             selectedRange={customRange}
             onBucketClick={onBucketClick}
             onRangeSelect={onBucketClick}
             hoveredTimeMs={hoveredTimeMs}
             onHoverTimeChange={setHoveredTimeMs}
-            latencyThresholdsMs={[{ value: 1000, label: 'p95 slow threshold (1s)' }]}
+            latencyThresholdsMs={[{ value: 1000, label: 'slow threshold (1s)' }]}
             annotations={data.annotations}
-            baselineBand={(() => {
-              // AppDynamics-style baseline: mean ± stddev of current-window
-              // bucket totals. Pure client-side computation; a bucket whose
-              // bar extends well past `hi` is the visual anomaly signal.
-              const vals = tracesHistogram.buckets.map(b => b.total || 0);
-              if (vals.length < 3) return null;
-              const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-              const variance = vals.reduce((a, v) => a + (v - mean) ** 2, 0) / vals.length;
-              const stddev = Math.sqrt(variance);
-              const lo = Math.max(0, mean - stddev);
-              const hi = mean + stddev;
-              if (hi - lo < 0.5) return null;
-              return { lo, hi, label: 'expected (μ ± σ)' };
-            })()}
-            priorTotals={priorTotals}
           />
         </div>
       )}
