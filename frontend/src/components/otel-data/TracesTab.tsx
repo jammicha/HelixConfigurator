@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Activity, AlertTriangle, Database, ExternalLink, FileText, Loader2, Server, X } from 'lucide-react';
 import { TimelineChart, TIMELINE_COLORS } from '../TimelineChart';
 import { BmcChevron } from './BmcChevron';
@@ -37,6 +37,34 @@ export const TracesTab: React.FC<{
   paused, setPaused, streamConnected, helixEnv, operationP95, tracesLoading, onSelect,
   histogram, customRange, onBucketClick, onClearCustomRange,
 }) => {
+  // Column sort. Default 'received' desc matches the SSE merge order; opting
+  // into 'duration' / 'spans' is a deliberate analytical re-sort.
+  type SortKey = 'received' | 'duration' | 'spans';
+  const [sortKey, setSortKey] = useState<SortKey>('received');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+  const sortedTraces = useMemo(() => {
+    const arr = traces.slice();
+    const cmp = (a: TraceSummary, b: TraceSummary) => {
+      switch (sortKey) {
+        case 'duration': return b.duration_ms - a.duration_ms;
+        case 'spans': return (b.span_count || 0) - (a.span_count || 0);
+        case 'received': return b.received_at - a.received_at;
+      }
+    };
+    arr.sort(cmp);
+    if (sortDir === 'asc') arr.reverse();
+    return arr;
+  }, [traces, sortKey, sortDir]);
+  const sortIndicator = (key: SortKey) =>
+    sortKey === key ? (sortDir === 'desc' ? ' ▾' : ' ▴') : '';
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-end gap-3 mb-4 flex-wrap">
@@ -178,14 +206,29 @@ export const TracesTab: React.FC<{
                 <th className="px-4 py-2 font-semibold">Status</th>
                 <th className="px-4 py-2 font-semibold">Service</th>
                 <th className="px-4 py-2 font-semibold">Root operation</th>
-                <th className="px-4 py-2 font-semibold text-right">Duration</th>
-                <th className="px-4 py-2 font-semibold text-right">Spans</th>
-                <th className="px-4 py-2 font-semibold">Received</th>
+                <th className="px-4 py-2 font-semibold text-right">
+                  <button
+                    onClick={() => handleSort('duration')}
+                    className={`uppercase tracking-wider font-semibold ${sortKey === 'duration' ? 'text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
+                  >Duration{sortIndicator('duration')}</button>
+                </th>
+                <th className="px-4 py-2 font-semibold text-right">
+                  <button
+                    onClick={() => handleSort('spans')}
+                    className={`uppercase tracking-wider font-semibold ${sortKey === 'spans' ? 'text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
+                  >Spans{sortIndicator('spans')}</button>
+                </th>
+                <th className="px-4 py-2 font-semibold">
+                  <button
+                    onClick={() => handleSort('received')}
+                    className={`uppercase tracking-wider font-semibold ${sortKey === 'received' ? 'text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
+                  >Received{sortIndicator('received')}</button>
+                </th>
                 {helixEnv?.endpoint && <th className="px-4 py-2 font-semibold w-10" aria-label="Helix" />}
               </tr>
             </thead>
             <tbody>
-              {traces.map(t => (
+              {sortedTraces.map(t => (
                 <tr
                   key={t.trace_id}
                   onClick={() => onSelect(t.trace_id)}

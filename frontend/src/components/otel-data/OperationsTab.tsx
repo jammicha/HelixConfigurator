@@ -11,14 +11,16 @@ export const OperationsTab: React.FC<{
   setRange: (r: TimeRange) => void;
   onJumpToOperation: (op: string) => void;
 }> = ({ operations, loading, range, setRange, onJumpToOperation }) => {
-  const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'count' | 'errors' | 'service'>('p95');
+  const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'max' | 'count' | 'errors' | 'slow' | 'service'>('p95');
   const sorted = useMemo(() => {
     const arr = operations.slice();
     switch (sortBy) {
       case 'p95': arr.sort((a, b) => b.p95_ms - a.p95_ms); break;
       case 'p50': arr.sort((a, b) => b.p50_ms - a.p50_ms); break;
+      case 'max': arr.sort((a, b) => b.max_ms - a.max_ms); break;
       case 'count': arr.sort((a, b) => b.trace_count - a.trace_count); break;
       case 'errors': arr.sort((a, b) => (b.error_count / Math.max(1, b.trace_count)) - (a.error_count / Math.max(1, a.trace_count))); break;
+      case 'slow': arr.sort((a, b) => (b.slow_count / Math.max(1, b.trace_count)) - (a.slow_count / Math.max(1, a.trace_count))); break;
       case 'service': arr.sort((a, b) => a.service_name.localeCompare(b.service_name) || a.root_operation.localeCompare(b.root_operation)); break;
     }
     return arr;
@@ -94,9 +96,9 @@ export const OperationsTab: React.FC<{
                 <th className="px-4 py-2 w-20"><Sortable id="count">Count</Sortable></th>
                 <th className="px-4 py-2 w-24"><Sortable id="p50">p50</Sortable></th>
                 <th className="px-4 py-2 w-24"><Sortable id="p95">p95</Sortable></th>
-                <th className="px-4 py-2 w-24 text-right text-tiny font-semibold text-gray-400 uppercase tracking-wider">Max</th>
+                <th className="px-4 py-2 w-24"><Sortable id="max">Max</Sortable></th>
                 <th className="px-4 py-2 w-24"><Sortable id="errors">Error %</Sortable></th>
-                <th className="px-4 py-2 w-24 text-right text-tiny font-semibold text-gray-400 uppercase tracking-wider">Slow</th>
+                <th className="px-4 py-2 w-24"><Sortable id="slow">Slow</Sortable></th>
               </tr>
             </thead>
             <tbody>
