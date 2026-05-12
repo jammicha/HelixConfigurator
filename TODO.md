@@ -43,6 +43,11 @@ chart looks calm while the trace list is on fire.
 **Risk:** Moderate. SSE bursts can be noisy; will need throttling
 (coalesce sub-second deltas into a single push).
 
+**Reframe (per #6 resolution):** When live updates fire on the volume
+timeline / stat cards, surface a small "View live in Helix AIOps →"
+deep-link next to the live-stream pill. Live wow factor channels into
+AIOps; it doesn't replace it.
+
 ---
 
 ## 3. Cross-correlated insights (Davis-style)
@@ -62,6 +67,11 @@ services and across time.
   of finding history (or recomputing from per-bucket history).
 
 **Risk:** Low. No ML. Just rule passes over existing data.
+
+**Reframe (per #6 resolution):** Every insight card (existing four +
+the two new rules) ends with an "Investigate `<service>` in Helix
+AIOps →" footer when a real Helix endpoint is configured. Insights
+become a launching pad, not a self-contained finding.
 
 ---
 
@@ -134,74 +144,48 @@ OTLP metrics.
 do B if there's a specific app-emitted metric a demo needs to show that
 isn't trace-shaped.
 
+**Reframe (per #6 resolution):** Whichever path ships, the Metrics tab
+header carries an "Open metrics in Helix AIOps →" CTA, and per-service
+panels include a deep-link to that service's AIOps metrics view.
+
 **ADAPT compliance** mirrors the rest of `/otel-data`: palette only, single-
 hue ramps for line charts, no rainbow scales, no gradients, 4px radii. Icons
 likely `LineChart`, `BarChart3`, `Gauge` from Lucide.
 
 ---
 
-## 6. Strategic — reposition `/otel-data` to enhance AIOps, not compete with it
+## 6. Strategic positioning — RESOLVED
 
-**Status:** Open question; brainstorm needed before implementation. Likely
-gates the scope of follow-on work, especially items #2 (SSE) and #3
-(insights) which both increase how compelling `/otel-data` is on its own.
+**Status:** Resolved. Decision recorded here so it doesn't get re-litigated.
 
-**The concern:** `/otel-data` has grown into a credible standalone APM
-viewer (Overview, traces, operations, logs/errors, service map, heatmap,
-Davis-flavored insights). At the same time, its job in the customer
-journey is to onboard them onto BMC Helix's hosted observability product.
-Those two pulls are in tension: every "wow" feature we add to `/otel-data`
-is a feature a customer can use without ever opening Helix. The local
-viewer is potentially cannibalizing the surface it's supposed to escort
-people to.
+**Slogan:** *Hybrid — Preflight for AIOps, with escape hatch.*
+`/otel-data` is positioned as a preflight verifier on the way to Helix
+AIOps. It stays full-fidelity locally so it remains useful in offline /
+air-gapped / demo-without-tenant contexts (the escape hatch), but every
+overlap surface deep-links to its richer AIOps equivalent.
 
-**The brainstorm to run:**
+**Per-surface stance (status quo on cede — nothing is removed or
+downgraded):**
 
-1. **Inventory what `/otel-data` does that Helix AIOps also does.** Be
-   honest. Volume timelines, service maps, latency analysis, error
-   grouping, top-N — these are AIOps features. Where do we duplicate?
-2. **Inventory what `/otel-data` does that Helix AIOps doesn't.**
-   - Gateway-side receiver counters (what arrived locally vs what got
-     exported)
-   - Sampling visibility (which spans got dropped)
-   - The smart-add merge preview (no equivalent in AIOps)
-   - Side-by-side "local seen vs Helix accepted" comparison
-   - Pre-Helix-arrival visibility (what's on the wire right now)
-3. **For each `/otel-data` surface, decide a stance:**
-   - **Cede** — Helix does this better. Remove from `/otel-data` or
-     downgrade visually (e.g., service map becomes "preview" with a
-     prominent "View full map in AIOps" CTA).
-   - **Bridge** — keep locally for offline-friendly preview, but every
-     interaction surfaces a deep-link to Helix's richer version.
-   - **Own** — local-only by nature (sampling holes, dropped data,
-     gateway counters). These become the unique value of `/otel-data`
-     and AIOps surfaces don't compete.
-4. **Pick a positioning slogan.** "Onboard, verify, hand off" vs
-   "always-on local viewer" vs "preflight for AIOps." The current scope
-   is incoherent because no slogan is implicit.
+| Surface | Stance |
+|---|---|
+| Overview RED cards, sparklines | Bridge — full-fidelity + Helix CTA |
+| Trace list + waterfall | Bridge — promote existing "View in Helix" |
+| Operations table | Bridge — add row-level Helix link |
+| Logs & Errors | Bridge — fix `hasRealHelixEndpoint` guard on chevrons |
+| Service Map | Bridge — full-fidelity + Helix CTA, force-directed layout still in scope |
+| Latency Heatmap | Bridge — full-fidelity + Helix CTA |
+| Davis-style insights | Bridge with reframe — see #3 |
+| Receiver counters, app-export errors, synthetic injection, N+1 detector | Own — surface health via Overview banner; details stay in Diagnostics |
+| Demo install bundle | Own — see #7 |
 
-**Concrete moves that could result from the brainstorm:**
-- Make every Helix deep-link more prominent (current chevron icons are
-  small and easy to miss).
-- Add a "Continue in Helix AIOps →" banner on the Overview tab once a
-  configured non-placeholder endpoint is detected.
-- Time-box `/otel-data`'s utility to the onboarding phase: after first
-  successful telemetry, suggest a transition to AIOps.
-- Frame Davis-style insights as "things to investigate in AIOps" rather
-  than self-contained findings (each card ends with "Open this service
-  in AIOps →").
-- Add the local-only surfaces that AIOps can't show: dropped-span counts,
-  sampling-rate visibility, "this span never made it past the gateway."
-
-**Risk of NOT doing this brainstorm:** every TODO item we ship adds to
-the cannibalization tension. Items #2 (SSE coverage) and #3 (correlated
-insights) in particular would make `/otel-data` more attractive on its
-own. Worth deciding the positioning before doing those.
-
-**Risk of doing this brainstorm too narrowly:** "compete vs complement"
-isn't really a binary. The honest answer is probably a hybrid, and the
-brainstorm should produce nuanced per-surface decisions, not a single
-"yes/no" verdict on the local viewer.
+**What this changes elsewhere in this doc:**
+- #2 (SSE) and #3 (correlated insights) ship as planned, with AIOps
+  CTAs added (see "Reframe" notes on each).
+- #5 (metrics viz) ships path A with AIOps CTAs (see "Reframe" note).
+- #4 backlog stays as-is — force-directed map, heatmap drill, etc. all
+  remain in scope because cede stance is status quo.
+- New items #8 and #9 below capture the positioning-specific work.
 
 ---
 
@@ -258,6 +242,60 @@ to be evaluated. It exists for the demo's local-trace-viewer pattern.
 In a real-product world, would it ship? Probably yes (local /otel-data
 is useful) but it's worth being explicit that this is part of the
 configurator's standalone story rather than something AIOps mandates.
+
+---
+
+## 8. Helix CTA promotion (positioning follow-on)
+
+**Why:** Current Helix deep-links live in three places (trace detail
+drawer header, per-row chevrons in Logs and Errors) and are easy to
+miss. Under the Preflight positioning, the CTA should be unmissable on
+every Bridge surface.
+
+**Plan:**
+- **Overview banner:** When `helixEnv.endpoint` and `helixEnv.tenantId`
+  are both set and non-placeholder, render a top-of-Overview banner:
+  "Telemetry is flowing — continue in Helix AIOps →" linking to the
+  AIOps landing page for the configured tenant. Dismissible
+  per-session, not per-forever.
+- **Per-surface CTAs:** On each Bridge surface header (Operations,
+  Service Map, Heatmap), a small "Open full view in AIOps →" link.
+  Same `hasRealHelixEndpoint` guard as elsewhere.
+- **Trace-row chevrons:** Apply the `hasRealHelixEndpoint` guard from
+  the existing #4 backlog item to Traces/Logs/Errors row-level
+  chevrons. (Already in scope; flagging the dependency.)
+
+**Risk:** Low. The banner is the only new affordance; everything else
+is a guard fix or a one-line link.
+
+---
+
+## 9. Preflight health banner (positioning follow-on)
+
+**Why:** The "Own" surfaces (receiver counters, app-export error scan,
+synthetic injection results, N+1 detection) currently live in the
+Diagnostics tab. Under the Preflight positioning these are the unique
+value of `/otel-data`, but they're invisible unless the user navigates
+to Diagnostics.
+
+**Plan:**
+- Compute a rolled-up preflight status from existing data:
+  - Receiver `refused_*` counters (warn if non-zero)
+  - App-export error scan (warn if any container in the last N minutes)
+  - "No traces seen in last 5 minutes" (warn)
+- Render at the top of Overview:
+  - **Green state:** compact "Preflight ✓" pill.
+  - **Degraded state:** full-width banner with the failing checks and
+    a "View in Diagnostics" link.
+- No new backend data needed — both `/api/diagnostics/receiver-counters`
+  and `/api/diagnostics/app-export-errors` already exist. New frontend
+  hook aggregates them.
+
+**Risk:** Low. New surface but no new data plumbing. Visual only.
+
+**Sequencing note:** Ships alongside #8 since both live on Overview
+and together establish the "Bridge with prominent CTA + Own surface
+visibility" pattern that defines the Preflight positioning.
 
 ---
 
