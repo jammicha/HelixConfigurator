@@ -299,6 +299,53 @@ visibility" pattern that defines the Preflight positioning.
 
 ---
 
+## 10. Streaming consistency — diagnosis
+
+**Symptom (from review):** "OTel data doesn't seem to stream in very
+consistently."
+
+**Root causes, ranked by likely impact:**
+
+1. **Overview surfaces are polled, not pushed.** SSE
+   (`/api/traces/stream`) only emits `trace`, `error_record`, `log`,
+   `trace_counts_update`. The Overview stat cards, volume chart, latency
+   heatmap, and service map all come from `/api/overview-bundle`, which
+   is polled on a hardcoded `setInterval(refresh, 60_000)` in
+   `OtelDataPage.tsx:141`. The trace *list* feels live (SSE) but every
+   aggregate visualization can be up to 60s stale. This is almost
+   certainly the dominant cause of "inconsistent" — adjacent surfaces
+   are on different cadences. Fix path: item #2 in this doc (SSE
+   coverage for Overview charts), or shorten the polling interval.
+2. **Collector batches with `timeout: 1s, send_batch_size: 1024`**
+   (`backend/index.js:335`). Traces arrive in ≤1s bursts, not
+   continuously. Looks jagged on a high-resolution timeline.
+3. **No replay on SSE reconnect.** Server doesn't set `id:` on events
+   and ignores `Last-Event-ID`. When the browser auto-reconnects after
+   a network blip or tab-throttle, anything emitted during the gap is
+   missing from the live list (still in the backend store). Indicator
+   stays at "Reconnecting…" since `streamConnected` only resets when
+   the next `connected` event arrives.
+4. **Operations tab polls every 60s** with no SSE coverage
+   (`OtelDataPage.tsx:377`). Same lag class as Overview but more
+   visible because Operations is a deep-dive surface.
+5. **Backgrounded-tab throttling.** `usePageRefresh` pauses polling
+   when `document.visibilityState === 'hidden'` (correct), but SSE is
+   browser-throttled in background tabs too. Coming back from a long
+   background period shows stale data until the next foreground poll.
+6. **No write-backpressure handling on SSE.** `res.write()` returns
+   false under TCP backpressure but the server keeps queuing. A slow
+   client would stall the event loop. Probably not the user's issue
+   but worth knowing.
+
+**Recommended fix path:**
+- Quick win: drop the hardcoded 60s polling intervals to 10s for
+  Overview/Operations to mask the lag. Cheap.
+- Medium: ship #2 (SSE coverage for Overview charts) and remove the
+  Operations polling entirely once those events flow.
+- Optional: add SSE `id:` + `Last-Event-ID` replay on reconnect.
+
+---
+
 ## What was deliberately NOT added
 
 For the record, so these don't get re-proposed:
