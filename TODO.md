@@ -90,6 +90,54 @@ Bundled together because each is small and none is independently urgent:
 
 ---
 
+## 5. OTel-native metrics visualization
+
+**Status:** Lower priority for now. Captured so we don't re-discover the
+analysis next time.
+
+**Current state:** The gateway already accepts OTLP metrics on 4317/4318
+and forwards to Helix. The local fan-out (`otlphttp/local_store`) does NOT
+include metrics today — only `traces_endpoint` + `logs_endpoint` are wired,
+so metrics are dropped on the configurator side. The Overview tab's
+throughput / error-rate / p95 stats are derived from traces, not from real
+OTLP metrics.
+
+**Approaches considered:**
+
+- **A. Derive from traces (RED-from-traces).** Build a "Metrics" view that's
+  per-service RED panels, per-operation latency distributions, and similar
+  trace-derived analytics. Reuses existing SQLite trace store. Captures ~80%
+  of what people look at on a metrics dashboard. **No new infra.** *Effort:*
+  1-2 days. *Risk:* low — same patterns as Overview.
+
+- **B. Lightweight OTLP metric ingest + viewer.** Add `/api/otlp/metrics`,
+  a `metric_samples` SQLite table with count cap (same discipline as logs),
+  and a new "Metrics" tab. Adds `metrics_endpoint` to the gateway's local
+  fan-out. Renders catalog (one row per name+label-set with sparkline) and
+  per-metric line charts; histograms as stacked-band view. **Captures
+  app-emitted custom metrics + runtime metrics** (heap, GC). *Effort:* 3-5
+  days. *Hard parts:* cardinality cap (label like `user_id` fans into
+  millions of series), OTel exponential histogram rendering, delta-vs-
+  cumulative counter semantics, aggregation across labels.
+
+- **C. Embed Prometheus + Grafana.** Drop a real TSDB into compose, iframe
+  Grafana for visualization. *Rejected:* abandons the standalone-single-
+  binary feel; iframing Grafana is "we gave up."
+
+- **D. Forward-only + deep-link to Helix.** No local viz; surface "View
+  metrics for this service in Helix" links. *Rejected:* breaks demo
+  isolation — can't show metrics without a working tenant.
+
+**Recommended path:** Start with A whenever this becomes top-priority. Only
+do B if there's a specific app-emitted metric a demo needs to show that
+isn't trace-shaped.
+
+**ADAPT compliance** mirrors the rest of `/otel-data`: palette only, single-
+hue ramps for line charts, no rainbow scales, no gradients, 4px radii. Icons
+likely `LineChart`, `BarChart3`, `Gauge` from Lucide.
+
+---
+
 ## What was deliberately NOT added
 
 For the record, so these don't get re-proposed:
