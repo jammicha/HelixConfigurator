@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Semantic Colors</title>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;padding:20px;background:var(--bg-surface);}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .row{display:flex;flex-direction:column;gap:6px;}
+  .stack{display:flex;border-radius:6px;overflow:hidden;border:1px solid var(--gray-200);}
+  .step{flex:1;height:56px;display:flex;align-items:flex-end;padding:6px 8px;font-size:10px;font-family:var(--font-family-mono);}
+  .label{font-size:12px;font-weight:600;color:var(--fg1);}
+</style></head>
+<body>
+<div class="grid">
+  <div class="row"><div class="label">Info</div><div class="stack">
+    <div class="step" style="background:#bcdef5;color:#22242a">muted</div>
+    <div class="step" style="background:#389be1;color:#22242a">base</div>
+    <div class="step" style="background:#007cc1;color:#fff">hover</div>
+    <div class="step" style="background:#00579c;color:#fff">pressed</div>
+  </div></div>
+  <div class="row"><div class="label">Success</div><div class="stack">
+    <div class="step" style="background:#bcf5e1;color:#22242a">muted</div>
+    <div class="step" style="background:#11845b;color:#fff">base</div>
+    <div class="step" style="background:#006640;color:#fff">hover</div>
+    <div class="step" style="background:#004120;color:#fff">pressed</div>
+  </div></div>
+  <div class="row"><div class="label">Warning</div><div class="stack">
+    <div class="step" style="background:#f5ebbc;color:#22242a">muted</div>
+    <div class="step" style="background:#ffd200;color:#22242a">base</div>
+    <div class="step" style="background:#d9ae00;color:#22242a">hover</div>
+    <div class="step" style="background:#ad8600;color:#fff">pressed</div>
+  </div></div>
+  <div class="row"><div class="label">Danger</div><div class="stack">
+    <div class="step" style="background:#f5bcc6;color:#22242a">muted</div>
+    <div class="step" style="background:#b2001e;color:#fff">base</div>
+    <div class="step" style="background:#890008;color:#fff">hover</div>
+    <div class="step" style="background:#520000;color:#fff">pressed</div>
+  </div></div>
+</div>
+</body></html>

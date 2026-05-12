@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Brand Illustrations</title>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;padding:18px;background:var(--bg-surface);font-family:var(--font-family);color:var(--fg1);}
+  .stack{display:flex;flex-direction:column;gap:12px;}
+  .item{display:flex;align-items:center;gap:16px;padding:16px;background:var(--gray-100);border-radius:6px;}
+  .swatch{flex:0 0 220px;height:96px;border-radius:4px;display:flex;align-items:center;justify-content:center;padding:14px;}
+  .swatch.light{background:#fff;border:1px solid var(--gray-200);}
+  .swatch.dark{background:#052140;}
+  .swatch img{max-height:40px;width:auto;}
+  .meta{display:flex;flex-direction:column;gap:3px;min-width:0;}
+  .ttl{font-size:14px;font-weight:600;color:var(--fg1);}
+  .lbl{font-size:11px;font-family:var(--font-family-mono);color:var(--fg3);}
+  .desc{font-size:12px;color:var(--fg2);max-width:340px;}
+  .pair{display:flex;gap:8px;}
+  .pair .swatch{flex:0 0 160px;height:80px;}
+</style></head>
+<body>
+<div class="stack">
+  <div class="item">
+    <div class="pair">
+      <div class="swatch light"><img src="../assets/bmc-helix-logo.svg" alt="bmc helix on light"></div>
+      <div class="swatch dark"><img src="../assets/logo-bmc-helix-light-icon.svg" alt="bmc helix on dark"></div>
+    </div>
+    <div class="meta">
+      <div class="ttl">BMC Helix — primary lockup</div>
+      <div class="lbl">assets/bmc-helix-logo.svg · light + dark variants</div>
+      <div class="desc">Coral icon + wordmark. Dark wordmark on light surfaces; white wordmark on dark surfaces.</div>
+    </div>
+  </div>
+
+  <div class="item">
+    <div class="swatch light"><img src="../assets/send-email.svg" alt="send email"></div>
+    <div class="meta">
+      <div class="ttl">Send email</div>
+      <div class="lbl">assets/send-email.svg</div>
+      <div class="desc">Onboarding / outreach illustration. One-off vector, not part of the icon font.</div>
+    </div>
+  </div>
+</div>
+</body></html>
