@@ -92,4 +92,12 @@ export type TimeRange = '5m' | '15m' | '1h' | '6h' | '24h' | 'all';
 
 export type TraceStatus = 'error' | 'slow' | 'ok' | 'outlier';
 
-export type HelixEnv = { endpoint: string; tenantId: string; source: string };
+export type HelixEnv = {
+  endpoint: string;
+  tenantId: string;
+  source: string;
+  /** AIOps business-service entity key (or full URL fragment containing one).
+   *  Used to build the deep-link target for "Open in AIOps" CTAs. Optional —
+   *  links degrade gracefully when not set. */
+  businessServiceKey?: string;
+};

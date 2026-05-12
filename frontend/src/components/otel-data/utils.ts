@@ -69,19 +69,27 @@ export const hasRealHelixEndpoint = (env: HelixEnv | null): boolean => {
   return !/\/\/your-tenant\.onbmc\.com\b/i.test(env.endpoint);
 };
 
-export const buildHelixLandingUrl = (env: HelixEnv | null): string | null => {
-  if (!hasRealHelixEndpoint(env)) return null;
-  const base = env!.endpoint.replace(/\/+$/, '');
-  return env!.tenantId ? `${base}/?orgId=${encodeURIComponent(env!.tenantId)}` : base;
+// Accept bare key, URL path fragment, or full AIOps URL — extract just the
+// opaque business-service key. Mirrors the helper in App.tsx; centralized
+// here so otel-data deep-links can reuse it.
+export const extractServiceKey = (input: string | undefined | null): string => {
+  if (!input) return '';
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/entities\/service\/([^/?#\s]+)/);
+  if (match) return match[1];
+  return trimmed.split(/[?#\s]/)[0];
 };
 
-// Best-guess AIOps Topology deep-link. Real path may differ — refine when the
-// actual Helix AIOps topology URL is known.
-export const buildHelixTopologyUrl = (env: HelixEnv | null): string | null => {
+// AIOps Business Service entity page. This is the page that hosts the Helix
+// Topology view, so it doubles as the "Open in AIOps Topology" target for
+// /otel-data's Service Map. Returns null when either the endpoint is still
+// the install-bundle placeholder or no business-service key is configured.
+export const buildHelixBusinessServiceUrl = (env: HelixEnv | null): string | null => {
   if (!hasRealHelixEndpoint(env)) return null;
+  const key = extractServiceKey(env!.businessServiceKey);
+  if (!key) return null;
   const base = env!.endpoint.replace(/\/+$/, '');
-  const qs = env!.tenantId ? `?orgId=${encodeURIComponent(env!.tenantId)}` : '';
-  return `${base}/aiops/#/topology${qs}`;
+  return `${base}/aiops/#/entities/service/${encodeURIComponent(key)}?type=key`;
 };
 
 export const buildHelixTraceUrl = (

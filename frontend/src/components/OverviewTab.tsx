@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ExternalLink, Loader2 } from 'lucide-react';
-import { buildHelixTopologyUrl } from './otel-data/utils';
+import { buildHelixBusinessServiceUrl } from './otel-data/utils';
 import { StatCard } from './StatCard';
 import { TopList } from './TopList';
 import type { TopListRow } from './TopList';
@@ -303,7 +303,7 @@ export const OverviewTab: React.FC<Props> = ({
               Service map <span className="normal-case tracking-normal text-gray-500 font-normal">— inter-service calls from spans · click a node to filter traces</span>
             </div>
             {(() => {
-              const url = buildHelixTopologyUrl(helixEnv);
+              const url = buildHelixBusinessServiceUrl(helixEnv);
               if (!url) return null;
               return (
                 <a

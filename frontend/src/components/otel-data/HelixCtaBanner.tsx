@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ExternalLink, X } from 'lucide-react';
 import { BmcChevron } from './BmcChevron';
-import { buildHelixLandingUrl } from './utils';
+import { buildHelixBusinessServiceUrl } from './utils';
 import type { HelixEnv } from './types';
 
 type Props = {
@@ -10,7 +10,7 @@ type Props = {
 
 export const HelixCtaBanner: React.FC<Props> = ({ helixEnv }) => {
   const [dismissed, setDismissed] = useState(false);
-  const url = buildHelixLandingUrl(helixEnv);
+  const url = buildHelixBusinessServiceUrl(helixEnv);
   if (!url || dismissed) return null;
 
   return (

@@ -202,6 +202,7 @@ export const OtelDataPage: React.FC = () => {
           endpoint: env.HELIX_ENDPOINT || '',
           tenantId,
           source: env.X_SOURCE || '',
+          businessServiceKey: env.BUSINESS_SERVICE_KEY || '',
         });
       })
       .catch(() => { /* env unset — links just won't render */ });
