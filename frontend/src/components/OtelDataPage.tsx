@@ -833,6 +833,7 @@ export const OtelDataPage: React.FC = () => {
               setActiveTab('traces');
             }}
             helixEnv={helixEnv}
+            slowThresholdMs={slowThresholdMs}
           />
         )}
         {activeTab === 'traces' && (

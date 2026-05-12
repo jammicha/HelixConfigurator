@@ -68,6 +68,8 @@ type Props = {
   onDrilldownHeatmapCell: (sinceMs: number, untilMs: number, minDurationMs: number) => void;
   /** Helix tenant config — when set to a non-placeholder endpoint, the AIOps CTA banner renders. */
   helixEnv: HelixEnv | null;
+  /** User-selected slow threshold (ms). Drives the reference line on the latency histogram so it tracks the same value as the Operations / Traces views. */
+  slowThresholdMs: number;
 };
 
 const formatNumber = (n: number): string => {
@@ -122,6 +124,7 @@ export const OverviewTab: React.FC<Props> = ({
   onDrilldownError,
   onDrilldownHeatmapCell,
   helixEnv,
+  slowThresholdMs,
 }) => {
   // Shared-crosshair: hover any chart, all charts on the page get a guide at
   // the same time-X. State is lifted here so the volume chart and heatmap
@@ -269,7 +272,7 @@ export const OverviewTab: React.FC<Props> = ({
             onRangeSelect={onBucketClick}
             hoveredTimeMs={hoveredTimeMs}
             onHoverTimeChange={setHoveredTimeMs}
-            latencyThresholdsMs={[{ value: 1000, label: 'slow threshold (1s)' }]}
+            latencyThresholdsMs={[{ value: slowThresholdMs, label: `slow threshold (${formatDuration(slowThresholdMs)})` }]}
             annotations={data.annotations}
           />
         </div>
