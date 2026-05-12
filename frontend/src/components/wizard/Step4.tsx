@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertTriangle, Hexagon, ExternalLink, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Hexagon, Loader2 } from 'lucide-react';
 import type { BridgeStatus, DetectedCollector } from './Step3';
 import type { EnvVars } from './Step1';
 
@@ -63,7 +63,7 @@ export const Step4: React.FC<Props> = ({
   return (
     <div className="adapt-card">
       <h2 className="text-lg font-bold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
-      <p className="text-sm text-gray-400 mb-5">Three quick checks. Restart your app or collector first if you just changed config.</p>
+      <p className="text-sm text-gray-400 mb-5">Restart your app or collector first if you just changed config.</p>
 
       {bridgeStatus?.kind === 'skipped' && !someoneAttached && (
         <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
@@ -89,7 +89,7 @@ export const Step4: React.FC<Props> = ({
 
       <div className="mb-5">
         <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-          Live counters <span className="normal-case tracking-normal text-gray-500 font-normal">— since you opened this step</span>
+          Live counters
         </div>
         <div className="grid grid-cols-3 gap-3">
           <CounterCard label="Spans" value={dSpans} />
@@ -171,23 +171,6 @@ export const Step4: React.FC<Props> = ({
             <span className="text-gray-200">Not yet verified. Run the synthetic check below.</span>
           </div>
         )}
-      </div>
-
-      <div className="mb-5 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-        <div>
-          <span className="text-gray-200">Before topology appears in Helix, the <span className="font-semibold">Default Blueprint for OTel Service</span> must be enabled in AIOps.</span>{' '}
-          {envVars.HELIX_ENDPOINT && (
-            <a
-              href={`${envVars.HELIX_ENDPOINT.replace(/\/+$/, '')}/aiops/#/configurations/manageOpentelemetry`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-active hover:underline font-semibold inline-flex items-center gap-1"
-            >
-              Open Manage OpenTelemetry <ExternalLink className="w-3 h-3" />
-            </a>
-          )}
-        </div>
       </div>
 
       <div className="flex gap-4">

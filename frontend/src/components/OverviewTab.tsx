@@ -6,8 +6,6 @@ import type { TopListRow } from './TopList';
 import { TimelineChart, TIMELINE_COLORS } from './TimelineChart';
 import { Heatmap } from './Heatmap';
 import type { HeatmapData as HeatmapDataInternal } from './Heatmap';
-import { InsightsPanel } from './InsightsPanel';
-import type { InsightFinding } from './InsightsPanel';
 import { ServiceMap } from './ServiceMap';
 import type { ServiceMapData } from './ServiceMap';
 import { HelixCtaBanner } from './otel-data/HelixCtaBanner';
@@ -58,8 +56,6 @@ type Props = {
   tracesHistogram: TracesHistogram | null;
   /** Prior-window per-bucket totals, aligned by index with tracesHistogram.buckets. */
   priorTotals: number[] | null;
-  insights: InsightFinding[];
-  insightsLoading: boolean;
   serviceMap: ServiceMapData | null;
   loading: boolean;
   customRange: { sinceMs: number; untilMs: number } | null;
@@ -119,8 +115,6 @@ export const OverviewTab: React.FC<Props> = ({
   heatmap,
   tracesHistogram,
   priorTotals,
-  insights,
-  insightsLoading,
   serviceMap,
   loading,
   customRange,
@@ -211,8 +205,6 @@ export const OverviewTab: React.FC<Props> = ({
           >Clear time selection</button>
         </div>
       )}
-
-      <InsightsPanel findings={insights} loading={insightsLoading} />
 
       {/* Stat row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">

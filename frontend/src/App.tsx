@@ -76,7 +76,7 @@ const App = () => {
   const [helixConfig, setHelixConfig] = useState({ baseUrl: '', tenantId: '', source: '', businessServiceKey: '' });
   const [loadingContainers, setLoadingContainers] = useState<Set<string>>(new Set());
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isYamlOpen, setIsYamlOpen] = useState(true);
   const [showApiKey, setShowApiKey] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmRequest | null>(null);

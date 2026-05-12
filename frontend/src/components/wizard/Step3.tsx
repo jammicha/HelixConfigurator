@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, CheckCircle2, AlertTriangle, Hexagon } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Hexagon } from 'lucide-react';
 import { SnippetBlock } from '../SnippetBlock';
 
 export type DetectedCollector = {
@@ -57,12 +57,6 @@ export const Step3: React.FC<Props> = ({
         <div className="mb-4 flex items-start gap-3 p-3 bg-success/10 border border-success/40 rounded text-sm">
           <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
           <span className="text-gray-200"><span className="font-semibold">helix-gateway was automatically attached to your app's network.</span> It joined <code className="font-mono">{bridgeStatus.network}</code> (matched container <code className="font-mono">{bridgeStatus.targetContainer}</code>).</span>
-        </div>
-      )}
-      {bridgeStatus?.kind === 'skipped' && (
-        <div className="mb-4 flex items-start gap-3 p-3 bg-active/10 border border-active/40 rounded text-sm">
-          <Activity className="w-4 h-4 text-active flex-shrink-0 mt-0.5" />
-          <span className="text-gray-200"><span className="font-semibold">APP_URL is a localhost or IP address — auto-attach skipped.</span> Use the controls below to connect manually.</span>
         </div>
       )}
       {bridgeStatus?.kind === 'error' && (
@@ -208,7 +202,7 @@ export const Step3: React.FC<Props> = ({
           <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0 mt-0.5" />
           <span>
             <span className="font-semibold text-gray-100">helix-gateway is already on a network with a detected collector.</span>{' '}
-            You can continue to Verify — no further attach needed.
+            You can continue to Verify.
           </span>
         </div>
       )}

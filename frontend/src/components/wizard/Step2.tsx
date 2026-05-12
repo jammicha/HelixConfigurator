@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Container, Loader2, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import { SnippetBlock } from '../SnippetBlock';
 import type { SmartAddProposal, SmartAddResult } from '../../hooks/useSmartAdd';
@@ -25,7 +25,35 @@ export const Step2: React.FC<Props> = ({
   onVerifyExporter,
   onBack,
   onNext,
-}) => (
+}) => {
+  // Track verify-button result inline. Without this the button does nothing
+  // visually for fast local YAML re-reads — the proposal might transition
+  // alreadyConfigured → alreadyConfigured with no UI delta.
+  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'verifying' | 'done'>('idle');
+  const sawLoadingRef = useRef(false);
+  useEffect(() => {
+    if (verifyStatus !== 'verifying') return;
+    if (smartAddLoading) {
+      sawLoadingRef.current = true;
+    } else if (sawLoadingRef.current) {
+      sawLoadingRef.current = false;
+      setVerifyStatus('done');
+      const t = setTimeout(() => setVerifyStatus('idle'), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [smartAddLoading, verifyStatus]);
+  const handleVerify = () => {
+    if (!onVerifyExporter) return;
+    setVerifyStatus('verifying');
+    onVerifyExporter();
+  };
+  const verifyBadge = verifyStatus === 'verifying'
+    ? (<span className="inline-flex items-center gap-1 text-tiny text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Verifying…</span>)
+    : verifyStatus === 'done'
+    ? (<span className="inline-flex items-center gap-1 text-tiny text-success"><CheckCircle2 className="w-3 h-3" /> Verified just now</span>)
+    : null;
+
+  return (
   <div className="adapt-card">
     <h2 className="text-lg font-bold mb-4 text-gray-200">Step 2: Add helix-gateway as an exporter</h2>
 
@@ -61,10 +89,14 @@ export const Step2: React.FC<Props> = ({
           <>
             <p className="text-tiny text-warning mb-3">⚠ {smartAddProposal.error} You can still apply the snippet below manually.</p>
             {onVerifyExporter && (
-              <button
-                onClick={onVerifyExporter}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
-              >Verify exporter</button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={handleVerify}
+                  disabled={verifyStatus === 'verifying'}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
+                >Verify exporter</button>
+                {verifyBadge}
+              </div>
             )}
           </>
         ) : smartAddProposal.alreadyConfigured ? (
@@ -74,10 +106,14 @@ export const Step2: React.FC<Props> = ({
               <span className="text-success font-semibold">Already configured</span> — <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
             </p>
             {onVerifyExporter && (
-              <button
-                onClick={onVerifyExporter}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
-              >Re-verify exporter</button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={handleVerify}
+                  disabled={verifyStatus === 'verifying'}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
+                >Re-verify exporter</button>
+                {verifyBadge}
+              </div>
             )}
           </>
         ) : (
@@ -96,11 +132,13 @@ export const Step2: React.FC<Props> = ({
               </button>
               {onVerifyExporter && (
                 <button
-                  onClick={onVerifyExporter}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
+                  onClick={handleVerify}
+                  disabled={verifyStatus === 'verifying'}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
                   title="Re-check whether helix-gateway is already wired into this collector's pipelines"
                 >Verify exporter</button>
               )}
+              {verifyBadge}
               <span className="text-tiny text-gray-500">Or copy the snippets below to apply manually.</span>
             </div>
           </>
@@ -154,4 +192,5 @@ export const Step2: React.FC<Props> = ({
       >Next: Connect →</button>
     </div>
   </div>
-);
+  );
+};
