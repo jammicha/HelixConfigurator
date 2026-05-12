@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Alerts</title>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;padding:22px;background:var(--bg-surface);font-family:var(--font-family);font-size:13px;}
+  .alert{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:4px;margin-bottom:8px;border:1px solid transparent;}
+  .ic{font-weight:700;flex-shrink:0;width:18px;text-align:center;}
+  .a-info{background:#bcdef5;color:#00579c;border-color:#389be1;}
+  .a-success{background:#bcf5e1;color:#004120;border-color:#11845b;}
+  .a-warning{background:#f5ebbc;color:#826900;border-color:#d9ae00;}
+  .a-danger{background:#f5bcc6;color:#52000;border-color:#b2001e;color:#52000a;}
+  .a-helixgpt{background:#f5d6bc;color:#a02e00;border-color:#f86e00;}
+  b{font-weight:600;}
+</style></head>
+<body>
+  <div class="alert a-info"><div class="ic">i</div><div><b>Heads up.</b> Maintenance window starts in 30 minutes.</div></div>
+  <div class="alert a-success"><div class="ic">✓</div><div><b>Configuration saved.</b> Changes are live in production.</div></div>
+  <div class="alert a-warning"><div class="ic">!</div><div><b>Approaching quota.</b> You've used 85% of your seats.</div></div>
+  <div class="alert a-danger"><div class="ic">×</div><div><b>Sync failed.</b> Verify the connector credentials.</div></div>
+  <div class="alert a-helixgpt"><div class="ic">★</div><div><b>HelixGPT suggestion.</b> Reassign ticket INC-3421 to Network team.</div></div>
+</body></html>

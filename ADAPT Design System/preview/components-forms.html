@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Form Controls</title>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;padding:22px;background:var(--bg-surface);font-family:var(--font-family);font-size:13px;color:var(--fg1);}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  label{display:block;font-size:12px;font-weight:600;margin-bottom:6px;}
+  .inp{width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:4px;font:inherit;background:#fff;color:var(--fg1);box-sizing:border-box;}
+  .inp:focus{outline:none;border-color:#3759d8;box-shadow:0 0 0 2px rgba(55,89,216,.2);}
+  .err{border-color:#b2001e;}
+  .help{font-size:11px;color:var(--fg3);margin-top:4px;}
+  .help.err{color:#b2001e;}
+  .check{display:flex;align-items:center;gap:8px;font-size:13px;}
+</style></head>
+<body>
+<div class="grid">
+  <div>
+    <label>Email</label>
+    <input class="inp" value="user@bmc.com">
+    <div class="help">We'll never share your email</div>
+  </div>
+  <div>
+    <label>Password</label>
+    <input class="inp err" type="password" value="••••">
+    <div class="help err">Must be at least 8 characters</div>
+  </div>
+  <div>
+    <label>Region</label>
+    <select class="inp"><option>US-East</option><option>EU-West</option></select>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end;">
+    <div class="check"><input type="checkbox" checked> Subscribe to product updates</div>
+    <div class="check"><input type="radio" name="r" checked> Standard plan</div>
+    <div class="check"><input type="radio" name="r"> Enterprise plan</div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Badges & Chips</title>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;padding:22px;background:var(--bg-surface);font-family:var(--font-family);}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;}
+  .lbl{font-family:var(--font-family-mono);font-size:11px;color:var(--fg3);width:80px;}
+  .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;line-height:1.5;}
+  .b-primary{background:#bcbcf5;color:#22242a;}
+  .b-active{background:#bcc8f5;color:#22242a;}
+  .b-info{background:#bcdef5;color:#22242a;}
+  .b-success{background:#bcf5e1;color:#0e6d4b;}
+  .b-warning{background:#f5ebbc;color:#826900;}
+  .b-danger{background:#f5bcc6;color:#b2001e;}
+  .b-helixgpt{background:#f5d6bc;color:#a02e00;}
+  .b-solid{background:#4040d9;color:#fff;}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px 3px 10px;border-radius:9999px;font-size:12px;background:var(--gray-200);color:var(--fg1);}
+  .chip .x{display:inline-flex;width:14px;height:14px;border-radius:50%;background:var(--gray-400);color:#fff;align-items:center;justify-content:center;font-size:10px;cursor:pointer;}
+</style></head>
+<body>
+  <div class="row"><div class="lbl">badges</div>
+    <span class="badge b-primary">Primary</span>
+    <span class="badge b-active">Active</span>
+    <span class="badge b-info">Info</span>
+    <span class="badge b-success">Success</span>
+    <span class="badge b-warning">Warning</span>
+    <span class="badge b-danger">Danger</span>
+    <span class="badge b-helixgpt">HelixGPT</span>
+    <span class="badge b-solid">12 new</span>
+  </div>
+  <div class="row"><div class="lbl">chips</div>
+    <span class="chip">Production <span class="x">×</span></span>
+    <span class="chip">Critical <span class="x">×</span></span>
+    <span class="chip">Datacenter-EU <span class="x">×</span></span>
+  </div>
+</body></html>

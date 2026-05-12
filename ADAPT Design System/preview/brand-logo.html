@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Logo</title>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;padding:24px;background:var(--bg-surface);font-family:var(--font-family);}
+  .row{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;}
+  .b{padding:18px 22px;background:var(--gray-100);border-radius:6px;display:flex;align-items:center;justify-content:center;min-width:180px;min-height:72px;}
+  .b.dark{background:#22242a;}
+  .lbl{font-size:11px;color:var(--fg3);font-family:var(--font-family-mono);margin-top:6px;}
+  .word{font-size:36px;font-weight:700;letter-spacing:.06em;color:#4040d9;}
+  .word.inv{color:#fff;}
+  .col{display:flex;flex-direction:column;}
+</style></head>
+<body>
+<div class="row">
+  <div class="col"><div class="b"><div class="word">ADAPT</div></div><div class="lbl">wordmark · on light</div></div>
+  <div class="col"><div class="b dark"><div class="word inv">ADAPT</div></div><div class="lbl">wordmark · on dark</div></div>
+  <div class="col"><div class="b"><img src="../assets/bmc-helix-logo.png" height="40"></div><div class="lbl">parent · BMC Helix</div></div>
+  <div class="col"><div class="b dark"><img src="../assets/bmc-helix-logo.png" height="40"></div><div class="lbl">parent · on dark</div></div>
+</div>
+</body></html>
