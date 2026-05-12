@@ -5,7 +5,7 @@ import { BmcChevron } from './BmcChevron';
 import { StatusPill } from './StatusPill';
 import { MIN_DURATION_PRESETS } from './constants';
 import { useSlowThreshold } from './SlowThresholdContext';
-import { buildHelixTraceUrl, formatDuration, formatRelative } from './utils';
+import { buildHelixTraceUrl, formatDuration, formatRelative, hasRealHelixEndpoint } from './utils';
 import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
 
 export const TracesTab: React.FC<{
@@ -198,7 +198,7 @@ export const TracesTab: React.FC<{
                     className={`uppercase tracking-wider font-semibold ${sortKey === 'received' ? 'text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
                   >Received{sortIndicator('received')}</button>
                 </th>
-                {helixEnv?.endpoint && <th className="px-4 py-2 font-semibold w-10" aria-label="Helix" />}
+                {hasRealHelixEndpoint(helixEnv) && <th className="px-4 py-2 font-semibold w-10" aria-label="Helix" />}
               </tr>
             </thead>
             <tbody>
@@ -269,7 +269,7 @@ export const TracesTab: React.FC<{
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums text-gray-400">{t.span_count}</td>
                   <td className="px-4 py-2 text-tiny text-gray-500">{formatRelative(t.received_at)}</td>
-                  {helixEnv?.endpoint && (
+                  {hasRealHelixEndpoint(helixEnv) && (
                     <td className="px-4 py-2 text-right">
                       {(() => {
                         const url = buildHelixTraceUrl(helixEnv, {

@@ -96,7 +96,11 @@ export const buildHelixTraceUrl = (
   env: HelixEnv | null,
   { traceId, serviceName, timeNs }: { traceId: string; serviceName: string; timeNs: number },
 ): string | null => {
-  if (!env || !env.endpoint || !env.tenantId || !traceId) return null;
+  // hasRealHelixEndpoint check centralizes the placeholder guard: every
+  // caller's `if (!url) return null;` becomes the guard automatically,
+  // so trace-row chevrons stop rendering a link to `your-tenant.onbmc.com`
+  // when the install bundle's default hasn't been replaced yet.
+  if (!env || !env.tenantId || !traceId || !hasRealHelixEndpoint(env)) return null;
   const params = new URLSearchParams({
     orgId: env.tenantId,
     'var-BusinessService': env.source || '',
