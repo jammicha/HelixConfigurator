@@ -49,19 +49,28 @@ export const StatCard: React.FC<Props> = ({
       onClick={onClick}
       className={`adapt-card w-full text-left ${onClick ? 'hover:border-gray-700 transition-colors cursor-pointer' : ''}`}
     >
-      <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-1">{label}</div>
+      {/* Typography aligned to ADAPT KPI tile spec
+          (ui_kits/helix-app/styles.css, .hx-kpi):
+          - label: 12px / 600 / uppercase / 0.05em tracking / fg2
+          - value: 32px / 700 / Open Sans (not mono) / line-height 1
+          - delta: 12px / fg3
+          The project's dark palette + sparkline are kept; Adapt's left-
+          border tone variants are not used here because the delta
+          already carries the up/down signal. */}
+      <div className="text-xs font-semibold text-gray-400 uppercase tracking-[0.05em] mb-1">{label}</div>
       <div className="flex items-end justify-between gap-3 mb-1">
-        <div className="text-2xl font-semibold text-gray-100 leading-tight font-mono tabular-nums">{value}</div>
+        <div className="text-[32px] font-bold text-gray-100 leading-none tabular-nums">{value}</div>
         {sparkline && <Sparkline data={sparkline} width={84} height={26} />}
       </div>
       {delta && (
-        <div className={`text-tiny font-semibold inline-flex items-center gap-1 ${deltaTone}`}>
+        <div className={`text-xs inline-flex items-center gap-1 ${deltaTone}`}>
           <DeltaIcon className="w-3 h-3" />
-          {delta} <span className="text-gray-500 font-normal normal-case tracking-normal">vs prior window</span>
+          <span className="font-semibold">{delta}</span>
+          <span className="text-gray-500 font-normal normal-case tracking-normal">vs prior window</span>
         </div>
       )}
       {summary && (
-        <div className="mt-1 flex items-center gap-2.5 text-tiny text-gray-500 font-mono tabular-nums">
+        <div className="mt-1 flex items-center gap-2.5 text-xs text-gray-500 tabular-nums">
           <span><span className="opacity-60">min</span> {summary.min}</span>
           <span><span className="opacity-60">max</span> {summary.max}</span>
           <span><span className="opacity-60">avg</span> {summary.avg}</span>
