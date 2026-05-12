@@ -10,6 +10,8 @@ import { InsightsPanel } from './InsightsPanel';
 import type { InsightFinding } from './InsightsPanel';
 import { ServiceMap } from './ServiceMap';
 import type { ServiceMapData } from './ServiceMap';
+import { HelixCtaBanner } from './otel-data/HelixCtaBanner';
+import type { HelixEnv } from './otel-data/types';
 
 // Shapes returned by /api/overview and /api/traces/latency-heatmap. Re-exported
 // from OtelDataPage so the parent doesn't need to redefine.
@@ -69,6 +71,8 @@ type Props = {
   onDrilldownError: (exceptionType: string, serviceName: string) => void;
   /** Drilldown from heatmap cell: zoom traces into that time window + duration band. */
   onDrilldownHeatmapCell: (sinceMs: number, untilMs: number, minDurationMs: number) => void;
+  /** Helix tenant config — when set to a non-placeholder endpoint, the AIOps CTA banner renders. */
+  helixEnv: HelixEnv | null;
 };
 
 const formatNumber = (n: number): string => {
@@ -125,6 +129,7 @@ export const OverviewTab: React.FC<Props> = ({
   onDrilldownService,
   onDrilldownError,
   onDrilldownHeatmapCell,
+  helixEnv,
 }) => {
   // Shared-crosshair: hover any chart, all charts on the page get a guide at
   // the same time-X. State is lifted here so the volume chart and heatmap
@@ -192,6 +197,7 @@ export const OverviewTab: React.FC<Props> = ({
 
   return (
     <div className="flex-1 overflow-y-auto pb-6">
+      <HelixCtaBanner helixEnv={helixEnv} />
       {customRange && (
         <div className="mb-3 flex items-center justify-between gap-3 px-1">
           <div className="text-tiny text-gray-400">

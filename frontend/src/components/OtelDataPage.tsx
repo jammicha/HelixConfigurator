@@ -722,6 +722,7 @@ export const OtelDataPage: React.FC = () => {
               setMinMs(Math.max(0, Math.floor(minDurationMs)));
               setActiveTab('traces');
             }}
+            helixEnv={helixEnv}
           />
         )}
         {activeTab === 'traces' && (

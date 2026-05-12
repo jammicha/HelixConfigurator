@@ -61,6 +61,20 @@ export const formatHelixTimestamp = (timeNs: number | null | undefined): string 
   return `${date} ${time}.${pad(d.getMilliseconds(), 3)}000000`;
 };
 
+// Install bundles ship HELIX_ENDPOINT=https://your-tenant.onbmc.com so the
+// wizard has something to validate against. A "real" endpoint is anything
+// the user has substituted in — anything that isn't the literal placeholder.
+export const hasRealHelixEndpoint = (env: HelixEnv | null): boolean => {
+  if (!env || !env.endpoint) return false;
+  return !/\/\/your-tenant\.onbmc\.com\b/i.test(env.endpoint);
+};
+
+export const buildHelixLandingUrl = (env: HelixEnv | null): string | null => {
+  if (!hasRealHelixEndpoint(env)) return null;
+  const base = env!.endpoint.replace(/\/+$/, '');
+  return env!.tenantId ? `${base}/?orgId=${encodeURIComponent(env!.tenantId)}` : base;
+};
+
 export const buildHelixTraceUrl = (
   env: HelixEnv | null,
   { traceId, serviceName, timeNs }: { traceId: string; serviceName: string; timeNs: number },
