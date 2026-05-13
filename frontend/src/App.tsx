@@ -113,6 +113,11 @@ const App = () => {
   const [receiverNow, setReceiverNow] = useState<ReceiverCounters | null>(null);
   const [receiverError, setReceiverError] = useState('');
   const [appExportErrors, setAppExportErrors] = useState<{ container: string; lines: string[] }[]>([]);
+  // gatewayStatus is the same shared state polled by the dashboard at the top
+  // of the file. On Step 4 we add a faster 2s parallel poll (alongside the
+  // receiver counters) so the wizard's "Gateway not running" affordance reacts
+  // snappily without us having to chase the dashboard's 5s cadence.
+  const [restartingGateway, setRestartingGateway] = useState(false);
 
   const [envVars, setEnvVars] = useState({
     HELIX_ENDPOINT: '',
@@ -376,26 +381,52 @@ const App = () => {
       setReceiverNow(null);
       setReceiverError('');
       setAppExportErrors([]);
+      // Don't reset gatewayStatus — the dashboard's always-on 5s poll owns
+      // that state and we'd briefly clobber it on every Step 4 exit.
       return;
     }
     let cancelled = false;
     let baselineSet = false;
     const tick = async () => {
       if (cancelled) return;
-      try {
-        const res = await fetch('/api/diagnostics/receiver-counters');
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          if (!cancelled) setReceiverError(data.error || 'Gateway metrics unreachable');
-          return;
+      // Run the receiver-counter probe and the gateway-status probe in
+      // parallel — both endpoints are cheap and we want them on the same
+      // 2s cadence so the "Gateway not running" affordance updates in
+      // step with the live counters.
+      const [countersRes, statusRes] = await Promise.allSettled([
+        fetch('/api/diagnostics/receiver-counters'),
+        fetch('/api/lifecycle/status'),
+      ]);
+      if (cancelled) return;
+
+      if (countersRes.status === 'fulfilled') {
+        try {
+          const res = countersRes.value;
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (!cancelled) setReceiverError(data.error || 'Gateway metrics unreachable');
+          } else {
+            const data = await res.json();
+            if (!cancelled) {
+              setReceiverError('');
+              setReceiverNow(data);
+              if (!baselineSet) { setReceiverBaseline(data); baselineSet = true; }
+            }
+          }
+        } catch (e: any) {
+          if (!cancelled) setReceiverError(e?.message || 'Network error');
         }
-        const data = await res.json();
-        if (cancelled) return;
-        setReceiverError('');
-        setReceiverNow(data);
-        if (!baselineSet) { setReceiverBaseline(data); baselineSet = true; }
-      } catch (e: any) {
-        if (!cancelled) setReceiverError(e?.message || 'Network error');
+      } else {
+        if (!cancelled) setReceiverError(countersRes.reason?.message || 'Network error');
+      }
+
+      if (statusRes.status === 'fulfilled') {
+        try {
+          const data = await statusRes.value.json();
+          if (!cancelled) setGatewayStatus(typeof data?.status === 'string' ? data.status : 'unknown');
+        } catch {
+          if (!cancelled) setGatewayStatus('unknown');
+        }
       }
     };
     tick();
@@ -953,6 +984,19 @@ const App = () => {
   };
 
   const smartAdd = useSmartAdd({ setupStep, isSetupComplete, detectedCollectors, refreshDetectedCollectors });
+
+  // Step 4 in-wizard remediation: restart the helix-gateway container when
+  // the polled status shows it's not running. The 2s tick will pick up the
+  // new state — we just flip the local 'restarting' flag for the button.
+  const handleRestartGateway = async () => {
+    if (restartingGateway) return;
+    setRestartingGateway(true);
+    setGatewayStatus('restarting');
+    try {
+      await fetch('/api/lifecycle/restart', { method: 'POST' });
+    } catch { /* tick will surface the failure state */ }
+    finally { setRestartingGateway(false); }
+  };
 
   // Step 2 verification: inject a synthetic trace through the gateway and watch
   // for the sent counter to move. Proves gateway→Helix independent of whether
@@ -1518,6 +1562,9 @@ ${logsData.logs || '(no logs available)'}
                   receiverBaseline={receiverBaseline}
                   receiverError={receiverError}
                   appExportErrors={appExportErrors}
+                  gatewayStatus={gatewayStatus}
+                  restartingGateway={restartingGateway}
+                  onRestartGateway={handleRestartGateway}
                   traceVerifyResult={traceVerifyResult}
                   verifyingTrace={verifyingTrace}
                   envVars={envVars}

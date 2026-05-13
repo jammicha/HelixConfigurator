@@ -22,6 +22,9 @@ type Props = {
   receiverBaseline: ReceiverCounters | null;
   receiverError: string;
   appExportErrors: { container: string; lines: string[] }[];
+  gatewayStatus: string;
+  restartingGateway: boolean;
+  onRestartGateway: () => void;
   traceVerifyResult: TraceVerifyResult;
   verifyingTrace: boolean;
   envVars: EnvVars;
@@ -47,6 +50,9 @@ export const Step4: React.FC<Props> = ({
   receiverBaseline,
   receiverError,
   appExportErrors,
+  gatewayStatus,
+  restartingGateway,
+  onRestartGateway,
   traceVerifyResult,
   verifyingTrace,
   envVars,
@@ -59,6 +65,10 @@ export const Step4: React.FC<Props> = ({
   const dLogs = delta(receiverNow?.acceptedLogRecords, receiverBaseline?.acceptedLogRecords);
   const someoneAttached = detectedCollectors.some(c => c.sharesNetworkWithSidecar);
   const k8sDetected = detectedCollectors.some(c => c.isKubernetes);
+  // Show the gateway-status warning only once we've actually probed the
+  // status (status !== 'unknown') and it's not the healthy state. The
+  // 'restarting' state is the transient one we set ourselves on click.
+  const gatewayNotRunning = gatewayStatus !== 'unknown' && gatewayStatus !== 'running';
 
   return (
     <div className="adapt-card">
@@ -84,6 +94,29 @@ export const Step4: React.FC<Props> = ({
             <button onClick={() => onJumpToStep(3)} className="text-active hover:underline font-semibold">Go back to Step 3</button>{' '}
             to connect manually if you haven't already.
           </span>
+        </div>
+      )}
+
+      {gatewayNotRunning && (
+        <div className="mb-4 flex items-start gap-3 p-3 rounded border border-warning/40 bg-warning/10 text-sm">
+          <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="text-gray-200">
+              <span className="font-semibold">Helix gateway is not running</span>
+              {gatewayStatus === 'restarting'
+                ? <> — restarting…</>
+                : <> (<code className="font-mono text-gray-300">{gatewayStatus}</code>). Telemetry from your collector won't reach Helix until it's back up.</>}
+            </div>
+          </div>
+          <button
+            onClick={onRestartGateway}
+            disabled={restartingGateway || gatewayStatus === 'restarting'}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-tiny rounded font-semibold bg-warning hover:bg-warning/90 text-gray-1000 disabled:opacity-60 flex-shrink-0"
+          >
+            {restartingGateway || gatewayStatus === 'restarting'
+              ? (<><Loader2 className="w-3 h-3 animate-spin" /> Restarting</>)
+              : 'Restart gateway'}
+          </button>
         </div>
       )}
 
