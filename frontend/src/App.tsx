@@ -1555,6 +1555,14 @@ ${logsData.logs || '(no logs available)'}
                   onLaunchDashboard={() => {
                     localStorage.setItem('helix-configurator.onboarded', '1');
                     setIsSetupComplete(true);
+                    // Clean the URL — the user may have arrived from
+                    // /onboarding (typed manually, or via the dev server's
+                    // SPA fallback) or from /?view=onboarding (the nav link).
+                    // Either way the dashboard's canonical URL is /, and
+                    // leaving the wizard URL in the bar misleads on refresh.
+                    if (window.location.pathname !== '/' || window.location.search) {
+                      window.history.replaceState(null, '', '/');
+                    }
                   }}
                 />
               )}
