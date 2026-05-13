@@ -471,13 +471,20 @@ untested code in this area.
 
 **What to verify:**
 
-- **Dedup behavior.** Provision the `OTEL_TRACE_ANOMALY` event class
-  via the Settings button. Send the same trace twice from the
-  drawer. Expected: BMC's auto-dedup matches on `helix_trace_id` and
-  updates the existing Event instead of creating a duplicate. If it
-  doesn't, check that the class definition's `helix_trace_id` slot
-  is flagged `dup_detect=true` and `mandatory=true` (see
-  `routes/situations.js` `provision-class` handler).
+- **Dedup behavior.** The Settings-page "Provision event class"
+  button was removed (2026-05-12) — it returned 401 against the
+  test tenant, since the events-classes API requires an elevated
+  permission most tenants don't expose to the standard API key.
+  The `POST /api/situations/provision-class` backend endpoint
+  remains and can be curl'd from a machine that holds a privileged
+  key. Once the class is in place, sending the same trace twice
+  from the drawer should auto-dedup on `helix_trace_id` and update
+  the existing Event instead of duplicating. If it doesn't, verify
+  the class definition's `helix_trace_id` slot is flagged
+  `dup_detect=true` and `mandatory=true` (see
+  `backend/routes/situations.js` `provision-class` handler). Until
+  then, the client-side localStorage send-history (in the drawer)
+  prevents accidental re-sends.
 - **Severity classification.** Send an error trace → confirm
   severity=CRITICAL appears in AIOps. Send an outlier (duration > 2×
   the operation's p95) → confirm severity=MAJOR. Send a normal trace

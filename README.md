@@ -116,7 +116,7 @@ After onboarding, the dashboard provides:
   - **Helix OTel Dashboard** — deep-link to the namespace overview dashboard.
   - **AIOps Business Service** — deep-link to the configured business service in AIOps (requires `BUSINESS_SERVICE_KEY`).
   - **Application UI** — opens `APP_URL`.
-- **Helix Connection Settings** — edit env vars in-place; saving triggers a gateway restart so changes take effect immediately. The Settings card also displays whether the UI is open access or password-required, and includes a one-time **Provision event class** button that creates the `OTEL_TRACE_ANOMALY` custom event class on your tenant — required for the trace drawer's *Send to AIOps* dedup to work (re-sends update the existing Event instead of duplicating).
+- **Helix Connection Settings** — edit env vars in-place; saving triggers a gateway restart so changes take effect immediately. The Settings card also displays whether the UI is open access or password-required.
 - **Gateway Config (YAML)** — Monaco-based editor with syntax highlighting, save-time validation (line-precise parse errors plus structural-lint warnings for typos like `recievers`, undefined pipeline references, missing `service` block), and `Cmd+S` / `Ctrl+S` to save.
   - **Load Template** — picker modal with built-in starting points: Default Sidecar, Prometheus Scrape, Tail Sampling for High-Volume Tracing, and Kubernetes Attribute Enrichment. Selecting a template loads its content into the editor with current env vars substituted; click Save Config to apply.
 - **Diagnostic Log Stream**
@@ -143,7 +143,7 @@ Three top-level tabs:
 
 Trace detail (click a row in Traces):
 
-- **Send to AIOps.** Top-right of the drawer: posts the trace into BMC Helix as an Event via the Events API. Severity is derived from the trace itself — `CRITICAL` when there's an error span, `MAJOR` when duration > 2× the operation's p95, `MINOR` otherwise. The button label changes accordingly (*Send anomaly to AIOps* vs *Send to AIOps as event*), and the icon is colored to match. Sends are deduped on `helix_trace_id` server-side; re-clicks are warned about in the UI (the button reads *Sent — send again?* with a relative timestamp). Pinning to one Business Service requires `BUSINESS_SERVICE_KEY` to be set and the `OTEL_TRACE_ANOMALY` event class to be provisioned (one-time button on the Settings card — see Features above).
+- **Send to AIOps.** Top-right of the drawer: posts the trace into BMC Helix as an Event via the Events API. Severity is derived from the trace itself — `CRITICAL` when there's an error span, `MAJOR` when duration > 2× the operation's p95, `MINOR` otherwise. The button label changes accordingly (*Send anomaly to AIOps* vs *Send to AIOps as event*), and the icon is colored to match. Re-clicks for the same trace are warned about in the UI (the button reads *Sent — send again?* with a relative timestamp); a localStorage send-history disclosure logs every attempt. Pinning to one Business Service requires `BUSINESS_SERVICE_KEY` to be set.
 - **View in Helix.** Deep-link to the `OTelTraceDetails` dashboard for this trace.
 - **Service breakdown.** Stacked bar showing wall-clock time per service in the trace, with intervals merged so parallel spans don't double-count.
 - **SQL rollup.** DB spans grouped by system + statement (or operation if no statement was captured) with count, total time, slowest exemplar. N+1 detection alert fires when 5+ spans share a `db.operation`.

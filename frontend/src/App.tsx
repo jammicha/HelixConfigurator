@@ -134,8 +134,6 @@ const App = () => {
   const [authStatus, setAuthStatus] = useState<{ required: boolean; authenticated: boolean } | null>(null);
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
   const [isTogglingDiag, setIsTogglingDiag] = useState(false);
-  const [isProvisioningClass, setIsProvisioningClass] = useState(false);
-  const [provisionResult, setProvisionResult] = useState<{ ok: boolean; message: string } | null>(null);
   const handleUpdateConfigRef = useRef<() => void>(() => {});
   const telemetryTimerRef = useRef<any>(null);
 
@@ -745,33 +743,6 @@ const App = () => {
       showToastMsg('Error updating settings', 'error');
     } finally {
       setIsUpdatingSettings(false);
-    }
-  };
-
-  const handleProvisionEventClass = async () => {
-    if (isProvisioningClass) return;
-    setIsProvisioningClass(true);
-    setProvisionResult(null);
-    try {
-      const res = await fetch('/api/situations/provision-class', { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setProvisionResult({
-          ok: true,
-          message: data.alreadyExists
-            ? `Class ${data.className || 'OTEL_TRACE_ANOMALY'} already exists on your tenant.`
-            : `Class ${data.className || 'OTEL_TRACE_ANOMALY'} created. Sends from the Traces drawer will now dedupe on re-send.`,
-        });
-      } else {
-        setProvisionResult({
-          ok: false,
-          message: data.error || `Request failed (${res.status})`,
-        });
-      }
-    } catch (e: any) {
-      setProvisionResult({ ok: false, message: e.message || 'Network error' });
-    } finally {
-      setIsProvisioningClass(false);
     }
   };
 
@@ -1795,27 +1766,6 @@ ${logsData.logs || '(no logs available)'}
                       >
                         {isUpdatingSettings && <Loader2 className="w-4 h-4 animate-spin" />}
                         {isUpdatingSettings ? 'Updating...' : 'Update Settings'}
-                      </button>
-                    </div>
-                    <div className="mt-5 pt-4 border-t border-gray-800 flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-1">AIOps event class</div>
-                        <div className="text-tiny text-gray-500 leading-relaxed">
-                          Provision <code className="font-mono text-gray-300">OTEL_TRACE_ANOMALY</code> on your tenant so re-sending the same trace updates the event instead of duplicating it. One-time setup.
-                        </div>
-                        {provisionResult && (
-                          <div className={`mt-2 text-tiny ${provisionResult.ok ? 'text-success' : 'text-danger'}`}>
-                            {provisionResult.message}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        onClick={handleProvisionEventClass}
-                        disabled={isProvisioningClass}
-                        className="border border-gray-800 hover:border-active disabled:opacity-60 disabled:cursor-not-allowed text-gray-200 px-4 py-2 rounded font-semibold transition-all text-tiny uppercase tracking-wider flex items-center gap-2 flex-shrink-0"
-                      >
-                        {isProvisioningClass && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                        {isProvisioningClass ? 'Provisioning…' : 'Provision event class'}
                       </button>
                     </div>
                     <div className="mt-5 pt-4 border-t border-gray-800 flex items-center gap-2 text-tiny">
