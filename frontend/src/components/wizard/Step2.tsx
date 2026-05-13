@@ -57,11 +57,6 @@ export const Step2: React.FC<Props> = ({
   <div className="adapt-card">
     <h2 className="text-lg font-semibold mb-4 text-gray-200">Step 2: Add helix-gateway as an exporter</h2>
 
-    <div className="mb-4 flex items-start gap-3 p-3 bg-active/10 border border-active/40 rounded text-sm">
-      <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
-      <span className="text-gray-200"><span className="font-semibold">helix-gateway is already configured.</span> Just add it as an exporter in your collector config.</span>
-    </div>
-
     {/* Smart-add — when exactly one OTel collector is detected on this host,
         the configurator can read its config, compute the merge, and apply it
         (with a backup + restart) for the user. POC scope. */}
