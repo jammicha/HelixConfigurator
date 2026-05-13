@@ -8,15 +8,6 @@ resolve in a way that changes the project's scope.
 
 ---
 
-## 1. Extract `TraceDetailDrawer` + waterfall subsystem — DONE (2026-05-12)
-
-**Status:** Shipped. Subsystem extracted into
-`components/otel-data/trace-detail/` (TraceDetailDrawer, Waterfall +
-SummaryCell + RollupPanel + ServiceBreakdownPanel, SpanRow, FlameView,
-LogLine, palette). `OtelDataPage.tsx` dropped from 1929 → 901 lines.
-
----
-
 ## 2. SSE coverage for the Overview charts
 
 **Why:** `/api/traces/stream` already pushes new traces, errors, and logs to
@@ -166,7 +157,7 @@ downgraded):**
 | Latency Heatmap | Bridge — full-fidelity + Helix CTA |
 | Davis-style insights | Bridge with reframe — see #3 |
 | Receiver counters, app-export errors, synthetic injection, N+1 detector | Own — surface health via Overview banner; details stay in Diagnostics |
-| Demo install bundle | Own — see #7 |
+| Demo install bundle | Own — see README "Demo install bundle" section |
 
 **What this changes elsewhere in this doc:**
 - #2 (SSE) and #3 (correlated insights) ship as planned, with AIOps
@@ -178,80 +169,13 @@ downgraded):**
 
 ---
 
-## 7. Make the demo/real plumbing boundary explicit in code
-
-**Status (2026-05-12):** Steps 1-4 all shipped. Only step 5 (optional
-separate compose service — explicitly flagged as overkill) remains.
-The demo/real boundary is now visible in URLs (`/api/_demo/aiops/*`),
-in source layout (`backend/routes/demo.js` is the sole home of every
-renderer), in runtime (gated by `IS_DEMO_INSTALL=false`), and in the
-README ("Demo install bundle" section).
-
-**Original framing — code hygiene; matters more the longer this codebase lives.**
-
-**The concern:** Routes labeled as demo simulations (`/api/aiops/configure`,
-`/api/aiops/package/:token`, `/api/aiops/install/:token.{sh,ps1}`) sit
-structurally beside real product routes. The SIMULATED prefix is only in
-comments; the routes are at the same URL namespace, the handlers look
-the same, the install bundle includes the simulated `FAKE-KEY-...` API
-key. A new contributor reading the file has no syntactic signal which
-half is the demo. Worse: the line gets harder to draw as the codebase
-grows, and at some point someone treats a demo path as real (or vice
-versa) and ships a bug.
-
-**Plan (incremental, each step independently shippable):**
-
-1. **Namespace prefix.** ✅ DONE (2026-05-12, commit `60581c3`). All
-   AIOps install routes moved to `/api/_demo/aiops/*`; the generated
-   bash/PowerShell installer scripts reference the new path. The
-   underscore prefix is conventional for "internal / non-product"
-   namespaces (Google APIs, Kubernetes).
-2. **Env flag.** ✅ DONE (2026-05-12, commit `d8eaf79`). `IS_DEMO_INSTALL`
-   env var defaults to true; setting it to `false` makes all four
-   `/api/_demo/aiops/*` routes 404 while `/api/health` and all other
-   `/api/*` routes are unaffected. Documented in README under
-   "Demo install bundle".
-3. **Move the AIOps simulator to its own module.** ✅ DONE (2026-05-12,
-   commit `09efe65`). All the `render*` functions, `SIMULATED_INGEST_ENDPOINT`,
-   `writePackageToArchive`, `aiopsSessions` now live in
-   `backend/routes/demo.js`. Conditional registration based on the
-   step-2 env flag is what's left.
-4. **README addendum.** ✅ DONE (2026-05-12, commit `d8eaf79`). New
-   "Demo install bundle (`/api/_demo/aiops/*`)" section in README
-   explains what the demo plumbing simulates, what would differ in a
-   real-product deployment (real AIOps page would generate the
-   install command; real tenant would supply the endpoint + key), and
-   how to disable via `IS_DEMO_INSTALL=false`. Also clarifies that
-   `otlphttp/helix_local_viewer` is NOT demo plumbing — it's part of
-   the configurator's standalone-sidecar story.
-5. **(Stretch) Separate compose service.** A `helix-configurator-demo`
-   container alongside the real one, only present when running the
-   demo flow. Definitely overkill for now — flag for when the rest
-   above feels insufficient.
-
-**Risk:** Low. Each step is non-breaking if the env flag defaults to
-true. The hardest part is finding every route handler that's "demo
-only" — some are obvious (`/api/aiops/configure`), some are subtler
-(the `/api/health` endpoint exposes the SIMULATED_INGEST_ENDPOINT in
-its response).
-
-**What I'd watch for:** the fan-out exporter in
-`helix-otel-collector.yaml` (`otlphttp/helix_local_viewer`) ALSO needs
-to be evaluated. It exists for the demo's local-trace-viewer pattern.
-In a real-product world, would it ship? Probably yes (local /otel-data
-is useful) but it's worth being explicit that this is part of the
-configurator's standalone story rather than something AIOps mandates.
-
----
-
 ## 8. Helix CTA promotion (positioning follow-on)
 
-**Status (2026-05-12):** Partially shipped. The trace detail drawer
-now carries a prominent "Send to AIOps" / "Send anomaly to AIOps"
-button that converts the trace into a Helix Event via the Events API
-(commit `d9fb3de`). The drawer also has a one-time "Provision event
-class" affordance on Settings. The remaining items are smaller and
-ship independently.
+**Status (2026-05-13):** Drawer Send-to-AIOps shipped (commit `d9fb3de`),
+trace-row chevron guards tightened (commit `8b4d277`), generic
+AIOps-console link + send-history disclosure shipped (commit
+`b6f72a5`). The Overview header, per-surface chrome, and the
+event-detail deep-link still need work.
 
 **Why:** Helix deep-links / actions on `/otel-data` should be
 unmissable on every Bridge surface. The drawer is now covered; the
@@ -266,31 +190,17 @@ Overview header and per-surface chrome aren't.
 - **Per-surface CTAs:** On each Bridge surface header (Operations,
   Service Map, Heatmap), a small "Open full view in AIOps →" link.
   Same `hasRealHelixEndpoint` guard as elsewhere.
-- **Trace-row chevrons:** ✅ DONE (2026-05-12, commit `8b4d277`).
-  `buildHelixTraceUrl` now checks `hasRealHelixEndpoint` internally
-  so every caller's existing `if (!url) return null;` is automatically
-  the guard. TracesTab's column-header gate tightened to
-  `hasRealHelixEndpoint(helixEnv)` too.
 - **Insights cards → AIOps:** the #3 "Reframe" note (Investigate
   `<service>` in Helix AIOps →) hasn't shipped yet — wire that up at
   the same time as the per-surface CTAs.
-- **Send-to-AIOps polish (the feature shipped 2026-05-12 in commit
-  `d9fb3de`).** Three follow-ups originally tracked here. Status:
-  - (a) "View this event in AIOps" link after successful send.
-    ✅ Shipped (commit `b6f72a5`) as a generic AIOps-console link
-    (`${endpoint}/aiops/`) since we don't yet have a validated portal
-    URL for an individual Event by id. **Refinement pending #13**:
-    once a real tenant exercises the flow, capture the actual
-    event-detail URL pattern and replace the generic console link
-    with a deep-link to the just-created Event.
-  - (b) Send-history log in the drawer. ✅ Shipped (commit `b6f72a5`)
-    as a `<details>` disclosure showing all attempts per trace
-    (success or failure) from a new `helix-otel.sendAttempts`
-    localStorage key, capped at 10/trace.
-  - (c) Severity rule refinement (CRITICAL on error / MAJOR on
-    outlier / MINOR otherwise). Still deferred — wait for #13
-    feedback on whether MAJOR vs MINOR feels right for manually-sent
-    non-anomalous traces.
+- **Event-detail deep-link.** Today the post-send "View in AIOps"
+  link goes to a generic AIOps-console URL (`${endpoint}/aiops/`).
+  Once #13 validates against a real tenant, capture the actual
+  event-detail URL pattern and replace the generic link with a
+  deep-link to the just-created Event by id.
+- **Severity rule refinement** (CRITICAL on error / MAJOR on outlier
+  / MINOR otherwise). Deferred — wait for #13 feedback on whether
+  MAJOR vs MINOR feels right for manually-sent non-anomalous traces.
 
 **Risk:** Low. The banner is the only new affordance; everything else
 is a guard fix or a one-line link.
@@ -378,10 +288,6 @@ unchanged. The dominant cause (#1) is still pending and requires #2.
 - Medium: ship #2 (SSE coverage for Overview charts) and have
   Operations honor the stream-mode cadence (or get its own SSE).
 - Optional: add SSE `id:` + `Last-Event-ID` replay on reconnect.
-- ✅ Restore a "reconnecting…" indicator. DONE (2026-05-12, commit
-  `cbe6ee8`): a 1.5×1.5 dot next to the Stream selector — cyan +
-  pulsing when SSE is connected, warning yellow when reconnecting.
-  Hidden in snapshot modes (which don't use SSE).
 
 ---
 
