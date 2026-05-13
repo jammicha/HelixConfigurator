@@ -180,16 +180,12 @@ downgraded):**
 
 ## 7. Make the demo/real plumbing boundary explicit in code
 
-**Status (2026-05-12):** Steps 1 and 3 substantially shipped. Step 1
-(commit `60581c3`) moved every AIOps install/demo route under
-`/api/_demo/aiops/...` — frontend `AiopsPage`, the generated
-bash/PowerShell installer scripts, and the four route handlers all
-updated. Step 3 (commit `09efe65`, on `refactor/backend-modular-split`)
-moved the AIOps simulator (all the `render*` functions,
-`SIMULATED_INGEST_ENDPOINT`, `writePackageToArchive`, `aiopsSessions`)
-out of `index.js` into `backend/routes/demo.js`. What remains: step 2
-(env-flag gate), step 4 (README addendum), step 5 (optional separate
-compose service — overkill flag).
+**Status (2026-05-12):** Steps 1-4 all shipped. Only step 5 (optional
+separate compose service — explicitly flagged as overkill) remains.
+The demo/real boundary is now visible in URLs (`/api/_demo/aiops/*`),
+in source layout (`backend/routes/demo.js` is the sole home of every
+renderer), in runtime (gated by `IS_DEMO_INSTALL=false`), and in the
+README ("Demo install bundle" section).
 
 **Original framing — code hygiene; matters more the longer this codebase lives.**
 
@@ -210,24 +206,24 @@ versa) and ships a bug.
    bash/PowerShell installer scripts reference the new path. The
    underscore prefix is conventional for "internal / non-product"
    namespaces (Google APIs, Kubernetes).
-2. **Env flag.** Add `IS_DEMO_INSTALL=true` to `.env.example`. Gate the
-   `/api/_demo/*` routes behind it — return 404 when the flag is false.
-   Default to true for the in-repo `.env` so existing demo flows keep
-   working. When a customer eventually runs this in a real environment,
-   they set it false and the demo plumbing is invisible. With step 3
-   done, this is now a small change: wrap the
-   `require('./routes/demo').register(...)` call in `index.js` in an
-   env-flag check.
+2. **Env flag.** ✅ DONE (2026-05-12, commit `d8eaf79`). `IS_DEMO_INSTALL`
+   env var defaults to true; setting it to `false` makes all four
+   `/api/_demo/aiops/*` routes 404 while `/api/health` and all other
+   `/api/*` routes are unaffected. Documented in README under
+   "Demo install bundle".
 3. **Move the AIOps simulator to its own module.** ✅ DONE (2026-05-12,
    commit `09efe65`). All the `render*` functions, `SIMULATED_INGEST_ENDPOINT`,
    `writePackageToArchive`, `aiopsSessions` now live in
    `backend/routes/demo.js`. Conditional registration based on the
    step-2 env flag is what's left.
-4. **README addendum.** New section explaining: what is the demo
-   plumbing for, what does it simulate, what should be replaced in a
-   real-product context (a real AIOps page would generate the install
-   command, not us; a real Helix tenant would supply the endpoint not
-   the placeholder, etc.).
+4. **README addendum.** ✅ DONE (2026-05-12, commit `d8eaf79`). New
+   "Demo install bundle (`/api/_demo/aiops/*`)" section in README
+   explains what the demo plumbing simulates, what would differ in a
+   real-product deployment (real AIOps page would generate the
+   install command; real tenant would supply the endpoint + key), and
+   how to disable via `IS_DEMO_INSTALL=false`. Also clarifies that
+   `otlphttp/helix_local_viewer` is NOT demo plumbing — it's part of
+   the configurator's standalone-sidecar story.
 5. **(Stretch) Separate compose service.** A `helix-configurator-demo`
    container alongside the real one, only present when running the
    demo flow. Definitely overkill for now — flag for when the rest
@@ -278,15 +274,23 @@ Overview header and per-surface chrome aren't.
 - **Insights cards → AIOps:** the #3 "Reframe" note (Investigate
   `<service>` in Helix AIOps →) hasn't shipped yet — wire that up at
   the same time as the per-surface CTAs.
-- **Send-to-AIOps polish (the feature shipped today, commit `d9fb3de`).**
-  Three follow-ups worth tracking: (a) after a successful send, render
-  a "View this event in AIOps →" link in the drawer using the
-  upstream-returned event id (the events API response carries it);
-  (b) keep a small retry/error log in the drawer so failed sends can
-  be inspected without a page reload; (c) revisit the severity rule
-  (CRITICAL on error / MAJOR on outlier / MINOR otherwise) once we
-  have feedback from a real Helix tenant on whether MAJOR vs MINOR
-  feels right for traces that aren't anomalous but were sent manually.
+- **Send-to-AIOps polish (the feature shipped 2026-05-12 in commit
+  `d9fb3de`).** Three follow-ups originally tracked here. Status:
+  - (a) "View this event in AIOps" link after successful send.
+    ✅ Shipped (commit `b6f72a5`) as a generic AIOps-console link
+    (`${endpoint}/aiops/`) since we don't yet have a validated portal
+    URL for an individual Event by id. **Refinement pending #13**:
+    once a real tenant exercises the flow, capture the actual
+    event-detail URL pattern and replace the generic console link
+    with a deep-link to the just-created Event.
+  - (b) Send-history log in the drawer. ✅ Shipped (commit `b6f72a5`)
+    as a `<details>` disclosure showing all attempts per trace
+    (success or failure) from a new `helix-otel.sendAttempts`
+    localStorage key, capped at 10/trace.
+  - (c) Severity rule refinement (CRITICAL on error / MAJOR on
+    outlier / MINOR otherwise). Still deferred — wait for #13
+    feedback on whether MAJOR vs MINOR feels right for manually-sent
+    non-anomalous traces.
 
 **Risk:** Low. The banner is the only new affordance; everything else
 is a guard fix or a one-line link.
