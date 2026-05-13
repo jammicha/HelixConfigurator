@@ -10,7 +10,12 @@ export const TabButton: React.FC<{
   /** Optional second danger-toned pill rendered next to `count`. Used by the
    *  Logs & Errors tab to surface log count and error count separately. */
   errorCount?: number;
-}> = ({ active, onClick, icon, label, count, countTone = 'neutral', errorCount }) => {
+  /** When provided, the error pill becomes its own click target — useful
+   *  when the parent wants to deep-link directly to the Errors sub-tab
+   *  instead of the default (Logs). Click bubbling is stopped so the
+   *  parent button's onClick doesn't also fire. */
+  onErrorCountClick?: () => void;
+}> = ({ active, onClick, icon, label, count, countTone = 'neutral', errorCount, onErrorCountClick }) => {
   const pillClass = (tone: 'neutral' | 'danger') =>
     `text-tiny px-1.5 py-0.5 rounded font-mono ${
       tone === 'danger'
@@ -34,7 +39,20 @@ export const TabButton: React.FC<{
         <span className={pillClass(countTone)} title="Logs">{count}</span>
       )}
       {typeof errorCount === 'number' && errorCount > 0 && (
-        <span className={pillClass('danger')} title="Errors">{errorCount}</span>
+        onErrorCountClick ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); onErrorCountClick(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onErrorCountClick(); }
+            }}
+            className={`${pillClass('danger')} cursor-pointer hover:bg-danger/30`}
+            title="Errors — click to open Errors sub-tab"
+          >{errorCount}</span>
+        ) : (
+          <span className={pillClass('danger')} title="Errors">{errorCount}</span>
+        )
       )}
     </button>
   );

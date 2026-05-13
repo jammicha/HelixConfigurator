@@ -15,8 +15,11 @@ export const LogsAndErrorsTab: React.FC<{
   customRange: { sinceMs: number; untilMs: number } | null;
   onBucketClick: (sinceMs: number, untilMs: number) => void;
   onClearCustomRange: () => void;
-}> = ({ logs, errors, helixEnv, onJumpToTrace, histogram, customRange, onBucketClick, onClearCustomRange }) => {
-  const [subTab, setSubTab] = useState<'logs' | 'errors'>('logs');
+  // Sub-tab state lifted up so the parent's tab-strip error pill can land
+  // directly on Errors instead of always defaulting to Logs.
+  subTab: 'logs' | 'errors';
+  setSubTab: (t: 'logs' | 'errors') => void;
+}> = ({ logs, errors, helixEnv, onJumpToTrace, histogram, customRange, onBucketClick, onClearCustomRange, subTab, setSubTab }) => {
   const [severityFilter, setSeverityFilter] = useState<string>('');
   const [logQuery, setLogQuery] = useState<string>('');
 

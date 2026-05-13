@@ -88,6 +88,9 @@ export const OtelDataPage: React.FC = () => {
     'overview',
     (v): v is 'overview' | 'traces' | 'operations' | 'errors' => typeof v === 'string' && ALLOWED_TABS.includes(v as any),
   );
+  // Sub-tab inside the Logs & Errors tab. Lifted up so the tab-strip error
+  // pill can land directly on 'errors' instead of always defaulting to 'logs'.
+  const [logsErrorsSubTab, setLogsErrorsSubTab] = useState<'logs' | 'errors'>('logs');
   const [operations, setOperations] = useState<OperationStat[]>([]);
   const [operationsLoading, setOperationsLoading] = useState<boolean>(false);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
@@ -664,6 +667,10 @@ export const OtelDataPage: React.FC = () => {
               count={visibleLogs.length}
               countTone="neutral"
               errorCount={visibleErrors.length}
+              onErrorCountClick={() => {
+                setLogsErrorsSubTab('errors');
+                setActiveTab('errors');
+              }}
             />
           </div>
           <div className="flex items-center gap-3 pb-2">
@@ -894,6 +901,8 @@ export const OtelDataPage: React.FC = () => {
             customRange={customRange}
             onBucketClick={(s, u) => setCustomRange({ sinceMs: s, untilMs: u })}
             onClearCustomRange={() => setCustomRange(null)}
+            subTab={logsErrorsSubTab}
+            setSubTab={setLogsErrorsSubTab}
           />
         )}
       </main>
