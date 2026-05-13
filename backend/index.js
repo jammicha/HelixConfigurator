@@ -407,10 +407,10 @@ app.get('/api/diagnostics/receiver-counters', async (req, res) => {
 
 // GET app-side export-error scan. When the App→Gateway counters stay at zero
 // despite the user applying a snippet, the cause is usually on THEIR side: an
-// app collector unable to resolve helix-gateway (DNS / not on the bridge),
-// using the wrong protocol (gRPC instead of HTTP), or refused by Helix. We
-// peek at recent logs of non-helix containers attached to helix-bridge and
-// surface any OTel export errors back to the wizard.
+// app collector unable to resolve helix-gateway (DNS / wrong network), using
+// the wrong protocol (gRPC instead of HTTP), or refused by Helix. We peek at
+// recent logs of non-helix containers sharing a network with helix-gateway
+// and surface any OTel export errors back to the wizard.
 app.get('/api/diagnostics/app-export-errors', async (req, res) => {
   // Lines containing any of these substrings — lower-cased match — are the
   // ones we care about. Keep narrow to avoid false positives from app code
@@ -440,7 +440,7 @@ app.get('/api/diagnostics/app-export-errors', async (req, res) => {
     let attachedNetworks = [];
     try {
       const gw = await docker.getContainer(targetContainer).inspect();
-      attachedNetworks = Object.keys((gw.NetworkSettings && gw.NetworkSettings.Networks) || {});
+      attachedNetworks = Object.keys(gw.NetworkSettings?.Networks ?? {});
     } catch {
       return res.json({ candidates: [], errors: [], note: `${targetContainer} not running` });
     }
@@ -449,7 +449,7 @@ app.get('/api/diagnostics/app-export-errors', async (req, res) => {
     }
 
     const candidateSet = new Set();
-    for (const netName of attachedNetworks) {
+    await Promise.all(attachedNetworks.map(async (netName) => {
       try {
         const net = await docker.getNetwork(netName).inspect();
         for (const c of Object.values(net.Containers || {})) {
@@ -457,31 +457,28 @@ app.get('/api/diagnostics/app-export-errors', async (req, res) => {
           if (name && !name.startsWith('helix-')) candidateSet.add(name);
         }
       } catch { /* network gone between listing and inspect — skip */ }
-    }
+    }));
     const candidates = Array.from(candidateSet);
 
-    const errors = [];
-    for (const name of candidates) {
+    const errors = (await Promise.all(candidates.map(async (name) => {
       try {
-        const container = docker.getContainer(name);
-        const buf = await container.logs({
+        const buf = await docker.getContainer(name).logs({
           stdout: true,
           stderr: true,
           follow: false,
           tail: 200,
           timestamps: false,
         });
-        const text = demuxLogBuffer(buf);
-        const matches = text
+        const matches = demuxLogBuffer(buf)
           .split('\n')
           .filter(l => {
             const lower = l.toLowerCase();
             return errorSignals.some(sig => lower.includes(sig));
           })
           .slice(-5); // most recent 5 matching lines per container
-        if (matches.length) errors.push({ container: name, lines: matches });
-      } catch { /* container unreadable, skip */ }
-    }
+        return matches.length ? { container: name, lines: matches } : null;
+      } catch { return null; /* container unreadable, skip */ }
+    }))).filter(Boolean);
 
     res.json({ candidates, errors });
   } catch (e) {
