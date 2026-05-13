@@ -572,6 +572,191 @@ are speculative until there's pull from real users.
 
 ---
 
+## 15. Ship `update.{sh,command,bat}` in the install bundle
+
+### Update note (2026-05-12)
+
+This plan was authored against the pre-split `backend/index.js`. The
+backend has since been modularized (commits `14da0bc` → `09efe65`)
+and the AIOps URL namespace moved under `/api/_demo/aiops/*`
+(commit `60581c3`). Concrete pointer updates for whoever picks this
+up:
+
+| Plan reference | Current location |
+|---|---|
+| `backend/index.js:726` (`aiopsSessions` TTL) | `backend/routes/demo.js` — `AIOPS_SESSION_TTL_MS` |
+| `backend/index.js:807` (`writePackageToArchive`) | `backend/routes/demo.js` |
+| `backend/index.js:705-720` (`computeInstallBaseUrl`) | `backend/util.js` |
+| `backend/index.js:467` (`renderShellLauncher`) | `backend/routes/demo.js` |
+| `backend/index.js:511` (`renderStartBat`) | `backend/routes/demo.js` |
+| `backend/index.js:383` (`renderEnvFile`) | `backend/routes/demo.js` |
+| `backend/index.js:319` (`SIMULATED_INGEST_ENDPOINT`) | `backend/routes/demo.js` |
+| `/api/aiops/configure`, `/api/aiops/package/:token`, `/api/aiops/install/:token.{sh,ps1}` | now `/api/_demo/aiops/configure`, etc. |
+
+The plan's "new backend endpoint" (`GET /api/install/latest.zip`)
+should also live in `backend/routes/demo.js` — same module, same
+`register(app, { projectRoot })` signature, and should be gated by
+the existing `IS_DEMO_INSTALL` check around the
+`require('./routes/demo').register(...)` call in `backend/index.js`
+(commit `d8eaf79`). When that flag is false in a real-product
+deployment, the update endpoint disappears alongside the rest of the
+demo plumbing — which is the right behavior.
+
+### Context
+
+Testers receive a frozen-snapshot zip from the configurator's "AIOps install"
+flow. Today, getting an update means: open the configurator URL in a browser,
+re-fill the configure form to get a fresh download token (tokens expire after
+1h — `backend/index.js:726`), download the zip, unpack over their install
+directory, preserve `.env`, restart Docker. Five+ steps, multiple manual
+copies, easy to forget the `.env` preservation. The goal is collapsing this to
+one command: `./update.sh` (or `update.command` on Mac, `update.bat` on
+Windows).
+
+### Recommended approach
+
+Two backend changes + three new files inside the bundle:
+
+1. **New backend endpoint** `GET /api/install/latest.zip` — unauthenticated,
+   token-less, returns the same archive `writePackageToArchive`
+   (`backend/index.js:807`) currently produces, but with a stub `.env` (no
+   per-tester values). The tester preserves their own `.env` locally; the
+   zip's purpose is delivering fresh source code, not credentials.
+2. **Bake the tunnel URL into the bundle** so `update.sh` knows where to
+   phone home. `computeInstallBaseUrl(req)` (`backend/index.js:705-720`)
+   already resolves the public URL from `X-Forwarded-Host` /
+   `INSTALL_BASE_URL`. We extend `writePackageToArchive` to receive that
+   resolved URL and substitute it into the new update scripts at bundle-
+   generation time (same pattern `renderBashInstaller`/`renderPowerShell
+   Installer` already use for `BASE_URL` at lines 836/969).
+3. **New scripts in the bundle**: `update.sh`, `update.command` (Mac double-
+   click), `update.bat`. Each does:
+   - Docker preflight (mirror `renderShellLauncher` lines 474-482 /
+     `renderStartBat` lines 518-532).
+   - `docker compose down`.
+   - Stash the existing `.env` to a temp file (and warn if the user has
+     local edits to `docker-compose.yml` / `helix-otel-collector.yaml` —
+     those will be overwritten).
+   - `curl -fsSL "$INSTALL_BASE_URL/api/install/latest.zip"` to a temp file.
+     PowerShell `Invoke-WebRequest` on Windows.
+   - Unzip into a temp dir; copy `helix-configurator/*` over the install
+     directory.
+   - Restore the stashed `.env`.
+   - `docker compose up -d --build`.
+   - Health-wait loop on `http://localhost:8765/api/health` (mirror
+     `renderShellLauncher` lines 487-501).
+4. **README mention**: append a short "Updating" section to the bundled
+   README (`renderReadme` / `renderReadmeHtml`) pointing at `./update.sh`.
+
+### Files to modify
+
+- `backend/index.js`
+  - **Add**: `renderUpdateBash({ interactive, installBaseUrl })` — alongside
+    `renderShellLauncher` at line 467. Returns the bash body for both
+    `update.sh` (`interactive: false`) and `update.command` (`interactive:
+    true`).
+  - **Add**: `renderUpdateBat({ installBaseUrl })` — alongside
+    `renderStartBat` at line 511.
+  - **Add**: `app.get('/api/install/latest.zip', ...)` near the existing
+    `/api/aiops/package/:token` route at line 1156. Reuse
+    `writePackageToArchive(archive, stubCtx)` where `stubCtx` carries
+    placeholder env values (matching the install-bundle conventions
+    documented at `backend/index.js:319`).
+  - **Modify**: `writePackageToArchive(archive, ctx)` at line 807. Accept
+    `installBaseUrl` on `ctx` (computed by the caller via
+    `computeInstallBaseUrl`). Append the three new scripts:
+    ```
+    archive.append(renderUpdateBash({ interactive: false, installBaseUrl: ctx.installBaseUrl }),
+      { name: 'helix-configurator/update.sh', mode: 0o755 });
+    archive.append(renderUpdateBash({ interactive: true, installBaseUrl: ctx.installBaseUrl }),
+      { name: 'helix-configurator/update.command', mode: 0o755 });
+    archive.append(renderUpdateBat({ installBaseUrl: ctx.installBaseUrl }),
+      { name: 'helix-configurator/update.bat' });
+    ```
+  - **Modify**: the two existing zip-route handlers (token-gated
+    `/api/aiops/package/:token` at line 1156 and the new
+    `/api/install/latest.zip`) to populate `ctx.installBaseUrl =
+    computeInstallBaseUrl(req)` before calling `writePackageToArchive`.
+  - **Modify**: `renderReadme` / `renderReadmeHtml` (around line 568) — add
+    an "Updating" subsection: *"Run `./update.sh` (or `update.command` on
+    Mac, `update.bat` on Windows) to fetch the latest build from the same
+    install URL. Your `.env` is preserved automatically."*
+
+### Things to reuse (don't rewrite)
+
+- `computeInstallBaseUrl(req)` — `backend/index.js:705-720`. Resolves the
+  tunnel URL from `INSTALL_BASE_URL` env / `X-Forwarded-Host` /
+  loopback-LAN-substitution.
+- `writePackageToArchive(archive, ctx)` — `backend/index.js:807`. Assembles
+  the bundle.
+- `renderEnvFile(ctx)` — `backend/index.js:383`. Returns a stub-env shape
+  the new endpoint can pass through unchanged.
+- Docker-preflight + health-loop blocks in `renderShellLauncher` /
+  `renderStartBat`. Copy the structure, change only the body.
+
+### Verification
+
+End-to-end, no real Helix tenant required:
+
+1. **Backend reload**: `docker-compose down && docker-compose up --build -d`
+   on the host. Confirm `GET /api/install/latest.zip` returns
+   `Content-Type: application/zip` and the archive contains `update.sh`,
+   `update.command`, `update.bat`:
+   ```sh
+   curl -sSI http://localhost:8765/api/install/latest.zip
+   curl -sS http://localhost:8765/api/install/latest.zip -o /tmp/b.zip
+   unzip -l /tmp/b.zip | grep -E "update\.(sh|command|bat)"
+   ```
+2. **Tunnel URL substitution**: spot-check that `update.sh` inside the zip
+   has `INSTALL_BASE_URL="http://localhost:8765"` (or the tunnel URL if
+   downloaded through one). When fetched through cloudflared with
+   `X-Forwarded-Host: foo.tryclo.com`, the script should contain
+   `INSTALL_BASE_URL="https://foo.tryclo.com"`.
+3. **Token-gated path still works**: re-download via the existing AIOps
+   configure flow and confirm `update.sh` is also present in *that* zip.
+4. **End-to-end update**:
+   - On a separate machine (or in a fresh dir), download and extract the
+     bundle, edit `.env` with real values, `./start.sh`.
+   - Confirm `http://localhost:8765/api/health` responds and the UI loads.
+   - Make a trivial backend change on the host (e.g., add a log line in
+     `backend/index.js`), rebuild the host: `docker-compose down &&
+     docker-compose up --build -d`.
+   - On the tester machine, `./update.sh`. Confirm:
+     - `docker compose down` ran.
+     - The download succeeded against the resolved `INSTALL_BASE_URL`.
+     - `.env` survived (diff against pre-update copy).
+     - `docker compose up -d --build` ran and the health loop passed.
+     - The new log line appears in `docker compose logs helix-configurator`.
+5. **Tunnel-URL-drifted case**: if `INSTALL_BASE_URL` baked into the bundle
+   is no longer reachable (cloudflared session expired, etc.),
+   `update.sh` should fail with a clear curl error and a short hint
+   ("If your tunnel URL changed, re-download the bundle manually").
+
+### Caveats / open choices
+
+- **The new endpoint is unauthenticated.** Acceptable because the zip's
+  `.env` is a stub — no credentials are exposed. The leak is the *existence*
+  of a configurator at that URL. If you'd rather keep parity with the
+  existing token-gated route, swap recommendation (1) for: have `update.sh`
+  POST to `/api/aiops/configure` with stub form values to mint a fresh
+  token, then GET `/api/aiops/package/:token`. More code, no real security
+  win.
+- **`update.sh` only preserves `.env`.** If a tester edited
+  `docker-compose.yml` or `helix-otel-collector.yaml`, those edits are
+  overwritten by the fresh bundle. The script prints a warning before doing
+  so. A more careful preservation (3-way merge, backups) is possible but
+  adds complexity disproportionate to the POC stage.
+- **Ephemeral tunnels break the bake-in.** ngrok-free / transient cloudflared
+  sessions rotate URLs. If the URL baked into `update.sh` is dead by the
+  time the tester runs it, `update.sh` fails with curl 6/7. Document the
+  manual-redownload fallback in the bundled README's Updating section.
+- **No version check.** `update.sh` always re-downloads. A future
+  improvement: have the backend serve an `ETag` / version header, and
+  have `update.sh` skip the dance if local matches remote. Out of scope
+  for v1.
+
+---
+
 ## What was deliberately NOT added
 
 For the record, so these don't get re-proposed:
