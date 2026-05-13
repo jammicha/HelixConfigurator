@@ -30,10 +30,33 @@ function register(app, { otelStore, docker }) {
     res.json({ errors: otelStore.listErrors({ limit: limit ? Number(limit) : 200 }) });
   });
 
-  // Realtime SSE — emits trace, error_record, log, and trace_counts_update
-  // events. Heartbeats every 15s keep idle connections alive through proxies
-  // that aggressively drop silent sockets. Listeners are detached on close
-  // so a slow client can't keep the otelStore EventEmitter rooted.
+  // SSE event capture + fan-out. The ring buffer survives the brief gap
+  // between a browser SSE disconnect and its auto-reconnect, so events emitted
+  // during the gap can be replayed via the standard Last-Event-ID header.
+  // Listeners are attached once at module init (not per-connection) so events
+  // are captured even with zero clients connected. Bounded ring → bounded
+  // memory; per-event monotonic ID; ring is reset on process restart (a
+  // stale Last-Event-ID from a previous process is treated as a fresh
+  // connect, no replay).
+  const SSE_RING_CAP = 1000;
+  const sseRing = [];
+  const sseSubscribers = new Set();
+  let sseNextId = 1;
+
+  const sseBroadcast = (type, payload) => {
+    const ev = { id: sseNextId++, type, payload };
+    sseRing.push(ev);
+    if (sseRing.length > SSE_RING_CAP) sseRing.shift();
+    for (const sub of sseSubscribers) sub(ev);
+  };
+  otelStore.events.on('trace', (s) => sseBroadcast('trace', s));
+  otelStore.events.on('span_error', (e) => sseBroadcast('error_record', e));
+  otelStore.events.on('log', (l) => sseBroadcast('log', l));
+  otelStore.events.on('trace_counts_update', (u) => sseBroadcast('trace_counts_update', u));
+
+  // Realtime SSE. Emits trace, error_record, log, and trace_counts_update
+  // events with monotonic id: values. Heartbeats every 15s keep idle
+  // connections alive through proxies that drop silent sockets.
   app.get('/api/traces/stream', (req, res) => {
     res.set({
       'Content-Type': 'text/event-stream',
@@ -44,22 +67,27 @@ function register(app, { otelStore, docker }) {
     res.flushHeaders();
     res.write('event: connected\ndata: {}\n\n');
 
-    const onTrace = (summary) => {
-      res.write(`event: trace\ndata: ${JSON.stringify(summary)}\n\n`);
+    // EventSource auto-sends Last-Event-ID on reconnect; allow query param as
+    // a manual override for clients that can't set headers.
+    const lastEventIdRaw = req.get('Last-Event-ID') || req.query.lastEventId;
+    const lastEventId = lastEventIdRaw ? Number.parseInt(String(lastEventIdRaw), 10) || 0 : null;
+    let highestSent = 0;
+    if (lastEventId != null && lastEventId > 0 && lastEventId < sseNextId) {
+      for (const ev of sseRing) {
+        if (ev.id > lastEventId) {
+          res.write(`id: ${ev.id}\nevent: ${ev.type}\ndata: ${JSON.stringify(ev.payload)}\n\n`);
+          highestSent = ev.id;
+        }
+      }
+    }
+
+    const subscriber = (ev) => {
+      // Skip anything we already delivered as part of the replay loop above.
+      if (ev.id <= highestSent) return;
+      highestSent = ev.id;
+      res.write(`id: ${ev.id}\nevent: ${ev.type}\ndata: ${JSON.stringify(ev.payload)}\n\n`);
     };
-    const onError = (err) => {
-      res.write(`event: error_record\ndata: ${JSON.stringify(err)}\n\n`);
-    };
-    const onLog = (log) => {
-      res.write(`event: log\ndata: ${JSON.stringify(log)}\n\n`);
-    };
-    const onCountsUpdate = (update) => {
-      res.write(`event: trace_counts_update\ndata: ${JSON.stringify(update)}\n\n`);
-    };
-    otelStore.events.on('trace', onTrace);
-    otelStore.events.on('span_error', onError);
-    otelStore.events.on('log', onLog);
-    otelStore.events.on('trace_counts_update', onCountsUpdate);
+    sseSubscribers.add(subscriber);
 
     const heartbeat = setInterval(() => {
       res.write(': heartbeat\n\n');
@@ -67,10 +95,7 @@ function register(app, { otelStore, docker }) {
 
     req.on('close', () => {
       clearInterval(heartbeat);
-      otelStore.events.off('trace', onTrace);
-      otelStore.events.off('span_error', onError);
-      otelStore.events.off('log', onLog);
-      otelStore.events.off('trace_counts_update', onCountsUpdate);
+      sseSubscribers.delete(subscriber);
     });
   });
 

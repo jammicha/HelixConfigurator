@@ -397,7 +397,10 @@ export const OtelDataPage: React.FC = () => {
     }
   };
 
-  const refreshOperations = async () => {
+  // useCallback so usePageRefresh below holds a stable poll reference until
+  // an underlying input actually changes — otherwise the interval would tear
+  // down and re-create on every render.
+  const refreshOperations = useCallback(async () => {
     setOperationsLoading(true);
     try {
       const params = new URLSearchParams();
@@ -413,20 +416,24 @@ export const OtelDataPage: React.FC = () => {
     } finally {
       setOperationsLoading(false);
     }
-  };
+  }, [range, customRange, slowThresholdMs]);
 
-  // Reload operations whenever the tab opens or the trace time range changes.
-  // Also fetch on initial mount + every 60s regardless of which tab is open,
-  // so the trace list can flag rows whose duration exceeds 2× p95 of their
-  // operation (Item 3: outlier highlighting).
-  useEffect(() => {
-    if (activeTab === 'operations') refreshOperations();
-  }, [activeTab, range, slowThresholdMs]);
+  // Fetch on initial mount + whenever underlying inputs change. Operations
+  // data also feeds the Traces tab's outlier flagging (rows whose duration
+  // exceeds 2× p95 of their operation), so the refresh runs regardless of
+  // which tab is active.
   useEffect(() => {
     refreshOperations();
-    const id = setInterval(refreshOperations, 60_000);
-    return () => clearInterval(id);
-  }, [range, slowThresholdMs]);
+  }, [refreshOperations]);
+  // Switching to the Operations tab refreshes immediately so the user
+  // doesn't see stale data while waiting for the periodic poll.
+  useEffect(() => {
+    if (activeTab === 'operations') refreshOperations();
+  }, [activeTab, refreshOperations]);
+  // Periodic refresh honors the page-wide stream mode (live / 30s / 1m / 5m /
+  // paused) — previously this was hardcoded to 60s and ignored the user's
+  // stream-mode selection.
+  usePageRefresh(streamMode, refreshOperations);
 
   const operationP95 = useMemo(() => {
     const m = new Map<string, number>();
