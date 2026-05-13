@@ -431,17 +431,34 @@ app.get('/api/diagnostics/app-export-errors', async (req, res) => {
   ];
 
   try {
-    // Find the helix-bridge network and its connected containers.
-    const networks = await docker.listNetworks();
-    const bridge = networks.find(n => n.Name === 'helix-bridge');
-    if (!bridge) {
-      return res.json({ candidates: [], errors: [], note: 'helix-bridge network not present yet' });
+    // The customer's collector / app is rarely on helix-bridge itself —
+    // the typical bridge flow is "attach helix-gateway to the customer's
+    // existing compose network", so the peers worth scanning live on
+    // whatever networks helix-gateway is currently a member of. Enumerate
+    // those instead of hardcoding helix-bridge.
+    const targetContainer = process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
+    let attachedNetworks = [];
+    try {
+      const gw = await docker.getContainer(targetContainer).inspect();
+      attachedNetworks = Object.keys((gw.NetworkSettings && gw.NetworkSettings.Networks) || {});
+    } catch {
+      return res.json({ candidates: [], errors: [], note: `${targetContainer} not running` });
+    }
+    if (attachedNetworks.length === 0) {
+      return res.json({ candidates: [], errors: [], note: `${targetContainer} has no networks attached yet` });
     }
 
-    const net = await docker.getNetwork(bridge.Id).inspect();
-    const candidates = Object.values(net.Containers || {})
-      .map((c) => c.Name)
-      .filter((name) => name && !name.startsWith('helix-')); // skip our own gateway/configurator
+    const candidateSet = new Set();
+    for (const netName of attachedNetworks) {
+      try {
+        const net = await docker.getNetwork(netName).inspect();
+        for (const c of Object.values(net.Containers || {})) {
+          const name = c.Name;
+          if (name && !name.startsWith('helix-')) candidateSet.add(name);
+        }
+      } catch { /* network gone between listing and inspect — skip */ }
+    }
+    const candidates = Array.from(candidateSet);
 
     const errors = [];
     for (const name of candidates) {
