@@ -696,6 +696,133 @@ function register(app, { docker, containerLogs, configPath }) {
       res.status(500).json({ status: 'FAIL', error: 'Failed to read env for check' });
     }
   });
+
+  // POST authoritative API key probe — bypass the gateway and post a minimal
+  // synthetic OTLP traces payload directly to ${HELIX_ENDPOINT}/v1/traces with
+  // X-Api-Key/X-Source set. The HTTP response is the source of truth for "is
+  // this key currently accepted by Helix?", independent of whether the gateway
+  // is up or the customer's collector is wired in.
+  //
+  // Surfaced from Step 4 when the existing "Verify gateway → Helix" check
+  // fails, so the user can disambiguate "key rejected" from "pipeline broken".
+  app.post('/api/diagnostics/apikey-probe', async (req, res) => {
+    try {
+      const envPath = path.join(__dirname, '../../.env');
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      const vars = {};
+      envContent.split('\n').forEach(line => {
+        const [key, ...value] = line.split('=');
+        if (key && value) vars[key.trim()] = value.join('=').trim();
+      });
+
+      const endpoint = (vars.HELIX_ENDPOINT || '').replace(/\/$/, '');
+      const apiKey = vars.HELIX_API_KEY || '';
+      const xSource = vars.X_SOURCE || 'helix-configurator-probe';
+      if (!endpoint) {
+        return res.json({ status: 'misconfigured', message: 'HELIX_ENDPOINT is not set in .env' });
+      }
+      if (!/^[^:]+::[^:]+::[^:]+$/.test(apiKey)) {
+        return res.json({
+          status: 'invalid-format',
+          message: 'HELIX_API_KEY must match TenantID::AccessKey::SecretKey',
+        });
+      }
+      if (apiKey.startsWith('FAKE-KEY-')) {
+        return res.json({
+          status: 'placeholder',
+          message: 'HELIX_API_KEY is the demo placeholder (FAKE-KEY-…). Replace it with a real tenant key before probing.',
+        });
+      }
+
+      // Minimal OTLP traces payload — one zero-duration span tagged with our
+      // own service name so it's easy to identify in Helix if it lands.
+      const payload = {
+        resourceSpans: [{
+          resource: { attributes: [{ key: 'service.name', value: { stringValue: 'helix-configurator-probe' } }] },
+          scopeSpans: [{
+            spans: [{
+              traceId: crypto.randomBytes(16).toString('hex'),
+              spanId: crypto.randomBytes(8).toString('hex'),
+              name: 'apikey-probe',
+              kind: 1,
+              startTimeUnixNano: Date.now() * 1_000_000,
+              endTimeUnixNano: (Date.now() + 1) * 1_000_000,
+              status: { code: 1 },
+            }],
+          }],
+        }],
+      };
+
+      const url = `${endpoint}/v1/traces`;
+      const t0 = Date.now();
+      try {
+        const r = await axios.post(url, payload, {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Api-Key': apiKey,
+            'X-Source': xSource,
+          },
+          timeout: 8000,
+          // Don't throw on 4xx/5xx — we want to inspect the status.
+          validateStatus: () => true,
+        });
+        const latencyMs = Date.now() - t0;
+        if (r.status >= 200 && r.status < 300) {
+          return res.json({
+            status: 'valid',
+            httpStatus: r.status,
+            latencyMs,
+            message: `Helix accepted the probe trace (HTTP ${r.status} in ${latencyMs}ms).`,
+          });
+        }
+        if (r.status === 401) {
+          return res.json({
+            status: 'rejected',
+            httpStatus: 401,
+            message: 'Helix rejected the API key (HTTP 401 Unauthorized).',
+            remediation: 'The key is malformed, expired, or revoked. Generate a new one in the BMC Helix Portal and paste it on Step 1.',
+          });
+        }
+        if (r.status === 403) {
+          return res.json({
+            status: 'rejected',
+            httpStatus: 403,
+            message: 'Helix accepted the key but the tenant refused this request (HTTP 403).',
+            remediation: 'The key is recognized but lacks permission, or the tenant is blocking the source IP. Verify the key role in the BMC Helix Portal.',
+          });
+        }
+        if (r.status >= 400 && r.status < 500) {
+          return res.json({
+            status: 'tenant-error',
+            httpStatus: r.status,
+            message: `Helix returned HTTP ${r.status}.`,
+            remediation: 'The endpoint accepted the connection but rejected the request. Check that HELIX_ENDPOINT is the tenant-root URL (no trailing /otlp/v1/traces).',
+          });
+        }
+        return res.json({
+          status: 'helix-error',
+          httpStatus: r.status,
+          message: `Helix returned HTTP ${r.status}.`,
+          remediation: 'Helix-side error. Retry shortly; if persistent, check the tenant status page.',
+        });
+      } catch (e) {
+        const code = e.code || '';
+        const isTimeout = code === 'ECONNABORTED' || /timeout/i.test(e.message || '');
+        const isConnect = code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'EAI_AGAIN';
+        return res.json({
+          status: 'network-error',
+          message: isTimeout
+            ? `Probe timed out talking to ${url}.`
+            : isConnect
+            ? `Could not reach ${url} (${code || 'connection error'}).`
+            : `Probe failed: ${e.message}`,
+          remediation: 'Verify HELIX_ENDPOINT is reachable from this host (firewall, DNS, https://).',
+        });
+      }
+    } catch (e) {
+      res.status(500).json({ status: 'error', message: `Probe setup failed: ${e.message}` });
+    }
+  });
 }
 
 module.exports = { register, closeActiveLogProcesses };

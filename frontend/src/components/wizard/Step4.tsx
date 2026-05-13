@@ -15,6 +15,13 @@ type TraceVerifyResult = {
   remediation?: string;
 } | null;
 
+type ApiKeyProbe = {
+  status: string;
+  message: string;
+  remediation?: string;
+  httpStatus?: number;
+} | null;
+
 type Props = {
   bridgeStatus: BridgeStatus;
   detectedCollectors: DetectedCollector[];
@@ -25,6 +32,9 @@ type Props = {
   gatewayStatus: string;
   restartingGateway: boolean;
   onRestartGateway: () => void;
+  apiKeyProbe: ApiKeyProbe;
+  probingApiKey: boolean;
+  onProbeApiKey: () => void;
   traceVerifyResult: TraceVerifyResult;
   verifyingTrace: boolean;
   envVars: EnvVars;
@@ -53,6 +63,9 @@ export const Step4: React.FC<Props> = ({
   gatewayStatus,
   restartingGateway,
   onRestartGateway,
+  apiKeyProbe,
+  probingApiKey,
+  onProbeApiKey,
   traceVerifyResult,
   verifyingTrace,
   envVars,
@@ -69,6 +82,44 @@ export const Step4: React.FC<Props> = ({
   // status (status !== 'unknown') and it's not the healthy state. The
   // 'restarting' state is the transient one we set ourselves on click.
   const gatewayNotRunning = gatewayStatus !== 'unknown' && gatewayStatus !== 'running';
+
+  // Inline "Test API key against Helix" affordance — appears under each
+  // failed verify branch. Bypasses the gateway and posts a synthetic OTLP
+  // payload directly to Helix to disambiguate "key rejected" from
+  // "pipeline broken" (the verify-trace check can fail for both reasons).
+  const probeIsSuccess = apiKeyProbe?.status === 'valid';
+  const renderApiKeyProbe = () => (
+    <div className="mt-2 pt-2 border-t border-gray-800/60">
+      {apiKeyProbe ? (
+        <div className={`flex items-start gap-2 text-tiny ${probeIsSuccess ? 'text-success' : 'text-warning'}`}>
+          {probeIsSuccess
+            ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            : <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />}
+          <div className="flex-1">
+            <div className="text-gray-200">
+              <span className="font-semibold">API key probe:</span>{' '}
+              <span className="text-gray-300">{apiKeyProbe.message}</span>
+            </div>
+            {apiKeyProbe.remediation && <p className="text-gray-400 mt-0.5">{apiKeyProbe.remediation}</p>}
+          </div>
+          <button
+            onClick={onProbeApiKey}
+            disabled={probingApiKey}
+            className="text-active hover:underline font-semibold disabled:opacity-60 flex-shrink-0"
+          >Re-test</button>
+        </div>
+      ) : (
+        <button
+          onClick={onProbeApiKey}
+          disabled={probingApiKey}
+          className="inline-flex items-center gap-1.5 text-tiny text-active hover:underline font-semibold disabled:opacity-60"
+        >
+          {probingApiKey && <Loader2 className="w-3 h-3 animate-spin" />}
+          {probingApiKey ? 'Probing Helix…' : 'Test API key against Helix →'}
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="adapt-card">
@@ -174,28 +225,31 @@ export const Step4: React.FC<Props> = ({
         ) : traceVerifyResult && traceVerifyResult.status === 'rejected' ? (
           <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
             <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
-            <div>
+            <div className="flex-1">
               <span className="text-gray-200 font-semibold">Helix rejected the trace.</span>
               <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
               {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
+              {renderApiKeyProbe()}
             </div>
           </div>
         ) : traceVerifyResult && traceVerifyResult.status === 'pending' ? (
           <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
             <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-            <div>
+            <div className="flex-1">
               <span className="text-gray-200 font-semibold">Trace queued but not yet exported.</span>
               <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
               {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
+              {renderApiKeyProbe()}
             </div>
           </div>
         ) : traceVerifyResult && traceVerifyResult.status === 'error' ? (
           <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
             <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
-            <div>
+            <div className="flex-1">
               <span className="text-gray-200 font-semibold">Verification failed.</span>
               <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
               {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
+              {renderApiKeyProbe()}
             </div>
           </div>
         ) : (

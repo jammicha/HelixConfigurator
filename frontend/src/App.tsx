@@ -118,6 +118,16 @@ const App = () => {
   // receiver counters) so the wizard's "Gateway not running" affordance reacts
   // snappily without us having to chase the dashboard's 5s cadence.
   const [restartingGateway, setRestartingGateway] = useState(false);
+  // Step 4 fallback: when the verify-trace check fails, the user can probe the
+  // API key authoritatively (bypass the gateway, POST directly to Helix) to
+  // disambiguate "key rejected" from "pipeline broken".
+  const [apiKeyProbe, setApiKeyProbe] = useState<{
+    status: string;
+    message: string;
+    remediation?: string;
+    httpStatus?: number;
+  } | null>(null);
+  const [probingApiKey, setProbingApiKey] = useState(false);
 
   const [envVars, setEnvVars] = useState({
     HELIX_ENDPOINT: '',
@@ -985,6 +995,28 @@ const App = () => {
 
   const smartAdd = useSmartAdd({ setupStep, isSetupComplete, detectedCollectors, refreshDetectedCollectors });
 
+  // Step 4 fallback: probe the API key directly against Helix. Called from
+  // the Verify result panel when verify-trace returned a non-success status.
+  const handleProbeApiKey = async () => {
+    if (probingApiKey) return;
+    setProbingApiKey(true);
+    setApiKeyProbe(null);
+    try {
+      const res = await fetch('/api/diagnostics/apikey-probe', { method: 'POST' });
+      const data = await res.json();
+      setApiKeyProbe({
+        status: data.status || 'error',
+        message: data.message || 'Probe finished without a status',
+        remediation: data.remediation,
+        httpStatus: data.httpStatus,
+      });
+    } catch (err: any) {
+      setApiKeyProbe({ status: 'error', message: err?.message || 'Probe request failed' });
+    } finally {
+      setProbingApiKey(false);
+    }
+  };
+
   // Step 4 in-wizard remediation: restart the helix-gateway container when
   // the polled status shows it's not running. The 2s tick will pick up the
   // new state — we just flip the local 'restarting' flag for the button.
@@ -1005,6 +1037,9 @@ const App = () => {
     if (verifyingTrace) return;
     setVerifyingTrace(true);
     setTraceVerifyResult(null);
+    // Re-verifying invalidates the previous probe result; clear it so the
+    // user isn't left looking at a stale "key was rejected" message.
+    setApiKeyProbe(null);
     setTelemetryStatus('loading');
     try {
       const res = await fetch('/api/diagnostics/inject-trace-verify', { method: 'POST' });
@@ -1565,6 +1600,9 @@ ${logsData.logs || '(no logs available)'}
                   gatewayStatus={gatewayStatus}
                   restartingGateway={restartingGateway}
                   onRestartGateway={handleRestartGateway}
+                  apiKeyProbe={apiKeyProbe}
+                  probingApiKey={probingApiKey}
+                  onProbeApiKey={handleProbeApiKey}
                   traceVerifyResult={traceVerifyResult}
                   verifyingTrace={verifyingTrace}
                   envVars={envVars}
