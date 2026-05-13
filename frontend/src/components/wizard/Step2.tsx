@@ -26,10 +26,12 @@ export const Step2: React.FC<Props> = ({
   onBack,
   onNext,
 }) => {
-  // Track verify-button result inline. Without this the button does nothing
-  // visually for fast local YAML re-reads — the proposal might transition
-  // alreadyConfigured → alreadyConfigured with no UI delta.
-  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'verifying' | 'done'>('idle');
+  // Track verify-button result inline. The post-verify outcome depends on what
+  // the re-fetched proposal looks like: alreadyConfigured → success, otherwise
+  // → "not detected" (since a proposal with addedToPipelines means the helix
+  // exporter is still missing). Without distinguishing the two, the badge said
+  // "Verified just now" even when the user's snippet was clearly absent.
+  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'verifying' | 'configured' | 'not-configured'>('idle');
   const sawLoadingRef = useRef(false);
   useEffect(() => {
     if (verifyStatus !== 'verifying') return;
@@ -37,11 +39,16 @@ export const Step2: React.FC<Props> = ({
       sawLoadingRef.current = true;
     } else if (sawLoadingRef.current) {
       sawLoadingRef.current = false;
-      setVerifyStatus('done');
-      const t = setTimeout(() => setVerifyStatus('idle'), 2500);
-      return () => clearTimeout(t);
+      if (smartAddProposal?.error) {
+        // Error message is already shown in the proposal panel — clear the badge.
+        setVerifyStatus('idle');
+      } else {
+        setVerifyStatus(smartAddProposal?.alreadyConfigured ? 'configured' : 'not-configured');
+        const t = setTimeout(() => setVerifyStatus('idle'), 4000);
+        return () => clearTimeout(t);
+      }
     }
-  }, [smartAddLoading, verifyStatus]);
+  }, [smartAddLoading, verifyStatus, smartAddProposal?.alreadyConfigured, smartAddProposal?.error]);
   const handleVerify = () => {
     if (!onVerifyExporter) return;
     setVerifyStatus('verifying');
@@ -49,8 +56,10 @@ export const Step2: React.FC<Props> = ({
   };
   const verifyBadge = verifyStatus === 'verifying'
     ? (<span className="inline-flex items-center gap-1 text-tiny text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Verifying…</span>)
-    : verifyStatus === 'done'
-    ? (<span className="inline-flex items-center gap-1 text-tiny text-success"><CheckCircle2 className="w-3 h-3" /> Verified just now</span>)
+    : verifyStatus === 'configured'
+    ? (<span className="inline-flex items-center gap-1 text-tiny text-success"><CheckCircle2 className="w-3 h-3" /> Verified — helix-gateway is wired in</span>)
+    : verifyStatus === 'not-configured'
+    ? (<span className="inline-flex items-center gap-1 text-tiny text-warning"><AlertTriangle className="w-3 h-3" /> Not detected — apply the snippet and restart the collector, then re-verify</span>)
     : null;
 
   return (
