@@ -310,10 +310,17 @@ and start in seconds.
 
 ## Update
 
-To pick up new releases of the configurator, **re-run the same install
-one-liner** you used originally. The installer detects the existing
-\`helix-configurator/\` directory and preserves your user-owned files while
-refreshing the source code:
+To pick up new releases of the configurator, run the update script that
+ships in this bundle:
+
+| Platform | Command |
+| --- | --- |
+| Mac | Double-click \`update.command\` (or run \`./update.sh\` in Terminal) |
+| Linux | \`./update.sh\` |
+| Windows | Double-click \`update.bat\` |
+
+The update script preserves your user-owned files while refreshing the
+source code:
 
 - \`.env\` — your credentials and source name
 - \`helix-otel-collector.yaml\` — gateway pipeline config (including any edits
@@ -321,18 +328,21 @@ refreshing the source code:
 - \`data/\` — local OTel trace store database
 
 Everything else (\`Dockerfile\`, \`docker-compose.yml\`, \`backend/\`,
-\`frontend/\`, \`start.*\`, this README) is replaced with the new bundle
-content, and \`docker compose up -d --build\` rebuilds the image with the
-updated source.
+\`frontend/\`, \`start.*\`, \`update.*\`, this README) is replaced with the
+fresh bundle content, and \`docker compose up -d --build\` rebuilds the
+image with the updated source.
 
-If extraction fails mid-update, the installer restores the preserved files
-into a fresh \`helix-configurator/\` so you're never left without your \`.env\`.
+If extraction fails mid-update, the script restores the preserved files
+into a fresh \`helix-configurator/\` so you're never left without your
+\`.env\`.
 
-> **Where do I get the install one-liner from again?** Open the simulated
-> AIOps page in your tenant, re-enter your source name (\`${xSource}\`), and
-> copy the new \`curl ... | sh\` / \`iwr ... | iex\` command. Tokens are
-> session-scoped on the demo host; if the host has restarted since your
-> first install, you'll need a fresh command.
+> **What if the update script fails to download?** The install host's URL
+> is baked into \`update.*\` at the time of generation; if that tunnel URL
+> has changed since your install, re-open the simulated AIOps page in your
+> tenant, re-enter your source name (\`${xSource}\`), and copy the new
+> \`curl ... | sh\` / \`iwr ... | iex\` command. Running that command is
+> functionally equivalent to running \`./update.sh\` and bakes the new URL
+> into the next bundle.
 
 ## What's inside
 
@@ -346,6 +356,7 @@ into a fresh \`helix-configurator/\` so you're never left without your \`.env\`.
 | \`start.command\` | Mac double-click launcher |
 | \`start.bat\` | Windows double-click launcher |
 | \`start.sh\` | Linux / terminal launcher |
+| \`update.command\` / \`update.sh\` / \`update.bat\` | Refresh source from the install host, preserve \`.env\` / \`data/\` |
 
 > **Where's \`.env\`?** It's a dotfile, so \`ls\` won't show it on macOS / Linux.
 > Run \`ls -a\` to confirm it's there. The Finder hides it by default; press
@@ -437,6 +448,217 @@ ${body}
 // inside the running configurator container we only have the *built*
 // frontend-dist. So the install bundle uses a single-stage Dockerfile that
 // installs backend prod deps and copies the prebuilt frontend straight in.
+// In-bundle update script. Ships inside helix-configurator/ and refreshes the
+// install in place — same preserve-user-files semantics as the installer's
+// existing update path, but without needing to revisit the AIOps page for a
+// new token. The self-relocate at the top is load-bearing: the script is
+// about to delete its own directory, so we copy it to /tmp and exec from
+// there before doing any destructive work.
+const renderUpdateBash = ({ installBaseUrl, interactive }) => `#!/usr/bin/env bash
+set -e
+INSTALL_BASE_URL='${installBaseUrl}'
+
+# Self-relocate to /tmp so we can recreate helix-configurator/ wholesale
+# without ripping out the script file we're executing from.
+if [ -z "$HELIX_UPDATE_RELOCATED" ]; then
+  RELOC=$(mktemp "\${TMPDIR:-/tmp}/helix-update.XXXXXX.sh")
+  cp "$0" "$RELOC"
+  chmod +x "$RELOC"
+  PARENT_DIR=$(cd "$(dirname "$0")/.." && pwd)
+  HELIX_UPDATE_RELOCATED=1 HELIX_UPDATE_PARENT="$PARENT_DIR" exec bash "$RELOC"
+fi
+${interactive ? "trap 'echo \"\"; read -p \"Press Return to close...\" _' EXIT\n" : ''}
+echo "================================================"
+echo " Helix OTel Configurator -- Update"
+echo "================================================"
+echo ""
+echo "Source URL: $INSTALL_BASE_URL"
+echo ""
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker isn't installed."
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is installed but not running. Start Docker Desktop and re-run."
+  exit 1
+fi
+
+cd "$HELIX_UPDATE_PARENT"
+
+if [ ! -d helix-configurator ]; then
+  echo "Error: no helix-configurator/ directory at $HELIX_UPDATE_PARENT."
+  echo "Run update.sh from inside the helix-configurator/ directory."
+  exit 1
+fi
+
+echo "Stopping current sidecar..."
+( cd helix-configurator && docker compose down 2>/dev/null || true )
+
+echo "Preserving .env, helix-otel-collector.yaml, and data/..."
+HELIX_BAK=$(mktemp -d "\${TMPDIR:-/tmp}/helix-update.XXXXXX")
+for keep in .env helix-otel-collector.yaml data; do
+  if [ -e "helix-configurator/$keep" ]; then
+    cp -R "helix-configurator/$keep" "$HELIX_BAK/"
+  fi
+done
+
+echo "Downloading latest bundle from $INSTALL_BASE_URL ..."
+if ! curl -fsSL "$INSTALL_BASE_URL/api/_demo/aiops/latest.zip" -o package.zip; then
+  echo ""
+  echo "Failed to download from $INSTALL_BASE_URL."
+  echo "If the install host's tunnel URL has changed, re-run the original"
+  echo "install one-liner from the AIOps page instead."
+  rm -rf "$HELIX_BAK"
+  exit 1
+fi
+
+rm -rf helix-configurator
+echo "Extracting..."
+unzip -oq package.zip
+rm package.zip
+if [ ! -d helix-configurator ]; then
+  echo "Error: extraction failed — helix-configurator/ directory missing."
+  echo "Restoring preserved files..."
+  mkdir -p helix-configurator
+  cp -R "$HELIX_BAK/." helix-configurator/ 2>/dev/null || true
+  rm -rf "$HELIX_BAK"
+  exit 1
+fi
+
+# Re-overlay user files on top of the fresh extract.
+for keep in .env helix-otel-collector.yaml data; do
+  if [ -e "$HELIX_BAK/$keep" ]; then
+    rm -rf "helix-configurator/$keep"
+    cp -R "$HELIX_BAK/$keep" "helix-configurator/"
+  fi
+done
+rm -rf "$HELIX_BAK"
+
+cd helix-configurator
+echo "Rebuilding image and starting..."
+docker compose up -d --build
+
+echo "Waiting for the configurator to come back online..."
+deadline=$(( $(date +%s) + 60 ))
+while [ $(date +%s) -lt $deadline ]; do
+  if curl -fsS http://localhost:8765/api/health >/dev/null 2>&1; then
+    echo "Update complete."
+    break
+  fi
+  sleep 1
+done
+`;
+
+const renderUpdateBat = ({ installBaseUrl }) => `@echo off
+setlocal enabledelayedexpansion
+set "INSTALL_BASE_URL=${installBaseUrl}"
+
+REM Self-relocate so we can safely tear down and re-create helix-configurator/.
+if not defined HELIX_UPDATE_RELOCATED (
+  set "RELOC=%TEMP%\\helix-update-%RANDOM%.bat"
+  copy "%~f0" "!RELOC!" >nul
+  set "HELIX_UPDATE_RELOCATED=1"
+  set "HELIX_UPDATE_PARENT=%~dp0.."
+  cmd /c "!RELOC!"
+  exit /b !ERRORLEVEL!
+)
+
+echo ================================================
+echo  Helix OTel Configurator -- Update
+echo ================================================
+echo.
+echo Source URL: %INSTALL_BASE_URL%
+echo.
+
+where docker >nul 2>&1
+if errorlevel 1 (
+  echo Docker isn't installed.
+  pause
+  exit /b 1
+)
+docker info >nul 2>&1
+if errorlevel 1 (
+  echo Docker is installed but not running. Start Docker Desktop and re-run.
+  pause
+  exit /b 1
+)
+
+cd /d "%HELIX_UPDATE_PARENT%"
+
+if not exist "helix-configurator" (
+  echo Error: no helix-configurator\\ directory at %HELIX_UPDATE_PARENT%.
+  echo Run update.bat from inside the helix-configurator\\ directory.
+  pause
+  exit /b 1
+)
+
+echo Stopping current sidecar...
+pushd helix-configurator >nul
+docker compose down >nul 2>&1
+popd >nul
+
+echo Preserving .env, helix-otel-collector.yaml, and data\\ ...
+set "HELIX_BAK=%TEMP%\\helix-update-%RANDOM%"
+mkdir "%HELIX_BAK%" >nul
+if exist "helix-configurator\\.env" copy "helix-configurator\\.env" "%HELIX_BAK%\\.env" >nul
+if exist "helix-configurator\\helix-otel-collector.yaml" copy "helix-configurator\\helix-otel-collector.yaml" "%HELIX_BAK%\\helix-otel-collector.yaml" >nul
+if exist "helix-configurator\\data" xcopy "helix-configurator\\data" "%HELIX_BAK%\\data\\" /E /I /Q /Y >nul
+
+echo Downloading latest bundle...
+powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -Uri '%INSTALL_BASE_URL%/api/_demo/aiops/latest.zip' -OutFile 'package.zip' } catch { exit 1 }"
+if errorlevel 1 (
+  echo.
+  echo Failed to download from %INSTALL_BASE_URL%.
+  echo If the install host's tunnel URL has changed, re-run the original
+  echo install one-liner from the AIOps page instead.
+  rd /s /q "%HELIX_BAK%"
+  pause
+  exit /b 1
+)
+
+rd /s /q helix-configurator
+powershell -NoProfile -Command "Expand-Archive -Force -Path 'package.zip' -DestinationPath '.'"
+del package.zip
+if not exist "helix-configurator" (
+  echo Extraction failed.
+  rd /s /q "%HELIX_BAK%"
+  pause
+  exit /b 1
+)
+
+if exist "%HELIX_BAK%\\.env" copy /Y "%HELIX_BAK%\\.env" "helix-configurator\\.env" >nul
+if exist "%HELIX_BAK%\\helix-otel-collector.yaml" copy /Y "%HELIX_BAK%\\helix-otel-collector.yaml" "helix-configurator\\helix-otel-collector.yaml" >nul
+if exist "%HELIX_BAK%\\data" xcopy "%HELIX_BAK%\\data" "helix-configurator\\data\\" /E /I /Q /Y >nul
+rd /s /q "%HELIX_BAK%"
+
+cd helix-configurator
+echo Rebuilding image and starting...
+docker compose up -d --build
+if errorlevel 1 (
+  echo.
+  echo Build failed. See errors above.
+  pause
+  exit /b 1
+)
+
+echo Waiting for the configurator to come back online...
+set /a "_waited=0"
+:waitloop
+powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:8765/api/health' -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+if not errorlevel 1 (
+  echo Update complete.
+  goto :done
+)
+set /a "_waited+=1"
+if %_waited% geq 60 goto :done
+timeout /t 1 /nobreak >nul
+goto :waitloop
+:done
+echo.
+pause
+`;
+
 const renderInstallDockerfile = () => `FROM node:20-slim
 WORKDIR /app
 
@@ -454,12 +676,18 @@ CMD ["node", "backend/index.js"]
 `;
 
 const writePackageToArchive = (archive, ctx, projectRoot) => {
+  if (!ctx.installBaseUrl) {
+    throw new Error('writePackageToArchive: ctx.installBaseUrl is required (set via computeInstallBaseUrl(req))');
+  }
   archive.append(renderDockerCompose(), { name: 'helix-configurator/docker-compose.yml' });
   archive.append(renderCollectorYaml(ctx), { name: 'helix-configurator/helix-otel-collector.yaml' });
   archive.append(renderEnvFile(ctx), { name: 'helix-configurator/.env' });
   archive.append(renderShellLauncher({ interactive: false }), { name: 'helix-configurator/start.sh', mode: 0o755 });
   archive.append(renderShellLauncher({ interactive: true }), { name: 'helix-configurator/start.command', mode: 0o755 });
   archive.append(renderStartBat(), { name: 'helix-configurator/start.bat' });
+  archive.append(renderUpdateBash({ installBaseUrl: ctx.installBaseUrl, interactive: false }), { name: 'helix-configurator/update.sh', mode: 0o755 });
+  archive.append(renderUpdateBash({ installBaseUrl: ctx.installBaseUrl, interactive: true }), { name: 'helix-configurator/update.command', mode: 0o755 });
+  archive.append(renderUpdateBat({ installBaseUrl: ctx.installBaseUrl }), { name: 'helix-configurator/update.bat' });
   archive.append(renderReadme(ctx), { name: 'helix-configurator/README.md' });
   archive.append(renderReadmeHtml(ctx), { name: 'helix-configurator/README.html' });
   archive.append(renderInstallDockerfile(), { name: 'helix-configurator/Dockerfile' });
@@ -815,7 +1043,35 @@ function register(app, { projectRoot }) {
       else res.end();
     });
     archive.pipe(res);
-    writePackageToArchive(archive, session, projectRoot);
+    // Compute installBaseUrl per-request — if the user downloads through a
+    // different tunnel URL than the one captured at configure time, the
+    // baked-in update.* scripts should reflect the URL the bundle was
+    // actually fetched from.
+    writePackageToArchive(archive, { ...session, installBaseUrl: computeInstallBaseUrl(req) }, projectRoot);
+    archive.finalize();
+  });
+
+  // GET /api/_demo/aiops/latest.zip — token-less bundle for in-place updates
+  // (called by update.sh / update.command / update.bat). The .env is a stub
+  // since the update script preserves the caller's existing .env. Gated by
+  // the same IS_DEMO_INSTALL flag that registers this whole module.
+  app.get('/api/_demo/aiops/latest.zip', (req, res) => {
+    const stubCtx = {
+      xSource: 'helix-otel',
+      endpoint: SIMULATED_INGEST_ENDPOINT,
+      apiKey: fakeHelixApiKey(),
+      installBaseUrl: computeInstallBaseUrl(req),
+    };
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="helix-configurator-latest.zip"');
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', (err) => {
+      console.error('archive error:', err);
+      if (!res.headersSent) res.status(500).end();
+      else res.end();
+    });
+    archive.pipe(res);
+    writePackageToArchive(archive, stubCtx, projectRoot);
     archive.finalize();
   });
 
