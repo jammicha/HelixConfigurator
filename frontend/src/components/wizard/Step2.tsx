@@ -162,10 +162,15 @@ export const Step2: React.FC<Props> = ({
   otlphttp/helix_sidecar:
     endpoint: "http://helix-gateway:4318"
     tls:
-      insecure: true`} />
+      insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 100
+      queue_size: 10000`} />
     <p className="text-tiny text-gray-500 -mt-4 mb-6">
       In your main collector config (e.g. <code className="font-mono">otelcol-config.yaml</code>). No API key needed here —{' '}
-      <button onClick={onOpenGatewayConfig} className="text-active hover:underline font-semibold">view gateway config to see where it's set</button>.
+      <button onClick={onOpenGatewayConfig} className="text-active hover:underline font-semibold">view gateway config to see where it's set</button>.{' '}
+      The <code className="font-mono">sending_queue</code> matches what helix-gateway uses — 100 parallel HTTP workers, 10k batch queue — so bursts don't drop.
     </p>
 
     <div className="mb-2 flex items-baseline justify-between gap-3">

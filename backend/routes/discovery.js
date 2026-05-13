@@ -312,11 +312,18 @@ function register(app, { docker }) {
     const ci = ' '.repeat(childCol);
     const ci2 = ' '.repeat(childCol + 2);
     const ci3 = ' '.repeat(childCol + 4);
+    // sending_queue mirrors the helix-gateway shipped exporter: 100 parallel
+    // HTTP workers + 10k queue absorb bursts so the customer's collector
+    // doesn't drop telemetry under sustained load.
     const newBlock = [
       `${ci}${exporterName}:`,
       `${ci2}endpoint: http://helix-gateway:4318`,
       `${ci2}tls:`,
       `${ci3}insecure: true`,
+      `${ci2}sending_queue:`,
+      `${ci3}enabled: true`,
+      `${ci3}num_consumers: 100`,
+      `${ci3}queue_size: 10000`,
     ];
     // Insert after the last structural line inside the exporters block (so we
     // don't push it past a trailing comment that belongs to the next section).
