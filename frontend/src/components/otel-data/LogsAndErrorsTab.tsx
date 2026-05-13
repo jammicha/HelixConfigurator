@@ -9,6 +9,11 @@ import type { ErrorRecord, HelixEnv, Histogram, LogRecord } from './types';
 export const LogsAndErrorsTab: React.FC<{
   logs: LogRecord[];
   errors: ErrorRecord[];
+  // Service list + filter state lifted up to OtelDataPage so the same
+  // serviceFilter that scopes Traces also scopes Logs / Errors here.
+  services: { name: string; traceCount: number }[];
+  serviceFilter: string;
+  setServiceFilter: (s: string) => void;
   helixEnv: HelixEnv | null;
   onJumpToTrace: (traceId: string) => void;
   histogram: Histogram | null;
@@ -19,7 +24,7 @@ export const LogsAndErrorsTab: React.FC<{
   // directly on Errors instead of always defaulting to Logs.
   subTab: 'logs' | 'errors';
   setSubTab: (t: 'logs' | 'errors') => void;
-}> = ({ logs, errors, helixEnv, onJumpToTrace, histogram, customRange, onBucketClick, onClearCustomRange, subTab, setSubTab }) => {
+}> = ({ logs, errors, services, serviceFilter, setServiceFilter, helixEnv, onJumpToTrace, histogram, customRange, onBucketClick, onClearCustomRange, subTab, setSubTab }) => {
   const [severityFilter, setSeverityFilter] = useState<string>('');
   const [logQuery, setLogQuery] = useState<string>('');
 
@@ -78,6 +83,22 @@ export const LogsAndErrorsTab: React.FC<{
           </div>
         </div>
         <div className="flex items-end gap-3 flex-wrap">
+          {/* Service filter — visible on both sub-tabs. Backed by the page-
+              level serviceFilter so picking a service here mirrors what's
+              shown on Traces / Operations. */}
+          <div className="flex flex-col gap-1">
+            <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Service</label>
+            <select
+              value={serviceFilter}
+              onChange={(e) => setServiceFilter(e.target.value)}
+              className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active min-w-[14rem]"
+            >
+              <option value="">All services</option>
+              {services.map(s => (
+                <option key={s.name} value={s.name}>{s.name}</option>
+              ))}
+            </select>
+          </div>
           {subTab === 'logs' && (
             <>
               <div className="flex flex-col gap-1">

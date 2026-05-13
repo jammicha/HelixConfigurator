@@ -258,13 +258,23 @@ export const OtelDataPage: React.FC = () => {
     () => services.filter(s => !INTERNAL_SERVICES.has(s.name)),
     [services],
   );
+  // serviceFilter is page-level state (Traces uses it server-side). For
+  // Logs/Errors we apply it client-side here — the stores aren't huge (200
+  // rows each) so a JS filter on every change is fine, and a server-side
+  // query would lag SSE-pushed entries between polls.
   const visibleErrors = useMemo(
-    () => errors.filter(e => !INTERNAL_SERVICES.has(e.service_name)),
-    [errors],
+    () => errors.filter(e =>
+      !INTERNAL_SERVICES.has(e.service_name)
+      && (!serviceFilter || e.service_name === serviceFilter),
+    ),
+    [errors, serviceFilter],
   );
   const visibleLogs = useMemo(
-    () => logs.filter(l => !INTERNAL_SERVICES.has(l.serviceName)),
-    [logs],
+    () => logs.filter(l =>
+      !INTERNAL_SERVICES.has(l.serviceName)
+      && (!serviceFilter || l.serviceName === serviceFilter),
+    ),
+    [logs, serviceFilter],
   );
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -892,6 +902,9 @@ export const OtelDataPage: React.FC = () => {
           <LogsAndErrorsTab
             logs={visibleLogs}
             errors={visibleErrors}
+            services={visibleServices}
+            serviceFilter={serviceFilter}
+            setServiceFilter={setServiceFilter}
             helixEnv={helixEnv}
             onJumpToTrace={(traceId) => {
               setActiveTab('traces');
