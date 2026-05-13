@@ -99,7 +99,7 @@ export const Step4: React.FC<Props> = ({
         {receiverError && <div className="mt-2 text-tiny text-warning">⚠ {receiverError}</div>}
         {appExportErrors.length > 0 && (
           <div className="mt-3 p-2.5 rounded border border-warning/40 bg-warning/10">
-            <div className="text-tiny text-warning font-semibold uppercase tracking-wider mb-1">⚠ Errors detected on your side</div>
+            <div className="text-tiny text-warning font-semibold uppercase tracking-wider mb-1">⚠ Errors detected in your collector</div>
             {appExportErrors.map(err => (
               <div key={err.container} className="mb-2 last:mb-0">
                 <div className="text-tiny text-gray-300 font-mono mb-0.5">{err.container}</div>
@@ -107,7 +107,7 @@ export const Step4: React.FC<Props> = ({
               </div>
             ))}
             <div className="text-tiny text-gray-400 mt-1">
-              Common fixes: confirm the container is on the <code className="font-mono text-gray-300">helix-bridge</code> network, the endpoint is <code className="font-mono text-gray-300">http://helix-gateway:4318</code> (not gRPC :4317), and the API key is correct.
+              Common fixes: confirm the collector shares a network with <code className="font-mono text-gray-300">helix-gateway</code>, the exporter endpoint is <code className="font-mono text-gray-300">http://helix-gateway:4318</code> (not gRPC :4317), and the API key is correct.
             </div>
           </div>
         )}

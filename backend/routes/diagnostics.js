@@ -325,16 +325,20 @@ function register(app, { docker, containerLogs, configPath }) {
     }
   });
 
-  // GET app-side export-error scan. When the App→Gateway counters stay at zero
-  // despite the user applying a snippet, the cause is usually on THEIR side: an
-  // app collector unable to resolve helix-gateway (DNS / wrong network), using
-  // the wrong protocol (gRPC instead of HTTP), or refused by Helix. We peek at
-  // recent logs of non-helix containers sharing a network with helix-gateway
-  // and surface any OTel export errors back to the wizard.
+  // GET collector-side export-error scan. When the App→Gateway counters stay
+  // at zero despite the user applying a snippet, the cause is usually on the
+  // customer's COLLECTOR side: an exporter unable to resolve helix-gateway
+  // (DNS / wrong network), using the wrong protocol, or refused by Helix.
+  //
+  // Scope is intentionally tight: we only scan containers that *look like*
+  // OTel collectors (image name contains opentelemetry-collector / otelcol,
+  // or command invokes otelcol) AND share a network with helix-gateway.
+  // App containers can log strings like "connection refused" or "rpc error"
+  // for entirely unrelated reasons (their own DB, internal gRPC, etc.) —
+  // surfacing those here was noisy and misleading, so they're excluded.
   app.get('/api/diagnostics/app-export-errors', async (req, res) => {
-    // Lines containing any of these substrings — lower-cased match — are the
-    // ones we care about. Keep narrow to avoid false positives from app code
-    // that just happens to log the word "error".
+    // Lines containing any of these substrings — lower-cased match — are
+    // the ones we care about.
     const errorSignals = [
       'no children to pick from',
       'connection refused',
@@ -351,36 +355,41 @@ function register(app, { docker, containerLogs, configPath }) {
     ];
 
     try {
-      // The customer's collector / app is rarely on helix-bridge itself —
-      // the typical bridge flow is "attach helix-gateway to the customer's
-      // existing compose network", so the peers worth scanning live on
-      // whatever networks helix-gateway is currently a member of. Enumerate
-      // those instead of hardcoding helix-bridge.
       const targetContainer = TARGET_CONTAINER();
-      let attachedNetworks = [];
+      let gatewayNetworks;
       try {
         const gw = await docker.getContainer(targetContainer).inspect();
-        attachedNetworks = Object.keys(gw.NetworkSettings?.Networks ?? {});
+        gatewayNetworks = new Set(Object.keys(gw.NetworkSettings?.Networks ?? {}));
       } catch {
-        return res.json({ candidates: [], errors: [], note: `${targetContainer} not running` });
+        return res.json({ collectors: [], errors: [], note: `${targetContainer} not running` });
       }
-      if (attachedNetworks.length === 0) {
-        return res.json({ candidates: [], errors: [], note: `${targetContainer} has no networks attached yet` });
+      if (gatewayNetworks.size === 0) {
+        return res.json({ collectors: [], errors: [], note: `${targetContainer} has no networks attached yet` });
       }
 
-      const candidateSet = new Set();
-      await Promise.all(attachedNetworks.map(async (netName) => {
-        try {
-          const net = await docker.getNetwork(netName).inspect();
-          for (const c of Object.values(net.Containers || {})) {
-            const name = c.Name;
-            if (name && !name.startsWith('helix-')) candidateSet.add(name);
-          }
-        } catch { /* network gone between listing and inspect — skip */ }
-      }));
-      const candidates = Array.from(candidateSet);
+      // Enumerate containers once, filter to collectors that share a network
+      // with helix-gateway. helix-* containers are always excluded so our own
+      // gateway/configurator don't show up.
+      const all = await docker.listContainers();
+      const collectors = all
+        .map(c => ({
+          name: (c.Names?.[0] || '').replace(/^\//, ''),
+          image: c.Image || '',
+          command: c.Command || '',
+          networks: Object.keys(c.NetworkSettings?.Networks || {}),
+        }))
+        .filter(c => {
+          if (!c.name || c.name.startsWith('helix-')) return false;
+          const looksLikeCollector =
+            /opentelemetry-collector/i.test(c.image) ||
+            /otelcol/i.test(c.image) ||
+            /otelcol/i.test(c.command);
+          if (!looksLikeCollector) return false;
+          return c.networks.some(n => gatewayNetworks.has(n));
+        })
+        .map(c => c.name);
 
-      const errors = (await Promise.all(candidates.map(async (name) => {
+      const errors = (await Promise.all(collectors.map(async (name) => {
         try {
           const buf = await docker.getContainer(name).logs({
             stdout: true,
@@ -400,9 +409,9 @@ function register(app, { docker, containerLogs, configPath }) {
         } catch { return null; /* container unreadable, skip */ }
       }))).filter(Boolean);
 
-      res.json({ candidates, errors });
+      res.json({ collectors, errors });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to scan app logs', details: e.message });
+      res.status(500).json({ error: 'Failed to scan collector logs', details: e.message });
     }
   });
 
