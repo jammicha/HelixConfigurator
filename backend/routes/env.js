@@ -69,9 +69,13 @@ function register(app) {
       fs.writeFileSync(ENV_PATH, newContent, 'utf8');
 
       // Reload into process.env so subsequent same-process reads see fresh
-      // values. The collector container picks up the new values from .env via
-      // docker-compose's env_file mapping on the next restart; the caller is
-      // expected to follow this POST with /api/lifecycle/restart.
+      // values. The collector container WON'T pick up the new values from a
+      // plain `docker restart` — docker-compose evaluates env_file only at
+      // container CREATE time, so a restarted container keeps the
+      // baked-in env from `docker compose up`. The caller follows this POST
+      // with /api/lifecycle/restart, which recreates the gateway container
+      // (stop + remove + create with fresh Env), so the new values take
+      // effect.
       process.env.HELIX_ENDPOINT = HELIX_ENDPOINT;
       process.env.HELIX_API_KEY = HELIX_API_KEY;
       process.env.X_SOURCE = X_SOURCE;

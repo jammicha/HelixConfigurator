@@ -5,14 +5,95 @@
 //
 // Auth: all gated by the /api/* requireAuth middleware in index.js.
 
+const fs = require('fs');
+const path = require('path');
+
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
+const ENV_PATH = path.join(__dirname, '..', '..', '.env');
+
+// Read .env into a KEY=VALUE array suitable for createContainer's Env. Skips
+// blank lines and # comments. Tolerant of `KEY=value=with=equals` (splits on
+// the first =). Returns null on read failure so the caller can fall back to
+// the inspected container's existing Env rather than wiping it.
+const readEnvAsArray = () => {
+  try {
+    return fs.readFileSync(ENV_PATH, 'utf8')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l && !l.startsWith('#') && l.includes('='))
+      .map(l => {
+        const idx = l.indexOf('=');
+        return `${l.slice(0, idx).trim()}=${l.slice(idx + 1).trim()}`;
+      });
+  } catch {
+    return null;
+  }
+};
+
+// Stop + remove + recreate the gateway container, preserving its image,
+// HostConfig (binds, ports, restart policy, network mode), labels, and
+// network memberships — only the Env is refreshed from .env on disk.
+//
+// Why this instead of a plain restart: docker-compose evaluates `env_file`
+// at container CREATE time, NOT at restart. A `docker restart` reuses the
+// existing container's environment frozen at first `docker compose up`. So
+// editing HELIX_ENDPOINT in the UI saved the new value to disk but the
+// gateway kept shipping to the placeholder https://your-tenant.onbmc.com
+// until the container was recreated. Now this endpoint does that recreate.
+const recreateGateway = async (docker, name) => {
+  const old = docker.getContainer(name);
+  const inspect = await old.inspect();
+
+  const freshEnv = readEnvAsArray();
+  const envArray = freshEnv && freshEnv.length > 0 ? freshEnv : (inspect.Config?.Env || []);
+  const allNetworks = Object.keys(inspect.NetworkSettings?.Networks || {});
+
+  // Generous stop timeout so the exporter has a chance to flush its sending
+  // queue. Tolerate 304 ("already stopped") and 404 (already gone).
+  try { await old.stop({ t: 10 }); } catch (e) {
+    if (e.statusCode !== 304 && e.statusCode !== 404) {
+      console.warn(`recreateGateway: stop ${name} warning:`, e.message);
+    }
+  }
+  try { await old.remove(); } catch (e) {
+    if (e.statusCode !== 404) throw e;
+  }
+
+  const fresh = await docker.createContainer({
+    name,
+    Image: inspect.Config?.Image,
+    Cmd: inspect.Config?.Cmd,
+    Entrypoint: inspect.Config?.Entrypoint,
+    Env: envArray,
+    Labels: inspect.Config?.Labels,
+    ExposedPorts: inspect.Config?.ExposedPorts,
+    HostConfig: inspect.HostConfig,
+  });
+  await fresh.start();
+
+  // Reattach to any additional networks the original was on. The primary
+  // network is already attached via HostConfig.NetworkMode at create; extras
+  // (e.g. a customer compose network the user bridged in Step 3) need an
+  // explicit connect. 403 = already attached, fine.
+  for (const net of allNetworks) {
+    try {
+      await docker.getNetwork(net).connect({ Container: name });
+    } catch (e) {
+      if (e.statusCode !== 403) {
+        console.warn(`recreateGateway: reattach ${name} to ${net} warning:`, e.message);
+      }
+    }
+  }
+};
 
 function register(app, { docker }) {
-  // POST restart collector.
+  // POST restart the configured target container. Recreates rather than
+  // plain-restarts so updated .env values load (see recreateGateway above
+  // for the env_file-at-create-time rationale).
   app.post('/api/lifecycle/restart', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
     try {
-      await docker.getContainer(targetContainer).restart();
+      await recreateGateway(docker, targetContainer);
       res.json({ message: `Container ${targetContainer} restarted successfully` });
     } catch (e) {
       res.status(500).json({ error: 'Failed to restart container', details: e.message });
