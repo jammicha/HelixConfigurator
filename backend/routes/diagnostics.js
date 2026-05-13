@@ -402,6 +402,14 @@ function register(app, { docker, containerLogs, configPath }) {
             .split('\n')
             .filter(l => {
               const lower = l.toLowerCase();
+              // Two-part match: the line must mention `helix` AND a known
+              // error signal. The `helix` substring narrows scope to the
+              // helix-bound exporter (component.id contains helix_sidecar,
+              // endpoint contains helix-gateway). Without this, unrelated
+              // receiver/processor failures with overlapping vocabulary
+              // (e.g. kafkametrics "connection refused" against a Kafka
+              // broker) leak in as false positives.
+              if (!lower.includes('helix')) return false;
               return errorSignals.some(sig => lower.includes(sig));
             })
             .slice(-5); // most recent 5 matching lines per container
