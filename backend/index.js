@@ -1039,21 +1039,50 @@ const writeFileViaBusyboxSidecar = async (hostFilePath, content) => {
   }
 };
 
-const detectCollectorConfigPath = (inspect) => {
-  const cmd = (inspect.Config && inspect.Config.Cmd) || [];
-  const args = inspect.Args || [];
-  const all = [...cmd, ...args];
+// Returns an ordered list of candidate in-container paths for the collector
+// config. The endpoint tries each until one yields parseable
+// receivers:/service: YAML — that's what makes smart-add robust against
+// collectors that don't pass --config explicitly, run from a non-default
+// image, or use a bind mount at an unusual location.
+const detectCollectorConfigPaths = (inspect) => {
+  const candidates = [];
+  const seen = new Set();
+  const add = (p) => {
+    if (typeof p !== 'string' || !p) return;
+    const clean = p.replace(/^file:/, '');
+    if (seen.has(clean)) return;
+    seen.add(clean);
+    candidates.push(clean);
+  };
+
+  // 1. Explicit --config flag, anywhere in Cmd/Args.
+  const all = [...((inspect.Config && inspect.Config.Cmd) || []), ...(inspect.Args || [])];
   for (let i = 0; i < all.length; i++) {
     const a = all[i];
     if (typeof a !== 'string') continue;
-    if (a.startsWith('--config=')) {
-      return a.substring('--config='.length).replace(/^file:/, '');
-    }
-    if (a === '--config' && i + 1 < all.length) {
-      return String(all[i + 1]).replace(/^file:/, '');
-    }
+    if (a.startsWith('--config=')) add(a.substring('--config='.length));
+    else if (a === '--config' && i + 1 < all.length) add(String(all[i + 1]));
   }
-  return '/etc/otelcol-contrib/config.yaml';
+
+  // 2. Bind-mounted YAML destinations — these are almost always the config.
+  //    Sort by descending length so file-level mounts take precedence over
+  //    parent directory mounts (matches resolveHostMountPath's bias).
+  const mounts = (inspect.Mounts || []).slice().sort((a, b) => (b.Destination || '').length - (a.Destination || '').length);
+  for (const m of mounts) {
+    if (m.Type !== 'bind' || !m.Destination) continue;
+    if (/\.ya?ml$/i.test(m.Destination)) add(m.Destination);
+  }
+
+  // 3. Common defaults across the otel-collector image family. Order: the
+  //    contrib image's default first (most common in the wild), then the
+  //    upstream non-contrib default, then frequently-seen custom locations.
+  add('/etc/otelcol-contrib/config.yaml');
+  add('/etc/otelcol/config.yaml');
+  add('/etc/otel-collector/config.yaml');
+  add('/conf/otel-collector-config.yaml');
+  add('/etc/opentelemetry-collector/config.yaml');
+
+  return candidates;
 };
 
 // Walk the container's Mounts to find the host-side source for an
@@ -1270,6 +1299,30 @@ const isRecognizedCollectorContainer = async (name) => {
   });
 };
 
+// Try each candidate config path in order and return the first one that
+// reads AND looks like a collector config (`receivers:` + `service:` at
+// column 0). Returns null when none work, plus a structured `attempts` log
+// so the endpoint can surface which paths it tried.
+const resolveCollectorConfig = async (container, inspect) => {
+  const candidates = detectCollectorConfigPaths(inspect);
+  const attempts = [];
+  for (const candidate of candidates) {
+    try {
+      const text = await readFileFromContainer(container, candidate);
+      // Validate the shape — without this, an unrelated YAML mounted at one
+      // of our default paths would be accepted and patched, which would
+      // corrupt the container.
+      if (/^receivers:/m.test(text) && /^service:/m.test(text)) {
+        return { configPath: candidate, configText: text, attempts };
+      }
+      attempts.push({ path: candidate, reason: 'not a collector config (missing receivers: and/or service:)' });
+    } catch (e) {
+      attempts.push({ path: candidate, reason: e.message || 'read failed' });
+    }
+  }
+  return { configPath: null, configText: null, attempts };
+};
+
 // GET — read the collector's config, return the proposed merge. No side effects.
 app.get('/api/discovery/collector-config/:name', async (req, res) => {
   const name = req.params.name;
@@ -1282,9 +1335,15 @@ app.get('/api/discovery/collector-config/:name', async (req, res) => {
   try {
     const container = docker.getContainer(name);
     const inspect = await container.inspect();
-    const configPath = detectCollectorConfigPath(inspect);
+    const { configPath, configText, attempts } = await resolveCollectorConfig(container, inspect);
+    if (!configPath) {
+      return res.status(404).json({
+        error: 'Could not locate a collector config inside the container',
+        details: `Tried ${attempts.length} candidate path(s); none returned valid OTel collector YAML. Common reasons: the container reads its config from env (--config=env:...) instead of a file, or the config lives at an unexpected path. Apply the snippet below manually.`,
+        attempts,
+      });
+    }
     const hostConfigPath = resolveHostMountPath(inspect, configPath);
-    const configText = await readFileFromContainer(container, configPath);
     const proposal = proposeCollectorMerge(configText);
     res.json({ name, configPath, hostConfigPath, configText, ...proposal });
   } catch (e) {
@@ -1304,10 +1363,17 @@ app.post('/api/discovery/collector-apply/:name', async (req, res) => {
   try {
     const container = docker.getContainer(name);
     const inspect = await container.inspect();
-    const configPath = detectCollectorConfigPath(inspect);
+    const { configPath, configText, attempts } = await resolveCollectorConfig(container, inspect);
+    if (!configPath) {
+      console.log(`[smart-add] apply on ${name}: no config found, tried ${attempts.length} paths`);
+      return res.status(404).json({
+        error: 'Could not locate a collector config inside the container',
+        details: 'Apply the snippet below manually.',
+        attempts,
+      });
+    }
     const hostConfigPath = resolveHostMountPath(inspect, configPath);
     console.log(`[smart-add] apply on ${name}: configPath=${configPath}, hostConfigPath=${hostConfigPath || '<image-baked>'}`);
-    const configText = await readFileFromContainer(container, configPath);
     const proposal = proposeCollectorMerge(configText);
     if (proposal.alreadyConfigured) {
       console.log(`[smart-add] apply on ${name}: already configured via ${proposal.existingExporterName}, no-op`);

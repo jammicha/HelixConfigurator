@@ -55,7 +55,12 @@ export function useSmartAdd({
       const res = await fetch(`/api/discovery/collector-config/${encodeURIComponent(collectorName)}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setProposal({ name: collectorName, configPath: '', error: data.error || data.details || 'Could not read collector config' });
+        // Combine error + details so the user sees the actionable reason
+        // (e.g. "tried 5 paths, none returned valid OTel collector YAML")
+        // rather than just the generic title.
+        const headline = data.error || 'Could not read collector config';
+        const detail = data.details && data.details !== headline ? ` ${data.details}` : '';
+        setProposal({ name: collectorName, configPath: '', error: `${headline}.${detail}` });
         return;
       }
       setProposal({
