@@ -132,7 +132,19 @@ function register(app, { docker, containerLogs, configPath, templatesDir }) {
     try {
       const indexPath = path.join(templatesDir, 'index.json');
       const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
-      res.json(index);
+      // Enrich each entry with the raw template content (no env substitution
+      // — the picker's "Selected" detection compares against the editor,
+      // which holds raw ${env:...} references too). Best-effort: missing
+      // files just omit content so the picker still lists them.
+      const enriched = (Array.isArray(index) ? index : []).map(entry => {
+        try {
+          const yamlPath = path.join(templatesDir, `${entry.id}.yaml`);
+          return { ...entry, content: fs.readFileSync(yamlPath, 'utf8') };
+        } catch {
+          return { ...entry };
+        }
+      });
+      res.json(enriched);
     } catch (e) {
       res.status(500).json({ error: 'Failed to load templates', details: e.message });
     }

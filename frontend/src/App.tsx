@@ -2157,6 +2157,7 @@ ${logsData.logs || '(no logs available)'}
         isOpen={isTemplatesOpen}
         templates={templates}
         loadingTemplateId={loadingTemplateId}
+        currentConfigYaml={config}
         onApply={handleApplyTemplate}
         onClose={() => setIsTemplatesOpen(false)}
       />
