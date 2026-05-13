@@ -53,6 +53,14 @@ UI_AUTH_PASSWORD=
 
 # Internal: container the configurator manages. Leave as default unless renaming.
 TARGET_CONTAINER_NAME=helix-gateway
+
+# Optional: gate the demo install bundle (the simulated AIOps "Manage
+# OpenTelemetry" wizard and its install-bundle generator). Defaults to true
+# for backward compatibility with the in-repo .env. Set to `false` in a real
+# product deployment so the /api/_demo/aiops/* routes return 404 and the
+# demo plumbing is invisible to clients. See the "Demo install bundle"
+# section below for what this gates.
+IS_DEMO_INSTALL=true
 ```
 
 The `helix-otel-collector.yaml` shipped in the repo references these via `${env:HELIX_ENDPOINT}` / `${env:HELIX_API_KEY}` / `${env:X_SOURCE}`, so secrets stay in `.env` (which is gitignored) and never land in committed config.
@@ -159,6 +167,30 @@ Both containers attach to the `helix-bridge` Docker network. Application contain
 The gateway also fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is a SQLite database mounted at `./data/otel-store.db` (capped at 500 traces, sliding window) and persists across container restarts.
 
 The configurator also exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes — bypasses the auth gate so it works in unauthenticated orchestrator checks.
+
+## Demo install bundle (`/api/_demo/aiops/*`)
+
+A second set of routes lives under the `/api/_demo/aiops/` namespace. These are **not** product features — they simulate the BMC Helix AIOps "Manage OpenTelemetry" page so a prospect can experience the full onboarding flow (generate an install command → run it → land in the configurator UI) without a real AIOps tenant on the other end.
+
+What the demo plumbing does:
+- The `/aiops` page on the configurator collects an `X-Source` name and POSTs to `/api/_demo/aiops/configure`. The backend fabricates a `FAKE-KEY-…` API key, parks it in an in-memory session, and returns a copyable `curl … | bash` / `iwr … | iex` one-liner.
+- That installer hits `/api/_demo/aiops/install/<token>.{sh,ps1}` to fetch the platform-specific install script, which in turn downloads `/api/_demo/aiops/package/<token>` — a generated zip containing the configurator source, a templated `helix-otel-collector.yaml`, a `.env` with the fake key, double-click launchers, and a README.
+- The bundle's `.env` ships `HELIX_ENDPOINT=https://your-tenant.onbmc.com` as an obvious placeholder; the user replaces it on the configurator's Settings page on first run.
+
+What it would look like in a real-product deployment:
+- A real AIOps page would generate the install command (the configurator would not host the page).
+- A real tenant would supply the actual `HELIX_ENDPOINT` and `HELIX_API_KEY`, not the placeholder + fake.
+- The fan-out `otlphttp/helix_local_viewer` exporter in `helix-otel-collector.yaml` (which feeds the local View OTel Data page) is **not** demo plumbing — it's part of the configurator's standalone-sidecar story and ships in either world.
+
+To hide the demo namespace entirely:
+
+```env
+IS_DEMO_INSTALL=false
+```
+
+Setting the flag makes the four `/api/_demo/aiops/*` routes return 404 and the `/aiops` SPA page becomes a dead end. All other `/api/*` routes (the real OTel data, gateway management, diagnostics) are unaffected.
+
+The boundary is also visible in source: every demo-only renderer (`renderCollectorYaml`, `renderEnvFile`, `renderDockerCompose`, `renderBashInstaller`, `renderPowerShellInstaller`, `writePackageToArchive`, …) lives in `backend/routes/demo.js` and nowhere else. A new contributor reading the code can tell at a glance which surfaces are product and which are sales-tool.
 
 ## Troubleshooting & Management
 

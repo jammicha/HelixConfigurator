@@ -86,7 +86,15 @@ require('./routes/otlp').register(app, { otelStore });
 // Demo install bundle (public — no auth). Mounted under /api/_demo/aiops/*
 // and registered BEFORE the requireAuth middleware so the install one-liner
 // works without a session cookie.
-require('./routes/demo').register(app, { projectRoot: path.resolve(__dirname, '..') });
+//
+// IS_DEMO_INSTALL gates the entire demo plumbing. Defaults to on for
+// backward compatibility with the in-repo .env and tunneled-demo flows.
+// Set IS_DEMO_INSTALL=false in a real-product deployment so the routes
+// 404 and the demo namespace is invisible to clients.
+const demoInstallEnabled = (process.env.IS_DEMO_INSTALL || 'true').trim().toLowerCase() !== 'false';
+if (demoInstallEnabled) {
+  require('./routes/demo').register(app, { projectRoot: path.resolve(__dirname, '..') });
+}
 // --------------------------------------------------------------------------
 
 // Gate everything else under /api/*
