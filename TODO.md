@@ -500,6 +500,78 @@ feature before validating it.
 
 ---
 
+## 14. Evolve the Config Templates feature
+
+**Why:** Today the configurator ships 4 starting points (Default Sidecar,
+Prometheus Scrape, Tail Sampling, K8s Attributes). Each is a complete
+`helix-otel-collector.yaml` and the picker is a radio. Reasonable for v0
+but the space of "what someone might want to configure" is much larger,
+and grows as the OTel project evolves. This item parks the thinking so a
+future session can pick an axis to invest in.
+
+**Directions, roughly grouped by reach:**
+
+1. **Catalog expansion (additive, low risk).** Add starting points the
+   four current ones don't cover: a logs-focused pipeline (filelog
+   receiver + parsers), a span-metrics connector for RED, span-name
+   sanitization à la the otel-demo's `transform/sanitize_spans` recipe,
+   multi-tenant fan-out (multiple `bmchelix` exporters with different
+   `X-Source`), AWS/GCP/Azure resource-detection variants. Pure content
+   work; cheap.
+2. **Composable fragments instead of monolithic templates.** Today a
+   template *replaces* the editor. Reframe as a checklist of
+   capabilities a user adds on top of a base ("+ tail sampling",
+   "+ k8s attributes", "+ span sanitization"). Reuses the smart-add
+   `patchCollectorYaml` machinery that already knows how to inject a
+   block without clobbering siblings. Bigger lift but the natural
+   successor to today's all-or-nothing model.
+3. **Template metadata.** Each template exists only as raw YAML
+   today. Add a JSON sidecar with: required env vars beyond the base
+   set (so the wizard can prompt), minimum collector version (some
+   processors are contrib-only or version-gated), compatibility notes
+   ("requires K8s service account"), and a *recommendation rule* the
+   picker uses to surface the right starting point (e.g., "Suggest
+   this if the existing collector has >1k traces/sec").
+4. **Receiver × exporter matrix.** Templates today implicitly assume
+   "OTLP in → bmchelix out." A matrix where the user picks receivers
+   (OTLP, prometheus-scrape, filelog, hostmetrics, kubeletstats,
+   syslog) and additional exporters (debug, kafka,
+   prometheus-remote-write for hybrid setups) generates the config.
+   Combinatorially explosive on its face — needs careful UX so it
+   doesn't feel like a configuration wizard for a wizard.
+5. **Merge mode + diff preview.** Picking a template currently
+   REPLACES the editor. Add a "merge into current config" path that
+   uses `patchCollectorYaml` to inject template content into the
+   user's existing edits. Same diff-preview-before-apply flow that
+   smart-add already provides for customer-collector merges.
+6. **Tested templates.** Spin up `otel/opentelemetry-collector-contrib`
+   against each template in CI with a synthetic trace; assert the
+   collector boots and emits to a mock exporter. Catches template
+   drift when OTel breaks backward compatibility on minor versions
+   (we already hit `db.statement` → `db.query.text` on the trace
+   store side; the templates have similar exposure).
+7. **"Save as my template" + per-host catalog.** Let a user save the
+   current editor content as a personal template alongside the
+   shipped ones. Stored under `templates/user/` on the configurator
+   host; survives container restart via the existing `./data` mount.
+8. **Remote template catalog.** Pull a versioned, Helix-published set
+   of templates from a remote source so updates ship without
+   redeploying the configurator. Bigger architectural lift; only
+   worth it once the maintained set has outgrown what's checked into
+   this repo.
+
+**Sequencing if anyone picks this up:** start with #1 (cheap content
+expansion) + #6 (tests against the existing four). #2 and #5 are the
+natural next major chunks if templates become a primary product
+surface. #3 should land alongside #1 once the catalog grows past
+~8 entries — the picker UX needs metadata at that point. #4, #7, #8
+are speculative until there's pull from real users.
+
+**Risk:** Low for #1, #3, #6. Moderate for #2, #5 (UX churn). #4, #7,
+#8 are larger commitments not worth doing speculatively.
+
+---
+
 ## What was deliberately NOT added
 
 For the record, so these don't get re-proposed:
