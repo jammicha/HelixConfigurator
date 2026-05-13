@@ -15,8 +15,13 @@ exporters:
     headers:
       X-Api-Key: ${env:HELIX_API_KEY}
       X-Source: ${env:X_SOURCE}
+    # Sending queue tuned for sustained burst throughput to Helix.
+    # num_consumers = parallel HTTP workers shipping batches; queue_size is
+    # bounded so the collector won't OOM under prolonged backpressure.
     sending_queue:
       enabled: true
+      num_consumers: 100
+      queue_size: 10000
   otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs

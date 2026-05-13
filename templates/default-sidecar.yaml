@@ -19,8 +19,13 @@ exporters:
     headers:
       X-Api-Key: ${env:HELIX_API_KEY}
       X-Source: ${env:X_SOURCE}
+    # Sending queue tuned for sustained burst throughput to Helix.
+    # num_consumers = parallel HTTP workers shipping batches; queue_size is
+    # bounded so the collector won't OOM under prolonged backpressure.
     sending_queue:
       enabled: true
+      num_consumers: 100
+      queue_size: 10000
   # Fan-out: traces and logs also flow to the configurator backend so the
   # local "View OTel Data" page can render waterfalls, errors, and DB insight.
   # Don't remove this — /otel-data depends on it.
