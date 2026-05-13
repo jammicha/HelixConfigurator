@@ -79,10 +79,6 @@ Bundled together because each is small and none is independently urgent:
 - **Force-directed service map layout** for cyclic topologies. Today's
   layered layout assumes DAG; mutual service calls degrade visually.
   ~80 LOC of Fruchterman-Reingold or similar.
-- **`hasRealHelixEndpoint` guard on trace-row Helix deep-links.** Same
-  fix we did on the dashboard buttons but for the in-table chevron
-  links in Traces/Logs/Errors views. Currently they render unconditionally
-  as long as `helixEnv.endpoint` is non-empty.
 - **Window-resolution helper DRY.** Five endpoints
   (`overview`, `traces/histogram`, `logs/histogram`, `latency-heatmap`,
   `service-map`, `insights`) reuse the same `start`/`end` defaulting
@@ -184,12 +180,16 @@ downgraded):**
 
 ## 7. Make the demo/real plumbing boundary explicit in code
 
-**Status (2026-05-12):** Step 1 shipped — every AIOps install/demo
-route is now under `/api/_demo/aiops/...`. Frontend `AiopsPage`, the
-generated bash/PowerShell installer scripts, and the four route
-handlers all updated. The boundary is now visible in URLs. Steps 2-5
-(env-flag gate, module split, README addendum, optional separate
-compose service) are still open.
+**Status (2026-05-12):** Steps 1 and 3 substantially shipped. Step 1
+(commit `60581c3`) moved every AIOps install/demo route under
+`/api/_demo/aiops/...` — frontend `AiopsPage`, the generated
+bash/PowerShell installer scripts, and the four route handlers all
+updated. Step 3 (commit `09efe65`, on `refactor/backend-modular-split`)
+moved the AIOps simulator (all the `render*` functions,
+`SIMULATED_INGEST_ENDPOINT`, `writePackageToArchive`, `aiopsSessions`)
+out of `index.js` into `backend/routes/demo.js`. What remains: step 2
+(env-flag gate), step 4 (README addendum), step 5 (optional separate
+compose service — overkill flag).
 
 **Original framing — code hygiene; matters more the longer this codebase lives.**
 
@@ -205,7 +205,7 @@ versa) and ships a bug.
 
 **Plan (incremental, each step independently shippable):**
 
-1. **Namespace prefix.** ✅ DONE (2026-05-12, commit pending). All
+1. **Namespace prefix.** ✅ DONE (2026-05-12, commit `60581c3`). All
    AIOps install routes moved to `/api/_demo/aiops/*`; the generated
    bash/PowerShell installer scripts reference the new path. The
    underscore prefix is conventional for "internal / non-product"
@@ -214,13 +214,15 @@ versa) and ships a bug.
    `/api/_demo/*` routes behind it — return 404 when the flag is false.
    Default to true for the in-repo `.env` so existing demo flows keep
    working. When a customer eventually runs this in a real environment,
-   they set it false and the demo plumbing is invisible.
-3. **Move the AIOps simulator to its own module.** Pull the ~300 LOC
-   of `renderEnvFile`, `renderDockerCompose`, `renderInstallerBundle`,
-   `renderBashInstaller`, `renderPowerShellInstaller`,
-   `writePackageToArchive`, the `SIMULATED_INGEST_ENDPOINT`, etc. into
-   `backend/demo-aiops.js`. `index.js` registers the routes
-   conditionally based on the env flag.
+   they set it false and the demo plumbing is invisible. With step 3
+   done, this is now a small change: wrap the
+   `require('./routes/demo').register(...)` call in `index.js` in an
+   env-flag check.
+3. **Move the AIOps simulator to its own module.** ✅ DONE (2026-05-12,
+   commit `09efe65`). All the `render*` functions, `SIMULATED_INGEST_ENDPOINT`,
+   `writePackageToArchive`, `aiopsSessions` now live in
+   `backend/routes/demo.js`. Conditional registration based on the
+   step-2 env flag is what's left.
 4. **README addendum.** New section explaining: what is the demo
    plumbing for, what does it simulate, what should be replaced in a
    real-product context (a real AIOps page would generate the install
@@ -268,12 +270,23 @@ Overview header and per-surface chrome aren't.
 - **Per-surface CTAs:** On each Bridge surface header (Operations,
   Service Map, Heatmap), a small "Open full view in AIOps →" link.
   Same `hasRealHelixEndpoint` guard as elsewhere.
-- **Trace-row chevrons:** Apply the `hasRealHelixEndpoint` guard from
-  the existing #4 backlog item to Traces/Logs/Errors row-level
-  chevrons. (Already in scope; flagging the dependency.)
+- **Trace-row chevrons:** ✅ DONE (2026-05-12, commit `8b4d277`).
+  `buildHelixTraceUrl` now checks `hasRealHelixEndpoint` internally
+  so every caller's existing `if (!url) return null;` is automatically
+  the guard. TracesTab's column-header gate tightened to
+  `hasRealHelixEndpoint(helixEnv)` too.
 - **Insights cards → AIOps:** the #3 "Reframe" note (Investigate
   `<service>` in Helix AIOps →) hasn't shipped yet — wire that up at
   the same time as the per-surface CTAs.
+- **Send-to-AIOps polish (the feature shipped today, commit `d9fb3de`).**
+  Three follow-ups worth tracking: (a) after a successful send, render
+  a "View this event in AIOps →" link in the drawer using the
+  upstream-returned event id (the events API response carries it);
+  (b) keep a small retry/error log in the drawer so failed sends can
+  be inspected without a page reload; (c) revisit the severity rule
+  (CRITICAL on error / MAJOR on outlier / MINOR otherwise) once we
+  have feedback from a real Helix tenant on whether MAJOR vs MINOR
+  feels right for traces that aren't anomalous but were sent manually.
 
 **Risk:** Low. The banner is the only new affordance; everything else
 is a guard fix or a one-line link.
@@ -361,8 +374,125 @@ unchanged. The dominant cause (#1) is still pending and requires #2.
 - Medium: ship #2 (SSE coverage for Overview charts) and have
   Operations honor the stream-mode cadence (or get its own SSE).
 - Optional: add SSE `id:` + `Last-Event-ID` replay on reconnect.
-- Optional: restore a "reconnecting…" indicator in some form (was
-  visible on the Traces / Logs tabs before the stream-mode unifier).
+- ✅ Restore a "reconnecting…" indicator. DONE (2026-05-12, commit
+  `cbe6ee8`): a 1.5×1.5 dot next to the Stream selector — cyan +
+  pulsing when SSE is connected, warning yellow when reconnecting.
+  Hidden in snapshot modes (which don't use SSE).
+
+---
+
+## 11. Finish the backend modular split
+
+**Status (2026-05-12):** ~half done. Branch `refactor/backend-modular-split`
+merged to `main` (commits `14da0bc` → `09efe65`) dropped `backend/index.js`
+from 3427 → 1579 lines (−54%). Six route modules + three cross-cutting
+modules carved out: `util.js`, `auth.js`, `validate.js`,
+`routes/{situations,otlp,env,config,traces,demo}.js`.
+
+**Still inline in `index.js` (~31 routes across 4 logical modules):**
+
+- **`routes/lifecycle.js`** (6 routes): `/api/lifecycle/{restart,start,stop,
+  bridge,bridge-network,restart-container,status}`. Shares the
+  collector-restart-and-watch pattern with `routes/config.js` —
+  `waitForGatewaySettle` is a candidate to lift back out into a shared
+  helper (`backend/gateway.js`?) when the second copy lands here.
+- **`routes/discovery.js`** (3 routes): `/api/discovery/{collectors,
+  collector-config/:name,collector-apply/:name}`. Small, clean carve.
+- **`routes/containers.js`** (7 routes): `/api/services`,
+  `/api/containers{,/full,/inspect/:name,/attach,/disconnect}`. Uses
+  `isValidContainerName` (already in `util.js`).
+- **`routes/diagnostics.js`** (10 routes): `/api/diagnostics/*`. The
+  most tangled of the remaining four — `debugTimer` /
+  `revertDebugMode` toggle helpers, the live-log SSE stream that
+  touches `activeLogProcesses` (declared at the top of `index.js`),
+  receiver-counter probes, app-export-error scans, the inject-trace
+  synthetic-telemetry path.
+
+**Sequencing for the follow-up session:** discovery (smallest, cleanest)
+→ containers → lifecycle (some shared-helper extraction needed) →
+diagnostics (deserves its own focused pass). Each module is independently
+shippable. After all four, `index.js` should be ~250-300 lines — pure
+app setup + middleware ordering + module registration.
+
+---
+
+## 12. Vitest scaffold around `otelStore`
+
+**Why:** The trace store is the surface that's been most recently
+buggy this quarter — the internal-service filter, the SSE service-filter
+merge, the lifetime-vs-windowed services dropdown, the search-q server-side
+move. None of those regressions had a test that would have caught them.
+The honest assessment in this session was that any non-trivial refactor
+of this codebase is brittle without tests, and `otelStore` is the
+highest-value place to start because (a) it's a single well-bounded
+module, (b) it has clear invariants (TRACE_CAP=500, log retention cap,
+the participant-vs-root filter), and (c) the route handlers are now
+mostly thin shims over it after the modular split.
+
+**Plan:**
+
+- Add `vitest` to `backend/package.json` devDependencies. Or
+  `node:test` if avoiding the dep is preferred — both work for a
+  thin Node-only integration layer.
+- Test invariants first, not happy paths:
+  - `ingestSpans` enforces the 500-trace cap (write 600 traces, assert
+    500 remain).
+  - `listTraces` filters out all-internal traces via the "any
+    non-internal participating span" rule (write a trace whose root
+    is `helix-gateway` but with a downstream `customer-app` span —
+    must appear).
+  - `listServices` is lifetime, not windowed (write a trace, advance
+    time, assert the service still appears in the dropdown).
+  - SSE `participating_services` tagging on emitted summaries.
+  - Slow-threshold plumbing through `tracesHistogram` + `listOperations`
+    (write traces at 800/1200ms, query with `slowThresholdMs=1000` →
+    one slow; query with `slowThresholdMs=500` → both slow).
+- Backend-only — no Express, no docker. Tests construct `OtelStore`
+  directly with an ephemeral in-memory SQLite (`:memory:`) and drive
+  it through `ingestSpans` / `ingestLogs`.
+
+**Risk:** Low. No new runtime code; tests can be added incrementally
+and run on a developer machine before being wired into CI.
+
+**Sequencing note:** Land this before #5 (OTel metrics ingest) — that
+work doubles the store's surface area, and we don't want to ship more
+untested code in this area.
+
+---
+
+## 13. Validate Send-to-AIOps against a real Helix tenant
+
+**Status:** Not code work — user-test the feature that shipped today
+(commit `d9fb3de`) against a live tenant before extending it.
+
+**What to verify:**
+
+- **Dedup behavior.** Provision the `OTEL_TRACE_ANOMALY` event class
+  via the Settings button. Send the same trace twice from the
+  drawer. Expected: BMC's auto-dedup matches on `helix_trace_id` and
+  updates the existing Event instead of creating a duplicate. If it
+  doesn't, check that the class definition's `helix_trace_id` slot
+  is flagged `dup_detect=true` and `mandatory=true` (see
+  `routes/situations.js` `provision-class` handler).
+- **Severity classification.** Send an error trace → confirm
+  severity=CRITICAL appears in AIOps. Send an outlier (duration > 2×
+  the operation's p95) → confirm severity=MAJOR. Send a normal trace
+  → confirm severity=MINOR. The frontend supplies the operation's
+  p95; mismatched p95 between Operations tab and what's sent would
+  surface here.
+- **Business-service pin.** With `BUSINESS_SERVICE_KEY` set and the
+  trace's `service.name` matching multiple AIOps Business Services
+  (the duplicate-event scenario the comment in `routes/situations.js`
+  references), confirm the Event lands on exactly one Business
+  Service via the `service_id` / `business_service_key` slots.
+- **`HELIX_EVENTS_ENDPOINT` fallback.** Tenants where ingest and
+  portal share a host should work with `HELIX_ENDPOINT` alone; those
+  with separate hosts need `HELIX_EVENTS_ENDPOINT` set. Verify both
+  paths.
+
+The polish items in #8 ("View in AIOps" link, retry log, severity
+refinement) hinge on what this validation surfaces. Don't extend the
+feature before validating it.
 
 ---
 
