@@ -43,6 +43,23 @@ function register(app, { docker }) {
     await container.putArchive(pack, { path: dir });
   };
 
+  // Absolute host path? Accept POSIX (/foo), Windows drive-letter (C:\foo or
+  // C:/foo), and UNC (\\server\share). resolveHostMountPath returns whatever
+  // Docker reported as Mounts[].Source, which is platform-shaped — on Docker
+  // Desktop for Windows that's typically a backslashed drive-letter path.
+  const isAbsoluteHostPath = (p) =>
+    typeof p === 'string' &&
+    (p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\'));
+
+  // Split an absolute host path into { dir, base } using the right path
+  // semantics for its platform shape.
+  const splitHostPath = (p) => {
+    if (p.startsWith('/')) {
+      return { dir: path.posix.dirname(p), base: path.posix.basename(p) };
+    }
+    return { dir: path.win32.dirname(p), base: path.win32.basename(p) };
+  };
+
   // Write `content` to `hostFilePath` (a host-side path) by spawning a
   // transient busybox container that bind-mounts the host directory and runs
   // `cat > /target/<basename>`. Needed because putArchive on the original
@@ -50,13 +67,17 @@ function register(app, { docker }) {
   // entries — and bind-mounted files inside a container cannot be unlinked
   // from inside the container. Writing via `cat >` uses O_WRONLY|O_TRUNC, which
   // works against bind mounts.
+  //
+  // Cross-platform: the source path is passed via HostConfig.Mounts (the
+  // structured form) instead of HostConfig.Binds (`<src>:<dst>`) so Windows
+  // drive-letter paths like `C:\Users\...` don't collide with the
+  // colon-separator parsing.
   const writeFileViaBusyboxSidecar = async (hostFilePath, content) => {
-    if (typeof hostFilePath !== 'string' || !hostFilePath.startsWith('/')) {
-      throw new Error(`writeFileViaBusyboxSidecar: hostFilePath must be an absolute path, got ${JSON.stringify(hostFilePath)}`);
+    if (!isAbsoluteHostPath(hostFilePath)) {
+      throw new Error(`writeFileViaBusyboxSidecar: hostFilePath must be an absolute host path (POSIX, Windows drive-letter, or UNC), got ${JSON.stringify(hostFilePath)}`);
     }
-    const hostDir = path.posix.dirname(hostFilePath);
-    const baseName = path.posix.basename(hostFilePath);
-    if (!hostDir.startsWith('/') || !baseName) {
+    const { dir: hostDir, base: baseName } = splitHostPath(hostFilePath);
+    if (!hostDir || !baseName) {
       throw new Error(`writeFileViaBusyboxSidecar: could not derive a bind mount from ${hostFilePath} (dir=${hostDir}, base=${baseName})`);
     }
     // Pull busybox if not cached locally. Subsequent calls are no-ops.
@@ -78,7 +99,9 @@ function register(app, { docker }) {
       StdinOnce: true,
       AttachStdin: true,
       Tty: false,
-      HostConfig: { Binds: [`${hostDir}:/target`] },
+      HostConfig: {
+        Mounts: [{ Type: 'bind', Source: hostDir, Target: '/target' }],
+      },
     });
     try {
       const stream = await container.attach({
@@ -498,11 +521,17 @@ function register(app, { docker }) {
         });
       }
       const backupPath = `${configPath}.helix-bak`;
-      if (hostConfigPath && hostConfigPath.startsWith('/')) {
+      if (isAbsoluteHostPath(hostConfigPath)) {
         // Bind-mounted config: write via busybox sidecar mounting the host
         // directory, so we don't trigger an unlink on the in-container path.
+        // The .helix-bak backup is computed in the host path's native
+        // semantics so it ends up alongside the original on disk.
+        const { dir: hostDir, base: hostBase } = splitHostPath(hostConfigPath);
+        const hostBackup = hostConfigPath.startsWith('/')
+          ? path.posix.join(hostDir, `${hostBase}.helix-bak`)
+          : path.win32.join(hostDir, `${hostBase}.helix-bak`);
         console.log(`[smart-add] apply on ${name}: writing via busybox sidecar (bind-mounted at ${hostConfigPath})`);
-        await writeFileViaBusyboxSidecar(`${hostConfigPath}.helix-bak`, configText);
+        await writeFileViaBusyboxSidecar(hostBackup, configText);
         await writeFileViaBusyboxSidecar(hostConfigPath, proposal.proposedYaml);
       } else {
         // Image-baked config (no host bind-mount): putArchive writes into the
