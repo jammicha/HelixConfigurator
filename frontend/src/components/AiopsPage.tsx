@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Apple,
@@ -65,6 +65,22 @@ const PLATFORM_LABEL: Record<Platform, string> = {
 };
 
 export const AiopsPage: React.FC = () => {
+  // Mirror the backend's IS_DEMO_INSTALL gate. The demo routes 404 on a real
+  // product deployment anyway, but without the SPA knowing that, the user
+  // hits a broken-looking page on every action. 'unknown' keeps the UI
+  // blank during the health probe instead of flashing.
+  const [demoEnabled, setDemoEnabled] = useState<'unknown' | 'on' | 'off'>('unknown');
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/health')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled) return;
+        setDemoEnabled(data && data.demoInstall === false ? 'off' : 'on');
+      })
+      .catch(() => { if (!cancelled) setDemoEnabled('on'); });
+    return () => { cancelled = true; };
+  }, []);
   const [xSource, setXSource] = useState('');
   const [step, setStep] = useState<Step>(1);
   const [generating, setGenerating] = useState(false);
@@ -73,6 +89,26 @@ export const AiopsPage: React.FC = () => {
   const [hostingProvider, setHostingProvider] = useState<HostingProvider>('my-host');
   const [platform, setPlatform] = useState<Platform>(() => detectPlatform());
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  if (demoEnabled === 'unknown') {
+    return <div className="min-h-screen bg-gray-900" />;
+  }
+  if (demoEnabled === 'off') {
+    return (
+      <div className="min-h-screen bg-gray-900 text-gray-200 flex items-center justify-center p-8">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-xl font-semibold">Demo install bundle is disabled</h1>
+          <p className="text-sm text-gray-400">
+            This deployment runs with <code className="font-mono">IS_DEMO_INSTALL=false</code>.
+            The simulated AIOps onboarding flow isn't available here.
+          </p>
+          <a href="/" className="inline-block px-4 py-2 rounded bg-primary hover:bg-primary-hover text-white text-sm font-semibold">
+            Go to configurator
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   // installBaseUrl comes from the backend — it substitutes the LAN IP for
   // localhost so the command works when pasted on a different machine.

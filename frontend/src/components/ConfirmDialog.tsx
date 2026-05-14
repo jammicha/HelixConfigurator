@@ -1,4 +1,5 @@
 import React from 'react';
+import { useEscClose } from '../hooks/useEscClose';
 
 export type ConfirmRequest = {
   title: string;
@@ -13,6 +14,10 @@ type Props = {
 };
 
 export const ConfirmDialog: React.FC<Props> = ({ request, onCancel }) => {
+  // Hook is called unconditionally; the bound listener is a no-op when the
+  // dialog isn't open. Keyboard-only users couldn't dismiss this dialog
+  // before — they had to tab to Cancel.
+  useEscClose(!!request, onCancel);
   if (!request) return null;
   return (
     <div

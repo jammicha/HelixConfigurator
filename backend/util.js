@@ -42,6 +42,43 @@ const makeContainerLogs = (docker) => async (containerName, options = {}) => {
 const isValidContainerName = (name) =>
   typeof name === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(name);
 
+class DockerTimeoutError extends Error {
+  constructor(label, ms) {
+    super(`Docker operation "${label}" timed out after ${ms}ms`);
+    this.name = 'DockerTimeoutError';
+    this.label = label;
+    this.timeoutMs = ms;
+  }
+}
+
+// Race a Docker promise against a timeout so a wedged daemon doesn't hang
+// the Express handler for Express's default 120s. Callers should catch
+// DockerTimeoutError and translate to 504 with a label-aware error payload
+// (see sendDockerTimeoutResponse).
+const withDockerTimeout = (promise, label, ms = 15_000) => {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new DockerTimeoutError(label, ms)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+
+// Standard 504 shape so the UI can distinguish a slow Docker socket from a
+// real operational failure. Returns true if the error was a docker timeout
+// (and a response was sent); false otherwise so callers can fall through to
+// their normal error handling.
+const sendDockerTimeoutResponse = (res, err) => {
+  if (err instanceof DockerTimeoutError) {
+    res.status(504).json({
+      error: 'Docker socket slow or unreachable',
+      op: err.label,
+      timeoutMs: err.timeoutMs,
+    });
+    return true;
+  }
+  return false;
+};
+
 // Best LAN-routable IPv4 from any non-virtual interface, prioritizing
 // 192.168.* over 10.* (the typical home/lab vs corp ordering).
 const getLanIPv4 = () => {
@@ -98,4 +135,7 @@ module.exports = {
   getLanIPv4,
   firstHeaderValue,
   computeInstallBaseUrl,
+  DockerTimeoutError,
+  withDockerTimeout,
+  sendDockerTimeoutResponse,
 };

@@ -86,11 +86,13 @@ export const Step1: React.FC<Props> = ({
             data-lpignore="true"
             value={envVars.HELIX_ENDPOINT}
             onChange={(e) => setEnvVars({ ...envVars, HELIX_ENDPOINT: e.target.value })}
+            aria-invalid={!!(envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT)}
+            aria-describedby={envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT ? 'helix-endpoint-error' : undefined}
             className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
             placeholder="https://your-tenant.onbmc.com"
           />
           {envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT && (
-            <p className="text-tiny text-danger">{errors.HELIX_ENDPOINT}</p>
+            <p id="helix-endpoint-error" className="text-tiny text-danger">{errors.HELIX_ENDPOINT}</p>
           )}
         </div>
         <div className="space-y-1">
@@ -110,12 +112,14 @@ export const Step1: React.FC<Props> = ({
             data-lpignore="true"
             value={envVars.X_SOURCE}
             onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
+            aria-invalid={!!(envVars.X_SOURCE && errors.X_SOURCE)}
+            aria-describedby={envVars.X_SOURCE && errors.X_SOURCE ? 'helix-x-source-error' : undefined}
             className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.X_SOURCE && errors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
             placeholder="e.g. payment-service"
           />
           <p className="text-tiny text-gray-500">Choose a name that will map to a business service in Helix AIOps.</p>
           {envVars.X_SOURCE && errors.X_SOURCE && (
-            <p className="text-tiny text-danger">{errors.X_SOURCE}</p>
+            <p id="helix-x-source-error" className="text-tiny text-danger">{errors.X_SOURCE}</p>
           )}
         </div>
         <div className="space-y-1">
@@ -136,6 +140,8 @@ export const Step1: React.FC<Props> = ({
                 const parsed = parseHelixKeyBundle(e.target.value);
                 setEnvVars({ ...envVars, HELIX_API_KEY: parsed ?? e.target.value });
               }}
+              aria-invalid={!!(envVars.HELIX_API_KEY && errors.HELIX_API_KEY)}
+              aria-describedby={envVars.HELIX_API_KEY && errors.HELIX_API_KEY ? 'helix-api-key-error' : undefined}
               style={!showApiKey ? { WebkitTextSecurity: 'disc', textSecurity: 'disc' } as React.CSSProperties : undefined}
               className={`w-full bg-gray-1000 border rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm ${envVars.HELIX_API_KEY && errors.HELIX_API_KEY ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
               placeholder="Paste your API key from the Helix portal"
@@ -150,7 +156,7 @@ export const Step1: React.FC<Props> = ({
           </div>
           <p className="text-tiny text-gray-500">Paste the full key — the format is parsed automatically.</p>
           {envVars.HELIX_API_KEY && errors.HELIX_API_KEY && (
-            <p className="text-tiny text-danger">{errors.HELIX_API_KEY}</p>
+            <p id="helix-api-key-error" className="text-tiny text-danger">{errors.HELIX_API_KEY}</p>
           )}
         </div>
         <div className="space-y-1">
@@ -167,11 +173,13 @@ export const Step1: React.FC<Props> = ({
             data-lpignore="true"
             value={envVars.APP_URL}
             onChange={(e) => setEnvVars({ ...envVars, APP_URL: e.target.value })}
+            aria-invalid={!!(envVars.APP_URL && errors.APP_URL)}
+            aria-describedby={envVars.APP_URL && errors.APP_URL ? 'helix-app-url-error' : undefined}
             className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.APP_URL && errors.APP_URL ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
             placeholder="URL of the application you're instrumenting"
           />
           {envVars.APP_URL && errors.APP_URL && (
-            <p className="text-tiny text-danger">{errors.APP_URL}</p>
+            <p id="helix-app-url-error" className="text-tiny text-danger">{errors.APP_URL}</p>
           )}
         </div>
       </div>

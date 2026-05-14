@@ -90,19 +90,28 @@ export const Step2: React.FC<Props> = ({
           <span className="ml-auto text-tiny text-gray-500">POC</span>
         </div>
         {smartAddProposal.error ? (
-          <>
-            <p className="text-tiny text-warning mb-3">⚠ {smartAddProposal.error} You can still apply the snippet below manually.</p>
+          <div className="p-3 rounded border border-danger/40 bg-danger/10" role="alert">
+            <div className="flex items-start gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-100">Smart-add couldn't reach this collector</p>
+                <p className="text-tiny text-gray-300 mt-1 break-words">{smartAddProposal.error}</p>
+                <p className="text-tiny text-gray-400 mt-1">You can still apply the snippets below manually.</p>
+              </div>
+            </div>
             {onVerifyExporter && (
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap mt-2">
                 <button
                   onClick={handleVerify}
                   disabled={verifyStatus === 'verifying'}
                   className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
-                >Verify exporter</button>
+                >
+                  {verifyStatus === 'verifying' ? 'Trying…' : 'Try smart-add again'}
+                </button>
                 {verifyBadge}
               </div>
             )}
-          </>
+          </div>
         ) : smartAddProposal.alreadyConfigured ? (
           <>
             <p className="text-tiny text-gray-300 mb-3">

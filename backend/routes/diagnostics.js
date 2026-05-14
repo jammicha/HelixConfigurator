@@ -13,7 +13,7 @@ const yaml = require('js-yaml');
 const axios = require('axios');
 const crypto = require('crypto');
 const { PassThrough } = require('stream');
-const { demuxLogBuffer, isValidContainerName } = require('../util');
+const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse } = require('../util');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 
@@ -162,9 +162,10 @@ function register(app, { docker, containerLogs, configPath }) {
       fs.writeFileSync(configPath, newYaml, 'utf8');
 
       try {
-        await docker.getContainer(targetContainer).restart();
+        await withDockerTimeout(docker.getContainer(targetContainer).restart(), 'container.restart', 30_000);
         res.json({ message: `Debug mode ${enable ? 'enabled' : 'disabled'}` });
       } catch (restartErr) {
+        if (sendDockerTimeoutResponse(res, restartErr)) return;
         res.status(500).json({ error: 'Failed to restart for debug toggle', details: restartErr.message });
       }
     } catch (e) {
@@ -407,9 +408,10 @@ function register(app, { docker, containerLogs, configPath }) {
       const targetContainer = TARGET_CONTAINER();
       let gatewayNetworks;
       try {
-        const gw = await docker.getContainer(targetContainer).inspect();
+        const gw = await withDockerTimeout(docker.getContainer(targetContainer).inspect(), 'container.inspect', 5_000);
         gatewayNetworks = new Set(Object.keys(gw.NetworkSettings?.Networks ?? {}));
-      } catch {
+      } catch (e) {
+        if (sendDockerTimeoutResponse(res, e)) return;
         return res.json({ collectors: [], errors: [], note: `${targetContainer} not running` });
       }
       if (gatewayNetworks.size === 0) {
@@ -419,7 +421,7 @@ function register(app, { docker, containerLogs, configPath }) {
       // Enumerate containers once, filter to collectors that share a network
       // with helix-gateway. helix-* containers are always excluded so our own
       // gateway/configurator don't show up.
-      const all = await docker.listContainers();
+      const all = await withDockerTimeout(docker.listContainers(), 'docker.listContainers');
       const collectors = all
         .map(c => ({
           name: (c.Names?.[0] || '').replace(/^\//, ''),
@@ -468,6 +470,7 @@ function register(app, { docker, containerLogs, configPath }) {
 
       res.json({ collectors, errors });
     } catch (e) {
+      if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to scan collector logs', details: e.message });
     }
   });
@@ -634,7 +637,7 @@ function register(app, { docker, containerLogs, configPath }) {
     try {
       // Check 1: Container Status — also surface exit code when not running so a
       // crash-loop is distinguishable from a clean stop.
-      const inspectData = await docker.getContainer(targetContainer).inspect();
+      const inspectData = await withDockerTimeout(docker.getContainer(targetContainer).inspect(), 'container.inspect', 5_000);
       const state = (inspectData && inspectData.State) || {};
       const status = state.Status || 'unknown';
       if (status !== 'running') {

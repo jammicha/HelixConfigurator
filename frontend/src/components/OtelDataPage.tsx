@@ -468,10 +468,18 @@ export const OtelDataPage: React.FC = () => {
   // Periodic re-fetch so the rollup counts (logs/errors/db calls) on
   // SSE-pushed traces catch up — those arrive with counts at 0 because
   // the trace summary is emitted before logs and the rest of the spans
-  // settle. Skip while paused to respect the user's freeze.
+  // settle. Skip while paused to respect the user's freeze. Also skip
+  // when SSE is healthy in Live mode: the trace_counts_update event
+  // already keeps rollup counts current, so this poll is pure redundant
+  // work. The fallback path still runs whenever SSE drops.
+  const sseConnectedRef = useRef(sseConnected);
+  sseConnectedRef.current = sseConnected;
+  const streamModeRef = useRef(streamMode);
+  streamModeRef.current = streamMode;
   useEffect(() => {
     const id = setInterval(() => {
       if (tracesPausedRef.current) return;
+      if (streamModeRef.current === 'live' && sseConnectedRef.current) return;
       refreshTraces();
     }, 30_000);
     return () => clearInterval(id);
@@ -759,11 +767,27 @@ export const OtelDataPage: React.FC = () => {
                 <option value="paused">Paused</option>
               </select>
               {streamMode === 'live' && (
-                <span
-                  className={`inline-block w-1.5 h-1.5 rounded-full ${sseConnected ? 'bg-[#5eead4] animate-pulse' : 'bg-warning'}`}
-                  title={sseConnected ? 'SSE connected — live updates flowing' : 'SSE disconnected — reconnecting'}
-                  aria-label={sseConnected ? 'Live stream connected' : 'Live stream reconnecting'}
-                />
+                sseConnected ? (
+                  <span
+                    className="inline-block w-1.5 h-1.5 rounded-full bg-[#5eead4] animate-pulse"
+                    title="SSE connected — live updates flowing"
+                    aria-label="Live stream connected"
+                    role="status"
+                  />
+                ) : (
+                  // Explicit amber "Reconnecting" pill so a silent SSE failure
+                  // doesn't look like "no traces" to the operator. Pairs with
+                  // the eventSource.onerror handler that flips sseConnected.
+                  <span
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-tiny font-semibold bg-warning/15 text-warning border border-warning/30 normal-case tracking-normal"
+                    title="SSE disconnected — reconnecting"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
+                    Reconnecting…
+                  </span>
+                )
               )}
             </label>
             <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">

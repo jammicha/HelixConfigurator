@@ -79,7 +79,7 @@ const formatDuration = (ms: number) => {
   return `${(ms / 1000).toFixed(2)}s`;
 };
 
-export const TimelineChart: React.FC<Props> = ({
+const TimelineChartImpl: React.FC<Props> = ({
   buckets,
   segments,
   bucketSizeMs,
@@ -620,3 +620,9 @@ export const TimelineChart: React.FC<Props> = ({
     </div>
   );
 };
+
+// React.memo with default shallow-equal. Parent components frequently re-
+// render on SSE events; the chart's heavy SVG body only needs to redraw
+// when its props actually change. Callers that pass inline arrays/callbacks
+// will defeat this memo — useOverview already returns identity-stable refs.
+export const TimelineChart = React.memo(TimelineChartImpl);

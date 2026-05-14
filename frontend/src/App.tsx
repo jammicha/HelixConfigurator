@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Editor, { useMonaco } from '@monaco-editor/react';
 import { Check, Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
+import { useLocalStorageState } from './hooks/useLocalStorageState';
 import { useSmartAdd } from './hooks/useSmartAdd';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack, Toast } from './components/ToastStack';
@@ -21,7 +22,15 @@ const App = () => {
   const [config, setConfig] = useState('');
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
-  const [setupStep, setSetupStep] = useState(1);
+  // Persist mid-wizard step so a browser refresh doesn't send the user back
+  // to Step 1 with all their progress (env saved server-side, bridge state,
+  // verify results) silently re-evaluated. Cleared on Launch Dashboard so
+  // a return visit starts from Step 1 if onboarding is reopened.
+  const [setupStep, setSetupStep] = useLocalStorageState<number>(
+    'helix-configurator.setupStep',
+    1,
+    (v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 4,
+  );
   const [isVerifying, setIsVerifying] = useState(false);
   const [setupError, setSetupError] = useState('');
   const [telemetryStatus, setTelemetryStatus] = useState('idle');
@@ -1629,6 +1638,10 @@ ${logsData.logs || '(no logs available)'}
                   onVerifyTelemetry={handleVerifyTelemetry}
                   onLaunchDashboard={() => {
                     localStorage.setItem('helix-configurator.onboarded', '1');
+                    // Drop the in-progress step so a future "Start onboarding
+                    // again" from the nav lands on Step 1, not the last step
+                    // the user happened to be on when they launched.
+                    localStorage.removeItem('helix-configurator.setupStep');
                     setIsSetupComplete(true);
                     // Clean the URL — the user may have arrived from
                     // /onboarding (typed manually, or via the dev server's

@@ -11,12 +11,18 @@ function register(app, { otelStore, docker }) {
     const since = sinceMs ? Number(sinceMs) : undefined;
     const until = untilMs ? Number(untilMs) : undefined;
     const query = typeof q === 'string' && q ? q : undefined;
+    // Clamp at the route layer too. otelStore.listTraces clamps to TRACE_CAP
+    // internally, but with a hard upper bound here the SQL execution
+    // (including the LEFT JOIN against the rollup CTEs) never sees a request
+    // for an unreasonable LIMIT in the first place.
+    const requested = limit ? Number(limit) : 200;
+    const clampedLimit = Math.min(500, Math.max(1, Number.isFinite(requested) ? requested : 200));
     const traces = otelStore.listTraces({
       service: svc,
       sinceMs: since,
       untilMs: until,
       q: query,
-      limit: limit ? Number(limit) : 200,
+      limit: clampedLimit,
     });
     res.json({ traces });
   });
@@ -81,22 +87,36 @@ function register(app, { otelStore, docker }) {
       }
     }
 
+    // res.write throws if the underlying socket has already closed. The
+    // 'close' event normally clears the heartbeat and subscriber, but it can
+    // fire late behind some proxies — wrap writes and tear down on failure
+    // so a stale interval doesn't keep firing against a dead stream.
+    let teardown = () => {};
+    const safeWrite = (chunk) => {
+      try {
+        res.write(chunk);
+      } catch {
+        teardown();
+      }
+    };
+
     const subscriber = (ev) => {
       // Skip anything we already delivered as part of the replay loop above.
       if (ev.id <= highestSent) return;
       highestSent = ev.id;
-      res.write(`id: ${ev.id}\nevent: ${ev.type}\ndata: ${JSON.stringify(ev.payload)}\n\n`);
+      safeWrite(`id: ${ev.id}\nevent: ${ev.type}\ndata: ${JSON.stringify(ev.payload)}\n\n`);
     };
     sseSubscribers.add(subscriber);
 
     const heartbeat = setInterval(() => {
-      res.write(': heartbeat\n\n');
+      safeWrite(': heartbeat\n\n');
     }, 15000);
 
-    req.on('close', () => {
+    teardown = () => {
       clearInterval(heartbeat);
       sseSubscribers.delete(subscriber);
-    });
+    };
+    req.on('close', teardown);
   });
 
   // Item 8: per-(service, root_operation) aggregates for the Operations tab.

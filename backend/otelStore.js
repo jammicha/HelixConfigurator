@@ -619,20 +619,27 @@ class OtelStore {
     where.push(`EXISTS (SELECT 1 FROM spans s WHERE s.trace_id = t.trace_id
                         AND s.service_name NOT IN (${INTERNAL_SERVICES.map(() => '?').join(',')}))`);
     params.push(...INTERNAL_SERVICES);
-    // Subquery rollups: log_count and error_count are cheap (indexed on
-    // trace_id). db_call_count uses json_extract on the spans attributes
-    // blob — fine for the 200-row cap, but watch this if the cap grows.
+    // Rollups via CTE LEFT JOINs instead of correlated subqueries: the prior
+    // shape executed three SELECTs per result row (200×3 = 600 subqueries per
+    // request, one of them scanning span attribute JSON). The CTE form runs
+    // each rollup exactly once against indexed columns. EXPLAIN QUERY PLAN
+    // shows a single SCAN of traces + index lookups into the CTEs.
     const sql = `
+      WITH lc AS (SELECT trace_id, COUNT(*) AS c FROM log_records GROUP BY trace_id),
+           ec AS (SELECT trace_id, COUNT(*) AS c FROM span_errors GROUP BY trace_id),
+           dc AS (SELECT trace_id, COUNT(*) AS c FROM spans
+                  WHERE json_extract(attributes_json, '$."db.system"') IS NOT NULL
+                     OR json_extract(attributes_json, '$."db.system.name"') IS NOT NULL
+                  GROUP BY trace_id)
       SELECT
         t.*,
-        (SELECT COUNT(*) FROM log_records WHERE trace_id = t.trace_id) AS log_count,
-        (SELECT COUNT(*) FROM span_errors WHERE trace_id = t.trace_id) AS error_count,
-        (SELECT COUNT(*) FROM spans
-           WHERE trace_id = t.trace_id
-             AND (json_extract(attributes_json, '$."db.system"') IS NOT NULL
-               OR json_extract(attributes_json, '$."db.system.name"') IS NOT NULL)
-        ) AS db_call_count
+        COALESCE(lc.c, 0) AS log_count,
+        COALESCE(ec.c, 0) AS error_count,
+        COALESCE(dc.c, 0) AS db_call_count
       FROM traces t
+      LEFT JOIN lc ON lc.trace_id = t.trace_id
+      LEFT JOIN ec ON ec.trace_id = t.trace_id
+      LEFT JOIN dc ON dc.trace_id = t.trace_id
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY t.received_at DESC LIMIT ?
     `;

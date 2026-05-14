@@ -10,6 +10,7 @@
 const path = require('path');
 const yaml = require('js-yaml');
 const tarStream = require('tar-stream');
+const { withDockerTimeout, sendDockerTimeoutResponse } = require('../util');
 
 function register(app, { docker }) {
   // -- Helpers ---------------------------------------------------------------
@@ -168,12 +169,43 @@ function register(app, { docker }) {
     return candidates;
   };
 
+  // Reject in-container paths that could escape their bind mount via `..` or
+  // NUL bytes. The in-container path comes from `--config=` args or Mounts[]
+  // Destinations — both attacker-controllable in a malicious compose. Without
+  // this guard, a `--config=/etc/otel/../../passwd` would resolve to /passwd
+  // on the host after path.posix.join.
+  const isSafeInContainerPath = (p) =>
+    typeof p === 'string' &&
+    p.length > 0 &&
+    !p.includes('\0') &&
+    !p.split('/').some(seg => seg === '..');
+
+  // After resolution, ensure the host path is still under the bind mount's
+  // declared Source — i.e. that no `..` slipped through join() to escape the
+  // mount. Compares normalized paths in POSIX semantics (Windows host paths
+  // hit a separate code path).
+  const isHostPathUnderSource = (hostPath, source) => {
+    if (!hostPath || !source) return false;
+    if (!hostPath.startsWith('/') || !source.startsWith('/')) {
+      // Non-POSIX (Windows drive-letter / UNC) — busybox sidecar will refuse
+      // anyway since busybox runs Linux; let the existing isAbsoluteHostPath
+      // gate handle these.
+      return true;
+    }
+    const normH = path.posix.normalize(hostPath);
+    const normS = path.posix.normalize(source);
+    return normH === normS || normH.startsWith(normS + '/');
+  };
+
   // Walk the container's Mounts to find the host-side source for an
   // in-container path. Returns the host path if the file (or one of its
   // ancestor dirs) is bind-mounted from the host, otherwise null. Picks the
   // most specific (deepest) matching destination so a file-level mount wins
-  // over a directory-level one.
+  // over a directory-level one. Rejects paths that try to escape via `..`
+  // segments so smart-add can't be coerced into writing outside the
+  // collector's declared mount.
   const resolveHostMountPath = (inspect, inContainerPath) => {
+    if (!isSafeInContainerPath(inContainerPath)) return null;
     const mounts = (inspect && inspect.Mounts) || [];
     let best = null;
     for (const m of mounts) {
@@ -190,7 +222,9 @@ function register(app, { docker }) {
       }
     }
     if (!best) return null;
-    return best.rel ? path.posix.join(best.source, best.rel) : best.source;
+    const hostPath = best.rel ? path.posix.join(best.source, best.rel) : best.source;
+    if (!isHostPathUnderSource(hostPath, best.source)) return null;
+    return hostPath;
   };
 
   // Indent helpers used by the text-level patcher below.
@@ -378,8 +412,16 @@ function register(app, { docker }) {
     };
   };
 
+  // Short-lived cache for the collectors-discovery GET. Smart-add polls this
+  // on every Step 2 refresh; a host with 50+ containers spends 50-200ms in
+  // docker.listContainers() each time. 60s TTL is well short of any
+  // meaningful container churn the user might do mid-wizard, and ?refresh=1
+  // lets the UI's manual refresh bypass it.
+  let collectorsCache = { ts: 0, payload: null };
+  const COLLECTORS_CACHE_TTL_MS = 60_000;
+
   const isRecognizedCollectorContainer = async (name) => {
-    const containers = await docker.listContainers();
+    const containers = await withDockerTimeout(docker.listContainers(), 'docker.listContainers');
     return containers.some(c => {
       const cName = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
       if (cName !== name) return false;
@@ -423,11 +465,15 @@ function register(app, { docker }) {
   // (helix-gateway) is excluded.
   app.get('/api/discovery/collectors', async (req, res) => {
     const sidecarName = process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
+    const forceRefresh = req.query.refresh === '1';
+    if (!forceRefresh && collectorsCache.payload && (Date.now() - collectorsCache.ts) < COLLECTORS_CACHE_TTL_MS) {
+      return res.json({ ...collectorsCache.payload, cached: true });
+    }
     try {
-      const containers = await docker.listContainers();
+      const containers = await withDockerTimeout(docker.listContainers(), 'docker.listContainers');
       const sidecarNetworks = await (async () => {
         try {
-          const inspected = await docker.getContainer(sidecarName).inspect();
+          const inspected = await withDockerTimeout(docker.getContainer(sidecarName).inspect(), 'container.inspect', 5_000);
           return Object.keys((inspected.NetworkSettings && inspected.NetworkSettings.Networks) || {});
         } catch { return []; }
       })();
@@ -460,8 +506,11 @@ function register(app, { docker }) {
             /\b(kubelet|k8s|kubernetes)\b/i.test(c.Command || '');
           return { name, image, networks, sharesNetworkWithSidecar, isKubernetes };
         });
-      res.json({ sidecar: sidecarName, sidecarNetworks, collectors: candidates });
+      const payload = { sidecar: sidecarName, sidecarNetworks, collectors: candidates };
+      collectorsCache = { ts: Date.now(), payload };
+      res.json(payload);
     } catch (e) {
+      if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to scan for collectors', details: e.message });
     }
   });
@@ -477,7 +526,7 @@ function register(app, { docker }) {
     }
     try {
       const container = docker.getContainer(name);
-      const inspect = await container.inspect();
+      const inspect = await withDockerTimeout(container.inspect(), 'container.inspect');
       const { configPath, configText, attempts } = await resolveCollectorConfig(container, inspect);
       if (!configPath) {
         return res.status(404).json({
@@ -490,6 +539,7 @@ function register(app, { docker }) {
       const proposal = proposeCollectorMerge(configText);
       res.json({ name, configPath, hostConfigPath, configText, ...proposal });
     } catch (e) {
+      if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to read collector config', details: e.message });
     }
   });
@@ -505,7 +555,7 @@ function register(app, { docker }) {
     }
     try {
       const container = docker.getContainer(name);
-      const inspect = await container.inspect();
+      const inspect = await withDockerTimeout(container.inspect(), 'container.inspect');
       const { configPath, configText, attempts } = await resolveCollectorConfig(container, inspect);
       if (!configPath) {
         console.log(`[smart-add] apply on ${name}: no config found, tried ${attempts.length} paths`);
@@ -558,12 +608,12 @@ function register(app, { docker }) {
       const gwName = process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
       let restarted = false;
       try {
-        const gwInspect = await docker.getContainer(gwName).inspect();
+        const gwInspect = await withDockerTimeout(docker.getContainer(gwName).inspect(), 'container.inspect', 5_000);
         const gwNetworks = new Set(Object.keys(gwInspect.NetworkSettings?.Networks || {}));
         const targetNetworks = Object.keys(inspect.NetworkSettings?.Networks || {});
         const sharesNetwork = targetNetworks.some(n => gwNetworks.has(n));
         if (sharesNetwork) {
-          await container.restart();
+          await withDockerTimeout(container.restart(), 'container.restart');
           restarted = true;
           console.log(`[smart-add] apply on ${name}: applied ${proposal.exporterName} into ${proposal.addedToPipelines.join(', ')}; container restarted`);
         } else {
@@ -574,10 +624,14 @@ function register(app, { docker }) {
         // behavior and restart immediately.
         console.warn(`[smart-add] apply on ${name}: shared-network check failed (${e.message}); restarting anyway`);
         try {
-          await container.restart();
+          await withDockerTimeout(container.restart(), 'container.restart');
           restarted = true;
         } catch { /* upstream catch will surface */ }
       }
+      // Mutating the collector population — bust the discovery cache so the
+      // next /api/discovery/collectors call sees the just-applied changes
+      // (e.g. updated networks once Step 3 bridges).
+      collectorsCache = { ts: 0, payload: null };
       res.json({
         success: true,
         configPath,
@@ -590,6 +644,7 @@ function register(app, { docker }) {
       });
     } catch (e) {
       console.error(`[smart-add] apply on ${name} failed:`, e);
+      if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to apply collector config', details: e.message });
     }
   });

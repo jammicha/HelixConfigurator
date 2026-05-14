@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { withDockerTimeout, sendDockerTimeoutResponse } = require('../util');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
@@ -114,11 +115,12 @@ function register(app, { docker }) {
   app.post('/api/lifecycle/start', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
     try {
-      await docker.getContainer(targetContainer).start();
+      await withDockerTimeout(docker.getContainer(targetContainer).start(), 'container.start');
       res.json({ message: `Container ${targetContainer} started successfully` });
     } catch (e) {
       // Already-running is a 304 from the API — treat as success.
       if (e.statusCode === 304) return res.json({ message: `Container ${targetContainer} already running` });
+      if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to start container', details: e.message });
     }
   });
@@ -127,10 +129,13 @@ function register(app, { docker }) {
   app.post('/api/lifecycle/stop', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
     try {
-      await docker.getContainer(targetContainer).stop();
+      // Stop can legitimately take longer than 15s if the container is mid-flush;
+      // give it 30s before declaring the daemon wedged.
+      await withDockerTimeout(docker.getContainer(targetContainer).stop(), 'container.stop', 30_000);
       res.json({ message: `Container ${targetContainer} stopped successfully` });
     } catch (e) {
       if (e.statusCode === 304) return res.json({ message: `Container ${targetContainer} already stopped` });
+      if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to stop container', details: e.message });
     }
   });
@@ -171,8 +176,9 @@ function register(app, { docker }) {
           : `APP_URL "${APP_URL}" is not a Docker container hostname — auto-bridge skipped.`;
       } else {
         let containers;
-        try { containers = await docker.listContainers(); }
+        try { containers = await withDockerTimeout(docker.listContainers(), 'docker.listContainers'); }
         catch (e) {
+          if (sendDockerTimeoutResponse(res, e)) return;
           return res.status(500).json({ error: 'Failed to list containers', details: e.message });
         }
         // Exact-match on container name (or one of its declared aliases) —
@@ -305,7 +311,7 @@ function register(app, { docker }) {
       return res.status(400).json({ error: 'Invalid container name' });
     }
     try {
-      const containers = await docker.listContainers();
+      const containers = await withDockerTimeout(docker.listContainers(), 'docker.listContainers');
       const isCollector = containers.some(c => {
         const cName = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
         if (cName !== name) return false;
@@ -316,12 +322,13 @@ function register(app, { docker }) {
       if (!isCollector) {
         return res.status(403).json({ error: `Container "${name}" is not a recognized OTel collector` });
       }
-      await docker.getContainer(name).restart();
+      await withDockerTimeout(docker.getContainer(name).restart(), 'container.restart');
       res.json({ message: `Restarted ${name}`, name });
     } catch (e) {
       if (e.statusCode === 404) {
         return res.status(404).json({ error: `Container "${name}" not found` });
       }
+      if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to restart container', details: e.message });
     }
   });
@@ -330,7 +337,10 @@ function register(app, { docker }) {
   app.get('/api/lifecycle/status', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
     try {
-      const data = await docker.getContainer(targetContainer).inspect();
+      // Status check is meant to be fast — a slow inspect points at a wedged
+      // daemon; surface that explicitly instead of letting the UI's status
+      // poll hang for two minutes.
+      const data = await withDockerTimeout(docker.getContainer(targetContainer).inspect(), 'container.inspect', 5_000);
       res.json({ status: (data.State && data.State.Status) || 'unknown' });
     } catch (e) {
       res.json({ status: 'error', error: e.message });

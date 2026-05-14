@@ -7,6 +7,17 @@ const crypto = require('crypto');
 const UI_AUTH_REQUIRED = !!process.env.UI_AUTH_PASSWORD;
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
+// Hash both sides to fixed-length digests, then timingSafeEqual. Hashing
+// equalizes length up-front (so wrong-length guesses take the same time as
+// right-length guesses) and timingSafeEqual makes the byte-compare itself
+// constant-time. Either alone is insufficient.
+const timingSafeStringEqual = (a, b) => {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const ha = crypto.createHash('sha256').update(a).digest();
+  const hb = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
+};
+
 // token → expiry epoch ms. Old impl was a Set without expiry, so a stale token
 // remained valid until process restart. This keeps the same casual-access model
 // (single shared password) but bounds session lifetime server-side.
@@ -72,7 +83,7 @@ const registerAuthRoutes = (app) => {
   app.post('/api/auth/login', (req, res) => {
     if (!UI_AUTH_REQUIRED) return res.json({ ok: true });
     const { password } = req.body || {};
-    if (typeof password !== 'string' || password !== process.env.UI_AUTH_PASSWORD) {
+    if (typeof password !== 'string' || !timingSafeStringEqual(password, process.env.UI_AUTH_PASSWORD)) {
       return res.status(401).json({ error: 'Invalid password' });
     }
     const token = crypto.randomUUID();

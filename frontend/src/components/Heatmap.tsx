@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export type HeatmapData = {
   timeStart: number;
@@ -25,6 +25,45 @@ type Props = {
   /** Shared crosshair: notify the page-level coordinator about local time-X hover. */
   onHoverTimeChange?: (ms: number | null) => void;
 };
+
+// Memoized cell grid. Re-renders only when the heatmap data, dimensions, or
+// fills change — not on hover state. With ~720 rects on a 60×12 chart this
+// is the difference between a smooth hover and a 50ms reflow per pointermove.
+type HeatmapCellsProps = {
+  nT: number;
+  nD: number;
+  cells: number[];
+  cellFills: string[];
+  cellW: number;
+  cellH: number;
+  padLeft: number;
+  padTop: number;
+  isInteractive: boolean;
+};
+const HeatmapCells = React.memo<HeatmapCellsProps>(({ nT, nD, cells, cellFills, cellW, cellH, padLeft, padTop, isInteractive }) => {
+  const w = Math.max(0, cellW - 0.5);
+  const h = Math.max(0, cellH - 0.5);
+  return (
+    <g>
+      {cells.map((count, idx) => {
+        const t = idx % nT;
+        const d = Math.floor(idx / nT);
+        return (
+          <rect
+            key={idx}
+            x={padLeft + t * cellW}
+            y={padTop + (nD - 1 - d) * cellH}
+            width={w}
+            height={h}
+            fill={cellFills[idx]}
+            className={isInteractive && count > 0 ? 'cursor-pointer' : ''}
+          />
+        );
+      })}
+    </g>
+  );
+});
+HeatmapCells.displayName = 'HeatmapCells';
 
 const formatTime = (ms: number) =>
   new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -64,12 +103,18 @@ export const Heatmap: React.FC<Props> = ({ data, height = 220, fillHigh = '#3759
   const cellW = nT > 0 ? innerW / nT : 0;
   const cellH = nD > 0 ? innerH / nD : 0;
 
-  const colorFor = (count: number) => {
-    if (count <= 0 || maxCount <= 0) return 'rgba(255,255,255,0.02)';
-    // Log-scale opacity so a few low cells aren't invisible against very busy peaks.
-    const t = Math.min(1, Math.log10(1 + count) / Math.log10(1 + maxCount));
-    return `${fillHigh}${Math.round(t * 0.92 * 255).toString(16).padStart(2, '0')}`;
-  };
+  // Precompute the fill color for every cell, keyed by the actual inputs
+  // (cells array, maxCount, fillHigh). Hover updates don't invalidate this
+  // memo, which is what lets the cell <g> below stay rerender-free on
+  // mousemove.
+  const cellFills = useMemo(() => {
+    const denom = maxCount > 0 ? Math.log10(1 + maxCount) : 0;
+    return cells.map(count => {
+      if (count <= 0 || denom <= 0) return 'rgba(255,255,255,0.02)';
+      const t = Math.min(1, Math.log10(1 + count) / denom);
+      return `${fillHigh}${Math.round(t * 0.92 * 255).toString(16).padStart(2, '0')}`;
+    });
+  }, [cells, maxCount, fillHigh]);
 
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!cellW || !cellH) return;
@@ -124,28 +169,35 @@ export const Heatmap: React.FC<Props> = ({ data, height = 220, fillHigh = '#3759
   return (
     <div ref={containerRef} className="relative w-full select-none">
       <svg width={width} height={height} className="block" onMouseMove={onMove} onMouseLeave={onLeave} onClick={handleClick}>
-        {/* Cells */}
-        {Array.from({ length: nT * nD }, (_, idx) => {
-          const t = idx % nT;
-          const d = Math.floor(idx / nT);
-          const count = cells[d * nT + t] || 0;
-          const x = padding.left + t * cellW;
-          const y = padding.top + (nD - 1 - d) * cellH; // flip so d=0 is bottom
-          const isHovered = hover && hover.t === t && hover.d === d;
-          return (
-            <rect
-              key={idx}
-              x={x}
-              y={y}
-              width={Math.max(0, cellW - 0.5)}
-              height={Math.max(0, cellH - 0.5)}
-              fill={colorFor(count)}
-              stroke={isHovered ? '#ffffff' : 'transparent'}
-              strokeOpacity={isHovered ? 0.4 : 0}
-              className={onCellClick && count > 0 ? 'cursor-pointer' : ''}
-            />
-          );
-        })}
+        {/* Cells — extracted to a memoized component so mousemove doesn't
+            re-render all nT*nD rects. The hover highlight is a separate
+            overlay rect below, also independent of the cell grid. */}
+        <HeatmapCells
+          nT={nT}
+          nD={nD}
+          cells={cells}
+          cellFills={cellFills}
+          cellW={cellW}
+          cellH={cellH}
+          padLeft={padding.left}
+          padTop={padding.top}
+          isInteractive={!!onCellClick}
+        />
+        {/* Hover highlight — single rect, replaces the per-cell stroke prop
+            that used to invalidate every cell on every mousemove. */}
+        {hover && cellW > 0 && cellH > 0 && (
+          <rect
+            x={padding.left + hover.t * cellW}
+            y={padding.top + (nD - 1 - hover.d) * cellH}
+            width={Math.max(0, cellW - 0.5)}
+            height={Math.max(0, cellH - 0.5)}
+            fill="none"
+            stroke="#ffffff"
+            strokeOpacity={0.4}
+            strokeWidth={1}
+            pointerEvents="none"
+          />
+        )}
         {/* Y axis labels */}
         {yTickIdxs.map(idx => (
           <text

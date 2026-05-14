@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink, Loader2 } from 'lucide-react';
+import { ExternalLink, Loader2, Send, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { buildHelixBusinessServiceUrl } from './otel-data/utils';
 import { StatCard } from './StatCard';
 import { TopList } from './TopList';
@@ -130,6 +130,28 @@ export const OverviewTab: React.FC<Props> = ({
   // the same time-X. State is lifted here so the volume chart and heatmap
   // can sync without prop-drilling further.
   const [hoveredTimeMs, setHoveredTimeMs] = useState<number | null>(null);
+  // Local state for the empty-state "Send a test trace" CTA. Doesn't need
+  // to bubble up — the SSE feed will re-render OverviewTab once the
+  // synthetic span lands.
+  const [testTraceStatus, setTestTraceStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [testTraceError, setTestTraceError] = useState<string>('');
+  const sendTestTrace = async () => {
+    if (testTraceStatus === 'sending') return;
+    setTestTraceStatus('sending');
+    setTestTraceError('');
+    try {
+      const res = await fetch('/api/diagnostics/inject-trace', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setTestTraceStatus('sent');
+      setTimeout(() => setTestTraceStatus('idle'), 4000);
+    } catch (e: any) {
+      setTestTraceError(e?.message || 'Failed to send test trace');
+      setTestTraceStatus('error');
+    }
+  };
   if (loading && !data) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400">
@@ -141,6 +163,47 @@ export const OverviewTab: React.FC<Props> = ({
     return (
       <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
         No overview data available yet.
+      </div>
+    );
+  }
+  // Empty-but-not-loading state: the window resolved with zero traces.
+  // Distinguish this from the loading spinner so the user has clear next
+  // steps (send a synthetic trace to verify the pipeline, or go back to
+  // the dashboard to check the gateway) instead of a flat "no data" line.
+  if (data.stats.totalTraces.value === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center px-6">
+        <div className="max-w-md text-center space-y-4">
+          <h3 className="text-base font-semibold text-gray-200">No traces in this window</h3>
+          <p className="text-sm text-gray-400">
+            The gateway isn't receiving traces for the selected time range. Send a synthetic trace to verify
+            the pipeline end-to-end, or check the gateway's health on the dashboard.
+          </p>
+          <div className="flex items-center justify-center gap-3 flex-wrap">
+            <button
+              onClick={sendTestTrace}
+              disabled={testTraceStatus === 'sending'}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm bg-primary hover:bg-primary-hover text-white disabled:opacity-60"
+            >
+              {testTraceStatus === 'sending'
+                ? (<><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>)
+                : testTraceStatus === 'sent'
+                ? (<><CheckCircle2 className="w-4 h-4" /> Sent — refreshing shortly</>)
+                : (<><Send className="w-4 h-4" /> Send a test trace</>)}
+            </button>
+            <a
+              href="/"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
+            >
+              Check gateway →
+            </a>
+          </div>
+          {testTraceStatus === 'error' && (
+            <p className="text-tiny text-danger inline-flex items-center gap-1 justify-center">
+              <AlertTriangle className="w-3.5 h-3.5" /> {testTraceError}
+            </p>
+          )}
+        </div>
       </div>
     );
   }
