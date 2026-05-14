@@ -82,6 +82,26 @@ const checkExporterFailing = async (targetContainer) => {
   return { failing: c.failed > 0 && c.sent === 0, ...c };
 };
 
+// Read the otlphttp/bmchelix exporter's sending-queue size from the gateway's
+// Prometheus metrics. A non-zero value during the verify wait means Helix is
+// accepting connections but the gateway hasn't drained the queue yet — usually
+// "Helix is slow" rather than "your config is broken." Returns null when the
+// metric isn't exposed (older otelcol versions or scrape failed).
+const fetchHelixQueueSize = async (targetContainer) => {
+  try {
+    const url = `http://${targetContainer}:8888/metrics`;
+    const response = await axios.get(url, { timeout: 2000 });
+    for (const line of response.data.split('\n')) {
+      if (!line.startsWith('otelcol_exporter_queue_size')) continue;
+      if (!line.includes('exporter="otlphttp/bmchelix"')) continue;
+      const parts = line.trim().split(/\s+/);
+      const val = parseFloat(parts[parts.length - 1]);
+      if (!isNaN(val)) return val;
+    }
+  } catch { /* metrics scrape failed — treat as unknown */ }
+  return null;
+};
+
 function register(app, { docker, containerLogs, configPath }) {
   // Strip debug logs from the collector YAML and restart. Used as both the
   // 5-minute failsafe (so a forgotten debug session doesn't pin the gateway)
@@ -243,9 +263,12 @@ function register(app, { docker, containerLogs, configPath }) {
       });
     }
 
-    // Poll the sent/failed counters for up to 5s. We're looking for a delta —
+    // Poll the sent/failed counters for up to 15s. We're looking for a delta —
     // either the trace exported (sent went up) or it was rejected (failed went up).
-    const deadline = Date.now() + 5000;
+    // Previously this was 5s, which routinely false-failed when Helix took
+    // a beat to ack or when the gateway's 1s batch processor hadn't flushed.
+    const deadline = Date.now() + 15000;
+    let lastQueueSize = null;
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 500));
       try {
@@ -267,12 +290,38 @@ function register(app, { docker, containerLogs, configPath }) {
             remediation: 'The gateway forwarded the trace but Helix rejected it. Verify HELIX_API_KEY and that the tenant is reachable.',
           });
         }
+        // Track the sending_queue size on the bmchelix exporter so the timeout
+        // verdict can call out "queue is backed up" vs "Helix is silent".
+        const q = await fetchHelixQueueSize(targetContainer);
+        if (q != null) lastQueueSize = q;
       } catch { /* metrics blip — keep polling */ }
     }
 
+    // Timeout path. Disambiguate based on what we saw during the wait:
+    //   queue > 0  → trace is sitting in the exporter's queue, Helix is slow
+    //                or unreachable but the gateway is doing its job
+    //   queue == 0 → the gateway drained but Helix never acknowledged a
+    //                success, possibly silent drop or backend-side filter
+    //   queue == null → metric not exposed; fall through to the old message
+    if (lastQueueSize != null && lastQueueSize > 0) {
+      return res.json({
+        status: 'pending',
+        queueSize: lastQueueSize,
+        message: `Trace is queued at the exporter (${lastQueueSize} item${lastQueueSize === 1 ? '' : 's'} pending) — Helix hasn't acknowledged yet`,
+        remediation: 'Helix is slow to accept or briefly unreachable. The gateway will keep retrying; watch the Sent counter for the next minute.',
+      });
+    }
+    if (lastQueueSize === 0) {
+      return res.json({
+        status: 'pending',
+        queueSize: 0,
+        message: 'Gateway drained the queue but Helix returned no acknowledgement within 15s',
+        remediation: 'The trace left the gateway but no success counter moved. Verify the tenant is configured to accept your X-Source, and that HELIX_API_KEY has the right role.',
+      });
+    }
     res.json({
       status: 'pending',
-      message: 'Trace accepted by gateway but no exporter delta within 5s — Helix may be slow or the exporter is queued',
+      message: 'Trace accepted by gateway but no exporter delta within 15s',
       remediation: 'Open Diagnostic Health Check and watch the Sent/Dropped counters for the next minute.',
     });
   });
