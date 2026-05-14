@@ -135,133 +135,117 @@ function register(app, { docker }) {
     }
   });
 
-  // POST bridge sidecar to target application network.
+  // POST bridge sidecar to target application network, AND recreate the
+  // gateway so any updated .env values (saved by the preceding POST /api/env)
+  // also load. This endpoint is the single "apply Step 1 changes" hook, so
+  // the recreate happens regardless of whether APP_URL is set or resolvable.
+  // Skipping the recreate when bridging was skipped would silently lose the
+  // env update.
   app.post('/api/lifecycle/bridge', async (req, res) => {
     const { APP_URL } = req.body;
     const sidecarName = TARGET_CONTAINER();
 
-    // APP_URL is optional. If the user didn't provide one, ensure the bridge
-    // network exists but skip the auto-attach — they can use Discovered Services
-    // to attach a container manually later.
-    if (!APP_URL || !APP_URL.trim()) {
-      try {
-        await docker.createNetwork({ Name: 'helix-bridge' });
-      } catch (e) { if (e.statusCode !== 409) console.warn('Network create warning:', e.message); }
-      return res.json({ skipped: true, reason: 'No APP_URL provided — attach a container manually from Discovered Services.' });
-    }
-
-    // Ensure the shared network exists (idempotent).
+    // Ensure the helix-bridge network exists (idempotent) so manual attach
+    // from Discovered Services has somewhere to land.
     try {
       await docker.createNetwork({ Name: 'helix-bridge' });
     } catch (e) {
-      // 409 means it already exists — fine.
-      if (e.statusCode !== 409) {
-        // Other errors: log but don't fail; the network may already be in use.
-        console.warn('Network create warning:', e.message);
-      }
+      if (e.statusCode !== 409) console.warn('Network create warning:', e.message);
     }
 
-    // Derive target hostname from APP_URL. localhost / 127.0.0.1 / IPs can't be
-    // resolved to a container, so treat them as "skipped" rather than failed —
-    // the user keeps APP_URL for the dashboard deep-link, and uses the Step 2
-    // network controls to attach helix-gateway instead.
-    let parsedHost = '';
-    try { parsedHost = new URL(APP_URL).hostname || ''; } catch { /* ignore */ }
-    const looksLikeIp = /^[\d.]+$/.test(parsedHost);
-    const isLoopback = parsedHost === 'localhost' || parsedHost === '127.0.0.1' || parsedHost === '::1';
-    if (!parsedHost || isLoopback || looksLikeIp) {
-      return res.json({
-        skipped: true,
-        reason: isLoopback
+    // Decide whether APP_URL gives us an auto-bridge target. Null = skip the
+    // attach but still recreate.
+    let pickedNetwork = null;
+    let targetName = null;
+    let candidateNames = null;
+    let skipReason = null;
+    if (APP_URL && APP_URL.trim()) {
+      let parsedHost = '';
+      try { parsedHost = new URL(APP_URL).hostname || ''; } catch { /* ignore */ }
+      const looksLikeIp = /^[\d.]+$/.test(parsedHost);
+      const isLoopback = parsedHost === 'localhost' || parsedHost === '127.0.0.1' || parsedHost === '::1';
+      const targetHost = parsedHost && /^[a-zA-Z0-9.-]+$/.test(parsedHost) ? parsedHost : '';
+      if (!parsedHost || isLoopback || looksLikeIp || !targetHost) {
+        skipReason = isLoopback
           ? `APP_URL "${APP_URL}" points at the host (not a Docker container) — auto-bridge can't infer a network from it.`
-          : `APP_URL "${APP_URL}" is not a Docker container hostname — auto-bridge skipped.`,
-      });
-    }
-    const targetHost = /^[a-zA-Z0-9.-]+$/.test(parsedHost) ? parsedHost : '';
-
-    // Find a container whose name matches the target hostname.
-    let containers;
-    try {
-      containers = await docker.listContainers();
-    } catch (e) {
-      return res.status(500).json({ error: 'Failed to list containers', details: e.message });
-    }
-
-    // Exact-match on container name (or one of its declared aliases). The
-    // previous substring test made `APP_URL=http://shop` resolve to whichever
-    // of `online-shop`, `shop-frontend`, or `shop` happened to come back
-    // first from listContainers — non-deterministic, occasionally wrong.
-    const target = targetHost
-      ? containers.find(c => {
+          : `APP_URL "${APP_URL}" is not a Docker container hostname — auto-bridge skipped.`;
+      } else {
+        let containers;
+        try { containers = await docker.listContainers(); }
+        catch (e) {
+          return res.status(500).json({ error: 'Failed to list containers', details: e.message });
+        }
+        // Exact-match on container name (or one of its declared aliases) —
+        // see commit 4b4787a for why substring matching is a bug.
+        const target = containers.find(c => {
           const names = (c.Names || []).map(n => n.replace(/^\//, ''));
           return names.includes(targetHost);
-        })
-      : null;
+        });
+        if (!target) {
+          return res.status(404).json({ error: `No running container matches hostname "${targetHost}"` });
+        }
+        targetName = (target.Names || []).map(n => n.replace(/^\//, ''))[0] || '';
+        const SYSTEM_NETWORKS = new Set(['host', 'none', 'ingress', 'helix-bridge']);
+        const targetNetworks = Object.keys((target.NetworkSettings && target.NetworkSettings.Networks) || {});
+        const candidates = targetNetworks.filter(n => !SYSTEM_NETWORKS.has(n));
+        if (candidates.length === 0) {
+          return res.status(500).json({
+            error: 'Target container has no user network to bridge to',
+            details: `Available: ${targetNetworks.join(', ') || '(none)'}`,
+          });
+        }
+        // Prefer driver=bridge, then longer name (more specific over default).
+        const inspected = await Promise.all(candidates.map(async name => {
+          try {
+            const info = await docker.getNetwork(name).inspect();
+            return { name, driver: info.Driver || '' };
+          } catch { return { name, driver: '' }; }
+        }));
+        inspected.sort((a, b) => {
+          if (a.driver === 'bridge' && b.driver !== 'bridge') return -1;
+          if (b.driver === 'bridge' && a.driver !== 'bridge') return 1;
+          return b.name.length - a.name.length;
+        });
+        pickedNetwork = inspected[0].name;
+        candidateNames = inspected.map(i => i.name);
 
-    if (!target) {
-      return res.status(404).json({ error: `No running container matches hostname "${targetHost}"` });
-    }
-    const targetName = (target.Names && target.Names[0] && target.Names[0].replace(/^\//, '')) || '';
-
-    // Pick the most specific user network. Object.keys is non-deterministic across
-    // Docker daemon versions, so explicitly skip system networks and prefer a
-    // user-defined bridge (which is what compose creates).
-    const targetNetworks = Object.keys((target.NetworkSettings && target.NetworkSettings.Networks) || {});
-    const SYSTEM_NETWORKS = new Set(['host', 'none', 'ingress', 'helix-bridge']);
-    const candidates = targetNetworks.filter(n => !SYSTEM_NETWORKS.has(n));
-    if (candidates.length === 0) {
-      return res.status(500).json({
-        error: 'Target container has no user network to bridge to',
-        details: `Available: ${targetNetworks.join(', ') || '(none)'}`,
-      });
-    }
-
-    // Inspect each candidate; prefer driver=bridge, then by name length (more
-    // specific wins over a generic "default" network).
-    const inspected = await Promise.all(candidates.map(async name => {
-      try {
-        const info = await docker.getNetwork(name).inspect();
-        return { name, driver: info.Driver || '' };
-      } catch { return { name, driver: '' }; }
-    }));
-    inspected.sort((a, b) => {
-      if (a.driver === 'bridge' && b.driver !== 'bridge') return -1;
-      if (b.driver === 'bridge' && a.driver !== 'bridge') return 1;
-      return b.name.length - a.name.length;
-    });
-    const picked = inspected[0].name;
-
-    // Attach (idempotent), then recreate so the OTLP listener binds with the
-    // new interface visible. See recreateGateway for the late-attachment
-    // rationale; a plain `docker network connect` on a running container
-    // adds the interface but existing sockets don't accept on it.
-    let alreadyAttached = false;
-    try {
-      await docker.getNetwork(picked).connect({ Container: sidecarName });
-    } catch (e) {
-      if (e.statusCode === 403 || /already exists/i.test(e.message || '')) {
-        alreadyAttached = true;
-      } else {
-        return res.status(500).json({ error: 'Failed to bridge networks', details: e.message });
+        // Idempotent attach. 403 = already attached, fine.
+        try {
+          await docker.getNetwork(pickedNetwork).connect({ Container: sidecarName });
+        } catch (e) {
+          if (e.statusCode !== 403 && !/already exists/i.test(e.message || '')) {
+            return res.status(500).json({ error: 'Failed to bridge networks', details: e.message });
+          }
+        }
       }
+    } else {
+      skipReason = 'No APP_URL provided — attach a container manually from Discovered Services.';
     }
+
+    // Single recreate covers both: fresh .env values load, and the just-
+    // attached network is present from t=0 so the OTLP listener accepts on
+    // it. Previously the wizard called /api/lifecycle/restart THEN /api/
+    // lifecycle/bridge, which did two recreates back-to-back (~10s of
+    // unnecessary downtime). The frontend now calls only this endpoint.
     try {
-      await recreateGateway(docker, sidecarName, { addNetwork: picked });
+      await recreateGateway(docker, sidecarName, pickedNetwork ? { addNetwork: pickedNetwork } : undefined);
     } catch (e) {
       return res.status(500).json({
-        error: 'Network attached but gateway recreate failed — telemetry may not flow until restart',
+        error: 'Gateway recreate failed — env changes and bridge attach may not have taken effect',
         details: e.message,
-        network: picked,
+        network: pickedNetwork || undefined,
       });
     }
-    res.json({
-      message: alreadyAttached
-        ? `${sidecarName} already attached to ${picked} (rebuilt to refresh listener)`
-        : `Successfully bridged ${sidecarName} to network: ${picked}`,
-      network: picked,
-      candidates: inspected.map(i => i.name),
-      targetContainer: targetName,
-    });
+
+    if (pickedNetwork) {
+      return res.json({
+        message: `Successfully bridged ${sidecarName} to network: ${pickedNetwork}`,
+        network: pickedNetwork,
+        candidates: candidateNames,
+        targetContainer: targetName,
+      });
+    }
+    res.json({ skipped: true, reason: skipReason });
   });
 
   // POST attach the sidecar to an arbitrary Docker network by name. Used by

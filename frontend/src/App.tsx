@@ -861,21 +861,22 @@ const App = () => {
       });
       if (!envRes.ok) throw new Error('Failed to save settings');
 
-      // Bounce sidecar
-      const restartRes = await fetch('/api/lifecycle/restart', { method: 'POST' });
-      if (!restartRes.ok) throw new Error('Failed to restart sidecar');
-
-      // Poll until the gateway reports running. Slow hosts used to false-fail
-      // the network diagnostic on a blind 3s sleep.
-      const ready = await waitForGatewayRunning(15000);
-      if (!ready) throw new Error('Gateway did not reach running state within 15s');
-
-      // Bridge network to target app
+      // Apply: /api/lifecycle/bridge attaches the gateway to APP_URL's network
+      // (when resolvable) AND recreates the gateway, which picks up the
+      // .env values we just persisted. Previously this was two separate
+      // calls (/api/lifecycle/restart THEN /api/lifecycle/bridge) — each
+      // recreated the gateway, doubling the apply time. The bridge endpoint
+      // now always recreates whether or not auto-bridge actually attached.
       const bridgeRes = await fetch('/api/lifecycle/bridge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ APP_URL: envVars.APP_URL })
       });
+
+      // Poll until the gateway reports running. Slow hosts used to false-fail
+      // the network diagnostic on a blind 3s sleep.
+      const ready = await waitForGatewayRunning(15000);
+      if (!ready) throw new Error('Gateway did not reach running state within 15s');
       let bridgedTarget = '';
       const bridgeData = await bridgeRes.json().catch(() => ({}));
       if (bridgeRes.ok) {
