@@ -187,10 +187,14 @@ function register(app, { docker }) {
       return res.status(500).json({ error: 'Failed to list containers', details: e.message });
     }
 
+    // Exact-match on container name (or one of its declared aliases). The
+    // previous substring test made `APP_URL=http://shop` resolve to whichever
+    // of `online-shop`, `shop-frontend`, or `shop` happened to come back
+    // first from listContainers — non-deterministic, occasionally wrong.
     const target = targetHost
       ? containers.find(c => {
-          const name = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
-          return name.includes(targetHost);
+          const names = (c.Names || []).map(n => n.replace(/^\//, ''));
+          return names.includes(targetHost);
         })
       : null;
 
