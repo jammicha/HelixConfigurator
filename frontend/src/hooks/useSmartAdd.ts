@@ -15,6 +15,12 @@ export type SmartAddProposal = {
 
 export type SmartAddResult = { ok: boolean; message: string };
 
+// When smart-add detects the gateway isn't yet on a network the target
+// collector shares, the backend skips the post-apply restart and surfaces
+// the container name here so the wizard can trigger the restart later
+// (after Step 3's bridge attaches the gateway to a reachable network).
+export type PendingCollectorRestart = { containerName: string } | null;
+
 type DetectedCollector = { name: string };
 
 type Args = {
@@ -34,6 +40,8 @@ export type UseSmartAdd = {
   apply: (collectorName: string) => Promise<void>;
   dismissResult: () => void;
   refresh: (collectorName: string) => Promise<void>;
+  pendingRestart: PendingCollectorRestart;
+  clearPendingRestart: () => void;
 };
 
 export function useSmartAdd({
@@ -47,6 +55,7 @@ export function useSmartAdd({
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<SmartAddResult | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [pendingRestart, setPendingRestart] = useState<PendingCollectorRestart>(null);
 
   const refreshProposal = async (collectorName: string) => {
     setLoading(true);
@@ -97,6 +106,15 @@ export function useSmartAdd({
       }
       if (data.alreadyConfigured) {
         setResult({ ok: true, message: `Already configured — ${data.existingExporterName} already points at helix-gateway:4318. No changes needed.` });
+      } else if (data.restartDeferred && data.containerName) {
+        // Backend skipped the restart because the gateway isn't on this
+        // collector's network yet. Stash the container name so the wizard
+        // can trigger the restart after Step 3's bridge succeeds.
+        setPendingRestart({ containerName: data.containerName });
+        setResult({
+          ok: true,
+          message: `Applied. ${data.exporterName} added to ${(data.addedToPipelines || []).join(', ') || '(no pipelines)'} on ${collectorName}. Restart deferred until Step 3 attaches the gateway to this collector's network.`,
+        });
       } else {
         setResult({
           ok: true,
@@ -137,5 +155,11 @@ export function useSmartAdd({
     await refreshProposal(collectorName);
   };
 
-  return { proposal, loading, applying, result, previewOpen, setPreviewOpen, apply, dismissResult, refresh };
+  const clearPendingRestart = () => setPendingRestart(null);
+
+  return {
+    proposal, loading, applying, result, previewOpen, setPreviewOpen,
+    apply, dismissResult, refresh,
+    pendingRestart, clearPendingRestart,
+  };
 }

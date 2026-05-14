@@ -938,7 +938,25 @@ const App = () => {
       });
       const data = await res.json().catch(() => ({}));
       setAttachResult({ network, ok: res.ok, message: data.message || data.error || 'Done' });
-      if (res.ok) refreshDetectedCollectors();
+      if (res.ok) {
+        refreshDetectedCollectors();
+        // If smart-add deferred a customer-collector restart (because the
+        // gateway wasn't yet on a network this collector could reach), the
+        // gateway is now on that network — finish the apply by restarting
+        // the collector so it picks up the new helix_sidecar exporter with
+        // a fresh DNS resolve.
+        const pending = smartAdd.pendingRestart;
+        if (pending) {
+          try {
+            await fetch('/api/lifecycle/restart-container', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: pending.containerName }),
+            });
+          } catch { /* non-fatal — the next bridge-network or manual restart will catch up */ }
+          smartAdd.clearPendingRestart();
+        }
+      }
     } catch (e: any) {
       setAttachResult({ network, ok: false, message: e.message || 'Request failed' });
     } finally {

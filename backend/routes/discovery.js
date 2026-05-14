@@ -547,14 +547,46 @@ function register(app, { docker }) {
         await writeFileToContainer(container, backupPath, configText);
         await writeFileToContainer(container, configPath, proposal.proposedYaml);
       }
-      await container.restart();
-      console.log(`[smart-add] apply on ${name}: applied ${proposal.exporterName} into ${proposal.addedToPipelines.join(', ')}; container restarted`);
+      // Defer the restart when the gateway isn't yet on a network this
+      // collector can reach. Restarting now would boot the collector with
+      // the new helix_sidecar exporter, fail DNS for helix-gateway, and
+      // Go's resolver would negative-cache that failure for 5–30s — the
+      // tester then completes Step 3, attaches the gateway to the network,
+      // but the collector keeps trying with stale DNS until the cache
+      // entry expires. The frontend triggers the restart via /api/
+      // lifecycle/restart-container right after Step 3's bridge succeeds.
+      const gwName = process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
+      let restarted = false;
+      try {
+        const gwInspect = await docker.getContainer(gwName).inspect();
+        const gwNetworks = new Set(Object.keys(gwInspect.NetworkSettings?.Networks || {}));
+        const targetNetworks = Object.keys(inspect.NetworkSettings?.Networks || {});
+        const sharesNetwork = targetNetworks.some(n => gwNetworks.has(n));
+        if (sharesNetwork) {
+          await container.restart();
+          restarted = true;
+          console.log(`[smart-add] apply on ${name}: applied ${proposal.exporterName} into ${proposal.addedToPipelines.join(', ')}; container restarted`);
+        } else {
+          console.log(`[smart-add] apply on ${name}: applied ${proposal.exporterName} into ${proposal.addedToPipelines.join(', ')}; restart deferred (no shared network with ${gwName})`);
+        }
+      } catch (e) {
+        // Couldn't determine whether networks overlap — fall back to today's
+        // behavior and restart immediately.
+        console.warn(`[smart-add] apply on ${name}: shared-network check failed (${e.message}); restarting anyway`);
+        try {
+          await container.restart();
+          restarted = true;
+        } catch { /* upstream catch will surface */ }
+      }
       res.json({
         success: true,
         configPath,
         backupPath,
         exporterName: proposal.exporterName,
         addedToPipelines: proposal.addedToPipelines,
+        containerName: name,
+        restarted,
+        restartDeferred: !restarted,
       });
     } catch (e) {
       console.error(`[smart-add] apply on ${name} failed:`, e);
