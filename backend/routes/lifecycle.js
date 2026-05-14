@@ -7,10 +7,102 @@
 
 const fs = require('fs');
 const path = require('path');
-const { withDockerTimeout, sendDockerTimeoutResponse } = require('../util');
+const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers } = require('../util');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
+
+// Persistent record of "networks the gateway should be attached to." Every
+// `docker network connect` issued by the bridge routes also lands here. On
+// configurator boot, we read this list and re-attach helix-gateway to any
+// missing entries, so a `docker compose down && up` cycle (or a configurator
+// restart) doesn't silently drop the gateway from the customer's network and
+// leave the wizard in a half-bridged state.
+//
+// File lives in the same data/ volume as the OTel store so it survives
+// container restarts. Single-writer assumption: only this process mutates it.
+const BRIDGED_NETWORKS_PATH = (() => {
+  // Mirror the OTEL_DB_PATH logic from index.js so the file lands in the same
+  // volume both inside and outside the container.
+  if (fs.existsSync('/app')) return '/app/data/bridged-networks.json';
+  return path.join(__dirname, '..', 'data', 'bridged-networks.json');
+})();
+
+const loadBridgedNetworks = () => {
+  try {
+    const raw = fs.readFileSync(BRIDGED_NETWORKS_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.networks)) return [];
+    return parsed.networks.filter(n => typeof n === 'string' && /^[a-zA-Z0-9_.-]+$/.test(n));
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.warn('bridged-networks: read failed:', e.message);
+    return [];
+  }
+};
+
+const saveBridgedNetworks = (networks) => {
+  try {
+    fs.mkdirSync(path.dirname(BRIDGED_NETWORKS_PATH), { recursive: true });
+    const payload = {
+      networks: Array.from(new Set(networks)).filter(Boolean).sort(),
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(BRIDGED_NETWORKS_PATH, JSON.stringify(payload, null, 2));
+  } catch (e) {
+    // Persistence is best-effort — a failure here means the auto-reattach
+    // won't fire next boot, but the in-process bridge succeeded so we don't
+    // surface this to the user.
+    console.warn('bridged-networks: write failed:', e.message);
+  }
+};
+
+const rememberBridgedNetwork = (network) => {
+  if (!network) return;
+  const current = loadBridgedNetworks();
+  if (current.includes(network)) return;
+  saveBridgedNetworks([...current, network]);
+};
+
+const forgetBridgedNetwork = (network) => {
+  const current = loadBridgedNetworks();
+  if (!current.includes(network)) return;
+  saveBridgedNetworks(current.filter(n => n !== network));
+};
+
+// Run once at startup. For each persisted network, ensure helix-gateway is
+// attached. Network gone (404) → drop from the list and move on. Other
+// failures → log and leave the entry so the next boot can retry.
+const reconcileBridgedNetworks = async (docker) => {
+  const wanted = loadBridgedNetworks();
+  if (wanted.length === 0) return;
+  const sidecar = TARGET_CONTAINER();
+  let attached;
+  try {
+    const inspect = await withDockerTimeout(docker.getContainer(sidecar).inspect(), 'container.inspect', 5_000);
+    attached = new Set(Object.keys(inspect.NetworkSettings?.Networks || {}));
+  } catch (e) {
+    // Sidecar isn't running yet (compose up still spinning, or user paused
+    // the gateway). Reconcile is opportunistic — try again next boot.
+    console.log(`bridged-networks: skipping reconcile (gateway not inspectable: ${e.message})`);
+    return;
+  }
+  let dropped = [];
+  for (const net of wanted) {
+    if (attached.has(net)) continue;
+    try {
+      await withDockerTimeout(docker.getNetwork(net).connect({ Container: sidecar }), 'network.connect', 5_000);
+      console.log(`bridged-networks: re-attached ${sidecar} to ${net}`);
+    } catch (e) {
+      if (e.statusCode === 404) {
+        console.log(`bridged-networks: dropping ${net} (network no longer exists)`);
+        dropped.push(net);
+      } else if (e.statusCode !== 403 && !/already exists/i.test(e.message || '')) {
+        console.warn(`bridged-networks: failed to re-attach ${net}: ${e.message}`);
+      }
+    }
+  }
+  if (dropped.length) saveBridgedNetworks(wanted.filter(n => !dropped.includes(n)));
+};
 
 // Read .env into a KEY=VALUE array suitable for createContainer's Env. Skips
 // blank lines and # comments. Tolerant of `KEY=value=with=equals` (splits on
@@ -187,40 +279,49 @@ function register(app, { docker }) {
           const names = (c.Names || []).map(n => n.replace(/^\//, ''));
           return names.includes(targetHost);
         });
-        if (!target) {
+        if (!target && targetHost.includes('.')) {
+          // Hostname with dots, no local match — almost always a public URL
+          // for an off-host app (my-app.example.com), not a typo of a
+          // container name. Auto-bridge fundamentally can't help with that:
+          // helix-gateway is local, the app is remote, they reach each other
+          // over the network, not via a Docker network. Skip cleanly with a
+          // specific reason instead of returning a confusing 404.
+          skipReason = `APP_URL "${APP_URL}" points off-host — no container named "${targetHost}" runs here. Auto-bridge only applies when the app runs on this Docker host. For a remote app, expose helix-gateway's :4318 to the network the app can reach instead.`;
+        } else if (!target) {
           return res.status(404).json({ error: `No running container matches hostname "${targetHost}"` });
-        }
-        targetName = (target.Names || []).map(n => n.replace(/^\//, ''))[0] || '';
-        const SYSTEM_NETWORKS = new Set(['host', 'none', 'ingress', 'helix-bridge']);
-        const targetNetworks = Object.keys((target.NetworkSettings && target.NetworkSettings.Networks) || {});
-        const candidates = targetNetworks.filter(n => !SYSTEM_NETWORKS.has(n));
-        if (candidates.length === 0) {
-          return res.status(500).json({
-            error: 'Target container has no user network to bridge to',
-            details: `Available: ${targetNetworks.join(', ') || '(none)'}`,
+        } else {
+          targetName = (target.Names || []).map(n => n.replace(/^\//, ''))[0] || '';
+          const SYSTEM_NETWORKS = new Set(['host', 'none', 'ingress', 'helix-bridge']);
+          const targetNetworks = Object.keys((target.NetworkSettings && target.NetworkSettings.Networks) || {});
+          const candidates = targetNetworks.filter(n => !SYSTEM_NETWORKS.has(n));
+          if (candidates.length === 0) {
+            return res.status(500).json({
+              error: 'Target container has no user network to bridge to',
+              details: `Available: ${targetNetworks.join(', ') || '(none)'}`,
+            });
+          }
+          // Prefer driver=bridge, then longer name (more specific over default).
+          const inspected = await Promise.all(candidates.map(async name => {
+            try {
+              const info = await docker.getNetwork(name).inspect();
+              return { name, driver: info.Driver || '' };
+            } catch { return { name, driver: '' }; }
+          }));
+          inspected.sort((a, b) => {
+            if (a.driver === 'bridge' && b.driver !== 'bridge') return -1;
+            if (b.driver === 'bridge' && a.driver !== 'bridge') return 1;
+            return b.name.length - a.name.length;
           });
-        }
-        // Prefer driver=bridge, then longer name (more specific over default).
-        const inspected = await Promise.all(candidates.map(async name => {
-          try {
-            const info = await docker.getNetwork(name).inspect();
-            return { name, driver: info.Driver || '' };
-          } catch { return { name, driver: '' }; }
-        }));
-        inspected.sort((a, b) => {
-          if (a.driver === 'bridge' && b.driver !== 'bridge') return -1;
-          if (b.driver === 'bridge' && a.driver !== 'bridge') return 1;
-          return b.name.length - a.name.length;
-        });
-        pickedNetwork = inspected[0].name;
-        candidateNames = inspected.map(i => i.name);
+          pickedNetwork = inspected[0].name;
+          candidateNames = inspected.map(i => i.name);
 
-        // Idempotent attach. 403 = already attached, fine.
-        try {
-          await docker.getNetwork(pickedNetwork).connect({ Container: sidecarName });
-        } catch (e) {
-          if (e.statusCode !== 403 && !/already exists/i.test(e.message || '')) {
-            return res.status(500).json({ error: 'Failed to bridge networks', details: e.message });
+          // Idempotent attach. 403 = already attached, fine.
+          try {
+            await docker.getNetwork(pickedNetwork).connect({ Container: sidecarName });
+          } catch (e) {
+            if (e.statusCode !== 403 && !/already exists/i.test(e.message || '')) {
+              return res.status(500).json({ error: 'Failed to bridge networks', details: e.message });
+            }
           }
         }
       }
@@ -244,6 +345,11 @@ function register(app, { docker }) {
     }
 
     if (pickedNetwork) {
+      // Remember so the next configurator boot re-attaches the gateway
+      // automatically if `compose down && up` (or a manual recreate)
+      // disconnects it. The file is best-effort — failures don't roll back
+      // the in-process bridge.
+      rememberBridgedNetwork(pickedNetwork);
       return res.json({
         message: `Successfully bridged ${sidecarName} to network: ${pickedNetwork}`,
         network: pickedNetwork,
@@ -292,6 +398,7 @@ function register(app, { docker }) {
         network,
       });
     }
+    rememberBridgedNetwork(network);
     res.json({
       message: alreadyAttached
         ? `${sidecarName} already attached to ${network} (rebuilt to refresh listener)`
@@ -312,13 +419,12 @@ function register(app, { docker }) {
     }
     try {
       const containers = await withDockerTimeout(docker.listContainers(), 'docker.listContainers');
-      const isCollector = containers.some(c => {
-        const cName = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
-        if (cName !== name) return false;
-        const image = c.Image || '';
-        const command = c.Command || '';
-        return /opentelemetry-collector/i.test(image) || /otelcol/i.test(image) || /otelcol/i.test(command);
-      });
+      // Same detector the listing endpoint uses, so a container the UI shows
+      // as a candidate is the same one this route will restart. Without the
+      // shared helper this previously matched only on image regex and missed
+      // vendor-distro collectors that exposed 4317/4318.
+      const sidecarName = TARGET_CONTAINER();
+      const isCollector = detectCollectorContainers(containers, { sidecarName }).some(d => d.name === name);
       if (!isCollector) {
         return res.status(403).json({ error: `Container "${name}" is not a recognized OTel collector` });
       }
@@ -333,6 +439,29 @@ function register(app, { docker }) {
     }
   });
 
+  // GET the persisted list of networks the gateway is supposed to be bridged
+  // to. Surfaced for the dashboard so the user can see what survives a
+  // compose recreate, and to debug a stale entry.
+  app.get('/api/lifecycle/bridged-networks', (req, res) => {
+    res.json({ networks: loadBridgedNetworks() });
+  });
+
+  // DELETE a stale entry. Doesn't disconnect the gateway from the network
+  // now — just stops the next reconcile from re-attaching it. Useful when a
+  // customer renames or removes a compose network and the configurator's
+  // persisted memory of it is what's wrong.
+  app.delete('/api/lifecycle/bridged-networks/:network', (req, res) => {
+    const network = req.params.network;
+    if (!network || !/^[a-zA-Z0-9_.-]+$/.test(network)) {
+      return res.status(400).json({ error: 'Invalid network name' });
+    }
+    if (!loadBridgedNetworks().includes(network)) {
+      return res.status(404).json({ error: `Network "${network}" was not in the persisted list` });
+    }
+    forgetBridgedNetwork(network);
+    res.json({ removed: network, networks: loadBridgedNetworks() });
+  });
+
   // GET status of the collector container.
   app.get('/api/lifecycle/status', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
@@ -345,6 +474,15 @@ function register(app, { docker }) {
     } catch (e) {
       res.json({ status: 'error', error: e.message });
     }
+  });
+
+  // Fire-and-forget: best-effort re-attach helix-gateway to networks the
+  // user previously bridged. Doesn't block route registration — the rest
+  // of the API is reachable immediately. If the gateway isn't running yet
+  // (compose-up still spinning), the reconcile bails out quietly and the
+  // user can retry by clicking Bridge again from Step 3.
+  reconcileBridgedNetworks(docker).catch(e => {
+    console.warn('bridged-networks: reconcile threw:', e.message);
   });
 }
 

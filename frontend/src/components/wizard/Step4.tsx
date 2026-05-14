@@ -232,6 +232,30 @@ export const Step4: React.FC<Props> = ({
               {renderApiKeyProbe()}
             </div>
           </div>
+        ) : traceVerifyResult && traceVerifyResult.status === 'queued_customer' ? (
+          // Customer collector is queueing or failing — gateway is unreachable
+          // from its side. Visually distinct from the gateway-queued case
+          // because the remediation lives in Step 3, not in Helix tenant config.
+          <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
+            <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <span className="text-gray-200 font-semibold">Trace stuck at your collector — helix-gateway not reachable from it.</span>
+              <span className="text-gray-300 ml-1">{traceVerifyResult.message}</span>
+              {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
+            </div>
+          </div>
+        ) : traceVerifyResult && traceVerifyResult.status === 'queued_gateway' ? (
+          // Gateway queue is backed up but not draining — Helix is slow or
+          // rejecting at the BMC side, not a collector-side networking problem.
+          <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
+            <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <span className="text-gray-200 font-semibold">Trace queued at the gateway — Helix hasn't acknowledged.</span>
+              <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
+              {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
+              {renderApiKeyProbe()}
+            </div>
+          </div>
         ) : traceVerifyResult && traceVerifyResult.status === 'pending' ? (
           <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
             <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />

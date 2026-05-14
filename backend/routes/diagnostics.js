@@ -102,6 +102,54 @@ const fetchHelixQueueSize = async (targetContainer) => {
   return null;
 };
 
+// Read counters from the *customer's* collector — same metrics shape as the
+// gateway's, but filtered to the helix_sidecar exporter (or whatever exporter
+// targets http://helix-gateway:4318). Used by verify-trace to distinguish
+// "trace stuck at customer side, gateway unreachable" from "trace stuck at
+// gateway side, BMC slow." Returns null when the collector doesn't expose
+// metrics or the exporter name can't be matched; callers fall back to
+// gateway-only verdicts in that case.
+const fetchCustomerCollectorCounters = async (collectorName, port = 8888) => {
+  if (!collectorName) return null;
+  try {
+    const url = `http://${collectorName}:${port}/metrics`;
+    const response = await axios.get(url, { timeout: 2000 });
+    const metrics = response.data;
+    // Match exporters whose name contains "helix" — smart-add writes
+    // otlphttp/helix_sidecar, but a user who applied the snippet manually
+    // might have a different exporter name. The substring catch is
+    // intentionally loose — anything else pointing at helix-gateway also
+    // matches. False positives are unlikely in a single collector config.
+    const isHelixExporter = (line) => /exporter="[^"]*helix[^"]*"/i.test(line);
+    let sent = 0, failed = 0, queueSize = null;
+    let sentSeen = false, failedSeen = false;
+    for (const line of metrics.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      if (!isHelixExporter(trimmed)) continue;
+      const parts = trimmed.split(/\s+/);
+      const val = parseFloat(parts[parts.length - 1]);
+      if (isNaN(val)) continue;
+      if (trimmed.startsWith('otelcol_exporter_sent_')) { sent += val; sentSeen = true; }
+      else if (trimmed.startsWith('otelcol_exporter_send_failed_')) { failed += val; failedSeen = true; }
+      else if (trimmed.startsWith('otelcol_exporter_queue_size')) { queueSize = val; }
+      // Older otelcol versions called the queue gauge "queue_capacity"; keep
+      // looking even after queue_size is set so a newer name overrides.
+      else if (trimmed.startsWith('otelcol_exporter_queue_capacity') && queueSize == null) queueSize = val;
+    }
+    // If we didn't see any helix-targeted exporter rows, the collector either
+    // doesn't have a helix-sidecar exporter wired in yet or doesn't expose
+    // metrics for it. Signal "unknown" so callers don't read undercounts as
+    // real numbers.
+    if (!sentSeen && !failedSeen && queueSize == null) return null;
+    return { sent: Math.round(sent), failed: Math.round(failed), queueSize };
+  } catch {
+    // Unreachable, no metrics endpoint, network not bridged yet — all
+    // collapse to "unknown" from the verdict's perspective.
+    return null;
+  }
+};
+
 function register(app, { docker, containerLogs, configPath }) {
   // Strip debug logs from the collector YAML and restart. Used as both the
   // 5-minute failsafe (so a forgotten debug session doesn't pin the gateway)
@@ -128,6 +176,133 @@ function register(app, { docker, containerLogs, configPath }) {
       console.error('Failsafe revert failed:', e.message);
     }
   };
+
+  // POST deep verification of the Step 3 bridge. Step 3 today shows green
+  // purely on a topology check (does the customer collector share a network
+  // with helix-gateway?). That misses two real failure modes:
+  //   1. Receiver isn't actually listening on the shared network's interface
+  //      — gateway crashed, OTLP receiver disabled in YAML, or the network
+  //      attached after the receiver bound (rare after the pre-start attach
+  //      fix in commit 81b8bfe, but still possible if reconcile re-attached
+  //      mid-run).
+  //   2. Customer collector's helix-targeted exporter is failing or stuck in
+  //      retry backoff — config wrong, DNS for helix-gateway not resolving
+  //      from the collector's network namespace, TLS misconfigured.
+  //
+  // Returns three sub-results + an overall verdict. yellow = couldn't
+  // perform a deeper check (collector has no metrics endpoint, common in
+  // minimal builds); red = an explicit failure; green = all probes passed.
+  app.post('/api/diagnostics/step3-verify', async (req, res) => {
+    const { collectorName } = req.body || {};
+    const targetContainer = TARGET_CONTAINER();
+    const collector = (typeof collectorName === 'string' && /^[a-zA-Z0-9_.-]+$/.test(collectorName))
+      ? collectorName : null;
+
+    // Topology check: confirm gateway and collector still share a network.
+    // Cheaper than the receiver/exporter probes and a useful sanity check
+    // for callers that didn't pre-confirm via /api/discovery/collectors.
+    let topology = 'unknown';
+    let sharedNetwork = null;
+    try {
+      const gwInspect = await withDockerTimeout(docker.getContainer(targetContainer).inspect(), 'container.inspect', 5_000);
+      const gwNetworks = new Set(Object.keys(gwInspect.NetworkSettings?.Networks || {}));
+      if (collector) {
+        const colInspect = await withDockerTimeout(docker.getContainer(collector).inspect(), 'container.inspect', 5_000);
+        const colNetworks = Object.keys(colInspect.NetworkSettings?.Networks || {});
+        sharedNetwork = colNetworks.find(n => gwNetworks.has(n)) || null;
+        topology = sharedNetwork ? 'ok' : 'missing';
+      } else {
+        // No collector name passed — caller is asking "is the gateway alive
+        // at all" on some non-helix-bridge network. Treat any non-helix-
+        // bridge network as evidence of topology being in place.
+        const userNetworks = [...gwNetworks].filter(n => n !== 'helix-bridge' && n !== 'host' && n !== 'none' && n !== 'ingress');
+        sharedNetwork = userNetworks[0] || null;
+        topology = sharedNetwork ? 'ok' : 'missing';
+      }
+    } catch (e) {
+      // Inspect failed — most often "gateway not running." Caller's UI shows
+      // this as 'unknown' rather than implying topology is broken.
+      console.warn('step3-verify topology probe:', e.message);
+    }
+
+    // Receiver probe: a tiny HTTP GET against the gateway's OTLP receiver.
+    // 404 is fine — the receiver responds to GET with a method-not-allowed
+    // but the listener is bound. Connection refused or timeout → not bound.
+    let gatewayReceiver = 'unknown';
+    try {
+      await axios.get(`http://${targetContainer}:4318/`, { timeout: 2000, validateStatus: () => true });
+      gatewayReceiver = 'ok';
+    } catch (e) {
+      if (e.code === 'ECONNREFUSED' || e.code === 'ECONNABORTED' || /timeout/i.test(e.message || '')) {
+        gatewayReceiver = 'unreachable';
+      } else {
+        gatewayReceiver = 'unknown';
+      }
+    }
+
+    // Exporter probe: 3-second delta on the customer collector's
+    // helix-targeted exporter counters. Failing means non-zero growth in
+    // send_failed_* over the window; ok means send_failed stable at the
+    // baseline OR sent grew at least as fast. Skipped (not-probed) when
+    // no collector was named or the collector doesn't expose metrics.
+    let collectorExporter = 'not-probed';
+    let exporterDetail = null;
+    if (collector) {
+      const baseline = await fetchCustomerCollectorCounters(collector);
+      if (!baseline) {
+        collectorExporter = 'unknown';
+      } else {
+        await new Promise(r => setTimeout(r, 3000));
+        const after = await fetchCustomerCollectorCounters(collector);
+        if (!after) {
+          collectorExporter = 'unknown';
+        } else {
+          const sentDelta = after.sent - baseline.sent;
+          const failedDelta = after.failed - baseline.failed;
+          exporterDetail = { sentDelta, failedDelta };
+          if (failedDelta > 0 && sentDelta <= 0) collectorExporter = 'failing';
+          else collectorExporter = 'ok';
+        }
+      }
+    }
+
+    // Tri-state overall verdict — strict: any explicit failure → red;
+    // any unknown on a probe we attempted → yellow; otherwise green.
+    let overall = 'green';
+    let message = 'helix-gateway is bridged and the collector exporter is succeeding.';
+    let remediation;
+    if (topology === 'missing' || gatewayReceiver === 'unreachable' || collectorExporter === 'failing') {
+      overall = 'red';
+      if (topology === 'missing') {
+        message = collector
+          ? `helix-gateway and \`${collector}\` don't share a network.`
+          : 'helix-gateway isn\'t on any user network yet.';
+        remediation = 'Re-attach via Step 3 or the Bridge controls below.';
+      } else if (gatewayReceiver === 'unreachable') {
+        message = 'helix-gateway\'s OTLP receiver isn\'t reachable on :4318.';
+        remediation = 'The gateway is running but the receiver isn\'t listening — check Step 1 saved a valid YAML and the container restarted cleanly.';
+      } else {
+        message = `\`${collector}\`'s helix exporter is failing (failed +${exporterDetail?.failedDelta || 0} in 3s, sent +${exporterDetail?.sentDelta || 0}).`;
+        remediation = 'The collector can\'t deliver to helix-gateway. Most common causes: DNS for "helix-gateway" doesn\'t resolve from the collector\'s network, or TLS/auth mismatched.';
+      }
+    } else if (gatewayReceiver === 'unknown' || (collector && collectorExporter === 'unknown') || topology === 'unknown') {
+      overall = 'yellow';
+      message = collector
+        ? `Topology looks good but I couldn't fully verify ${collectorExporter === 'unknown' ? `\`${collector}\`'s exporter` : 'the gateway receiver'}.`
+        : 'Topology looks good but I couldn\'t fully verify the gateway receiver.';
+      remediation = 'You can continue to Verify; the Step 4 check will catch lingering issues.';
+    }
+    res.json({
+      topology,
+      gatewayReceiver,
+      collectorExporter,
+      sharedNetwork,
+      exporterDetail,
+      overall,
+      message,
+      remediation,
+    });
+  });
 
   // POST toggle debug logging in YAML and restart.
   app.post('/api/diagnostics/toggle-debug', async (req, res) => {
@@ -224,6 +399,15 @@ function register(app, { docker, containerLogs, configPath }) {
     const traceId = crypto.randomBytes(16).toString('hex');
     const spanId = crypto.randomBytes(8).toString('hex');
 
+    // Optional: the Step 3-selected customer collector. When provided, the
+    // poll loop also reads its helix-targeted exporter counters so the
+    // verdict can distinguish "stuck at customer side, gateway unreachable"
+    // from "stuck at gateway side, BMC slow." When omitted, the route falls
+    // back to its prior gateway-only behavior.
+    const customerCollector = (req.body && typeof req.body.collectorName === 'string'
+      && /^[a-zA-Z0-9_.-]+$/.test(req.body.collectorName))
+      ? req.body.collectorName : null;
+
     let baseline;
     try {
       baseline = await fetchCounters(targetContainer);
@@ -234,6 +418,11 @@ function register(app, { docker, containerLogs, configPath }) {
         remediation: 'The gateway is not running or not responding on :8888. Start it from the dashboard.',
       });
     }
+    // Customer baseline is best-effort — missing data here just means we
+    // skip the dual-side analysis later, not that the verify call fails.
+    const customerBaseline = customerCollector
+      ? await fetchCustomerCollectorCounters(customerCollector)
+      : null;
 
     const payload = {
       resourceSpans: [{
@@ -264,12 +453,21 @@ function register(app, { docker, containerLogs, configPath }) {
       });
     }
 
-    // Poll the sent/failed counters for up to 15s. We're looking for a delta —
-    // either the trace exported (sent went up) or it was rejected (failed went up).
-    // Previously this was 5s, which routinely false-failed when Helix took
-    // a beat to ack or when the gateway's 1s batch processor hadn't flushed.
-    const deadline = Date.now() + 15000;
+    // Poll the gateway sent/failed counters for up to 20s, and (when a
+    // customer collector was named) the customer's helix-exporter counters
+    // alongside. We're looking for a delta — either the trace exported
+    // (gateway sent went up), Helix rejected it (gateway failed went up),
+    // the customer side is queueing (customer queue/failed grew while
+    // gateway counters stayed flat), or nothing moved (true timeout).
+    //
+    // The 5s → 15s → 20s history: original 5s false-failed when Helix took
+    // a beat to ack; 15s caught most cases; 20s splits the difference with
+    // the TODO ask (30s) — 90th-percentile real traces should land in
+    // 10-15s, leaving a healthy margin without making the user wait forever
+    // on a stalled pipeline.
+    const deadline = Date.now() + 20000;
     let lastQueueSize = null;
+    let lastCustomer = customerBaseline;
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 500));
       try {
@@ -295,20 +493,58 @@ function register(app, { docker, containerLogs, configPath }) {
         // verdict can call out "queue is backed up" vs "Helix is silent".
         const q = await fetchHelixQueueSize(targetContainer);
         if (q != null) lastQueueSize = q;
+        // Refresh the customer-side snapshot if we have one. Only useful in
+        // the timeout-verdict logic below — a customer-side delta is a
+        // tiebreaker for "where did the trace get stuck," not a success
+        // signal in its own right.
+        if (customerCollector) {
+          const cur = await fetchCustomerCollectorCounters(customerCollector);
+          if (cur) lastCustomer = cur;
+        }
       } catch { /* metrics blip — keep polling */ }
     }
 
-    // Timeout path. Disambiguate based on what we saw during the wait:
-    //   queue > 0  → trace is sitting in the exporter's queue, Helix is slow
-    //                or unreachable but the gateway is doing its job
-    //   queue == 0 → the gateway drained but Helix never acknowledged a
-    //                success, possibly silent drop or backend-side filter
-    //   queue == null → metric not exposed; fall through to the old message
+    // Timeout path. Three-way disambiguation:
+    //   queued_customer  → customer exporter queue grew OR send_failed grew
+    //                      while gateway counters stayed flat. The trace
+    //                      never left the customer side.
+    //   queued_gateway   → gateway queue > 0 and nothing customer-side moved
+    //                      worse. Trace is sitting in the gateway's outbound
+    //                      queue waiting on Helix.
+    //   pending          → nothing observable moved anywhere. Fallback.
+    //
+    // We only branch into queued_customer when we have both baseline and
+    // current snapshots; otherwise the customer state is "unknown" and the
+    // gateway-side verdict stands.
+    const customerDelta = (customerBaseline && lastCustomer) ? {
+      sent: lastCustomer.sent - customerBaseline.sent,
+      failed: lastCustomer.failed - customerBaseline.failed,
+      queueSize: lastCustomer.queueSize,
+      queueSizeDelta: (customerBaseline.queueSize != null && lastCustomer.queueSize != null)
+        ? lastCustomer.queueSize - customerBaseline.queueSize
+        : null,
+    } : null;
+    const customerStuck = customerDelta && (
+      (customerDelta.failed > 0) ||
+      (customerDelta.queueSizeDelta != null && customerDelta.queueSizeDelta > 0) ||
+      (customerDelta.queueSize != null && customerDelta.queueSize > 0)
+    );
+
+    if (customerStuck) {
+      return res.json({
+        status: 'queued_customer',
+        customer: customerDelta,
+        queueSize: lastQueueSize,
+        message: `Trace is stuck at \`${customerCollector}\` — helix-gateway looks unreachable from it.`,
+        remediation: 'The collector is queueing or failing to send. Check Step 3: confirm the collector and helix-gateway share a network, and that the collector can resolve "helix-gateway" via DNS. Then restart the collector.',
+      });
+    }
     if (lastQueueSize != null && lastQueueSize > 0) {
       return res.json({
-        status: 'pending',
+        status: 'queued_gateway',
         queueSize: lastQueueSize,
-        message: `Trace is queued at the exporter (${lastQueueSize} item${lastQueueSize === 1 ? '' : 's'} pending) — Helix hasn't acknowledged yet`,
+        customer: customerDelta,
+        message: `Trace is queued at the gateway (${lastQueueSize} item${lastQueueSize === 1 ? '' : 's'} pending) — Helix hasn't acknowledged yet`,
         remediation: 'Helix is slow to accept or briefly unreachable. The gateway will keep retrying; watch the Sent counter for the next minute.',
       });
     }
@@ -316,13 +552,15 @@ function register(app, { docker, containerLogs, configPath }) {
       return res.json({
         status: 'pending',
         queueSize: 0,
-        message: 'Gateway drained the queue but Helix returned no acknowledgement within 15s',
+        customer: customerDelta,
+        message: 'Gateway drained the queue but Helix returned no acknowledgement within 20s',
         remediation: 'The trace left the gateway but no success counter moved. Verify the tenant is configured to accept your X-Source, and that HELIX_API_KEY has the right role.',
       });
     }
     res.json({
       status: 'pending',
-      message: 'Trace accepted by gateway but no exporter delta within 15s',
+      customer: customerDelta,
+      message: 'Trace accepted by gateway but no exporter delta within 20s',
       remediation: 'Open Diagnostic Health Check and watch the Sent/Dropped counters for the next minute.',
     });
   });

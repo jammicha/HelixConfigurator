@@ -13,6 +13,7 @@ import { Stepper } from './components/wizard/Stepper';
 import { Step1 } from './components/wizard/Step1';
 import { Step2 } from './components/wizard/Step2';
 import { Step3 } from './components/wizard/Step3';
+import type { DetectedCollector } from './components/wizard/Step3';
 import { Step4 } from './components/wizard/Step4';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle } from './utils/helixKey';
@@ -103,9 +104,7 @@ const App = () => {
   // Detected OTel collector containers running on this host. Populated when
   // Step 2 mounts; surfaced in the network callout so users with their own
   // collector can one-click attach helix-gateway to that collector's network.
-  const [detectedCollectors, setDetectedCollectors] = useState<
-    Array<{ name: string; image: string; networks: string[]; sharesNetworkWithSidecar: boolean; isKubernetes?: boolean }>
-  >([]);
+  const [detectedCollectors, setDetectedCollectors] = useState<DetectedCollector[]>([]);
   const [attachingNetwork, setAttachingNetwork] = useState<string | null>(null);
   const [attachResult, setAttachResult] = useState<{ network: string; ok: boolean; message: string } | null>(null);
   // Wizard redesign — Step 3 + Step 4 state.
@@ -1070,7 +1069,17 @@ const App = () => {
     setApiKeyProbe(null);
     setTelemetryStatus('loading');
     try {
-      const res = await fetch('/api/diagnostics/inject-trace-verify', { method: 'POST' });
+      // Pass the Step 3 customer collector (when there's exactly one detected
+      // candidate sharing a network with the sidecar) so verify-trace can read
+      // its helix-exporter counters too. Without this, "stuck at customer
+      // side" and "stuck at gateway side" look identical from the verdict.
+      const bridgedCollector = detectedCollectors.find(c => c.sharesNetworkWithSidecar);
+      const verifyBody = bridgedCollector ? { collectorName: bridgedCollector.name } : undefined;
+      const res = await fetch('/api/diagnostics/inject-trace-verify', {
+        method: 'POST',
+        headers: verifyBody ? { 'Content-Type': 'application/json' } : undefined,
+        body: verifyBody ? JSON.stringify(verifyBody) : undefined,
+      });
       const data = await res.json();
       setTraceVerifyResult({
         status: data.status || (res.ok ? 'pending' : 'error'),

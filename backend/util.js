@@ -42,6 +42,66 @@ const makeContainerLogs = (docker) => async (containerName, options = {}) => {
 const isValidContainerName = (name) =>
   typeof name === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(name);
 
+// OTLP receiver ports the helix sidecar (and most user collectors) listen on.
+// Exposed ports for either port are taken as a "this might be a collector"
+// signal independent of image name — used to catch vendor distros and
+// renamed images that the image-regex misses.
+const OTLP_PORTS = new Set([4317, 4318]);
+
+const containerExposesOtlp = (container) => {
+  const ports = (container && container.Ports) || [];
+  for (const p of ports) {
+    if (p && OTLP_PORTS.has(Number(p.PrivatePort))) return true;
+  }
+  return false;
+};
+
+const containerHasCollectorImage = (container) => {
+  const image = (container && container.Image) || '';
+  const command = (container && container.Command) || '';
+  return /opentelemetry-collector/i.test(image)
+      || /otelcol/i.test(image)
+      || /otelcol/i.test(command);
+};
+
+// Classify a list of docker.listContainers() results into collector candidates.
+// Combines two signals: image/command regex (catches renamed contrib builds
+// and `otelcol`-invoking entrypoints) and OTLP port exposure (catches vendor
+// distros — Datadog, Honeycomb, Grafana Agent — and locally-built images that
+// don't carry the upstream name). Helix-managed containers and the sidecar
+// itself are excluded explicitly so the caller doesn't have to remember.
+// Returns one object per detected candidate:
+//   { container, name, image, command, detectedVia: 'image+ports' | 'image' | 'ports' }
+// Containers matching neither signal are filtered out. The helix-* exclusion
+// is upfront so a container that happens to be named helix-collector can't
+// slip through via the image-regex.
+const detectCollectorContainers = (containers, { sidecarName, includeHelix = false } = {}) => {
+  const sidecar = sidecarName || 'helix-gateway';
+  const out = [];
+  for (const c of containers || []) {
+    const name = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
+    if (!name) continue;
+    if (name === sidecar) continue;
+    if (!includeHelix && name.startsWith('helix-')) continue;
+    const byImage = containerHasCollectorImage(c);
+    const byPorts = containerExposesOtlp(c);
+    if (!byImage && !byPorts) continue;
+    const detectedVia = byImage && byPorts ? 'image+ports' : byImage ? 'image' : 'ports';
+    out.push({
+      container: c,
+      name,
+      image: c.Image || '',
+      command: c.Command || '',
+      detectedVia,
+    });
+  }
+  // Rank: dual-signal first, then image-only, then port-only. Within a band,
+  // keep Docker's listing order (which is creation order).
+  const rank = (v) => v === 'image+ports' ? 0 : v === 'image' ? 1 : 2;
+  out.sort((a, b) => rank(a.detectedVia) - rank(b.detectedVia));
+  return out;
+};
+
 class DockerTimeoutError extends Error {
   constructor(label, ms) {
     super(`Docker operation "${label}" timed out after ${ms}ms`);
@@ -138,4 +198,8 @@ module.exports = {
   DockerTimeoutError,
   withDockerTimeout,
   sendDockerTimeoutResponse,
+  detectCollectorContainers,
+  containerExposesOtlp,
+  containerHasCollectorImage,
+  OTLP_PORTS,
 };

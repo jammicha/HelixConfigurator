@@ -10,7 +10,7 @@
 const path = require('path');
 const yaml = require('js-yaml');
 const tarStream = require('tar-stream');
-const { withDockerTimeout, sendDockerTimeoutResponse } = require('../util');
+const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers } = require('../util');
 
 function register(app, { docker }) {
   // -- Helpers ---------------------------------------------------------------
@@ -420,15 +420,14 @@ function register(app, { docker }) {
   let collectorsCache = { ts: 0, payload: null };
   const COLLECTORS_CACHE_TTL_MS = 60_000;
 
+  // Authorization gate for collector-mutating routes: only act on containers
+  // the detector recognizes. Goes through the same image+ports signal as the
+  // listing endpoint so a smart-add target that shows up in the UI also
+  // passes the apply check, no matter which signal originally surfaced it.
   const isRecognizedCollectorContainer = async (name) => {
+    const sidecarName = process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
     const containers = await withDockerTimeout(docker.listContainers(), 'docker.listContainers');
-    return containers.some(c => {
-      const cName = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
-      if (cName !== name) return false;
-      const image = c.Image || '';
-      const command = c.Command || '';
-      return /opentelemetry-collector/i.test(image) || /otelcol/i.test(image) || /otelcol/i.test(command);
-    });
+    return detectCollectorContainers(containers, { sidecarName }).some(d => d.name === name);
   };
 
   // Try each candidate config path in order and return the first one that
@@ -478,34 +477,20 @@ function register(app, { docker }) {
         } catch { return []; }
       })();
       const sidecarNetSet = new Set(sidecarNetworks);
-      const candidates = containers
-        .map(c => {
-          const name = (c.Names && c.Names[0] && c.Names[0].replace(/^\//, '')) || '';
-          const image = c.Image || '';
-          const command = c.Command || '';
-          return { c, name, image, command };
-        })
-        .filter(({ name, image, command }) => {
-          if (name === sidecarName) return false;
-          const looksLikeCollector =
-            /opentelemetry-collector/i.test(image) ||
-            /otelcol/i.test(image) ||
-            /otelcol/i.test(command);
-          return looksLikeCollector;
-        })
-        .map(({ c, name, image }) => {
-          const networks = Object.keys((c.NetworkSettings && c.NetworkSettings.Networks) || {})
-            .filter(n => n !== 'host' && n !== 'none' && n !== 'ingress');
-          const sharesNetworkWithSidecar = networks.some(n => sidecarNetSet.has(n));
-          // K8s containers carry well-known kubelet labels. Detect via labels
-          // first (most reliable) then fall back to image / command hints.
-          const labels = c.Labels || {};
-          const isKubernetes =
-            Object.keys(labels).some(k => k.startsWith('io.kubernetes.')) ||
-            /\b(kubelet|k8s|kubernetes)\b/i.test(image) ||
-            /\b(kubelet|k8s|kubernetes)\b/i.test(c.Command || '');
-          return { name, image, networks, sharesNetworkWithSidecar, isKubernetes };
-        });
+      const detected = detectCollectorContainers(containers, { sidecarName });
+      const candidates = detected.map(({ container: c, name, image, detectedVia }) => {
+        const networks = Object.keys((c.NetworkSettings && c.NetworkSettings.Networks) || {})
+          .filter(n => n !== 'host' && n !== 'none' && n !== 'ingress');
+        const sharesNetworkWithSidecar = networks.some(n => sidecarNetSet.has(n));
+        // K8s containers carry well-known kubelet labels. Detect via labels
+        // first (most reliable) then fall back to image / command hints.
+        const labels = c.Labels || {};
+        const isKubernetes =
+          Object.keys(labels).some(k => k.startsWith('io.kubernetes.')) ||
+          /\b(kubelet|k8s|kubernetes)\b/i.test(image) ||
+          /\b(kubelet|k8s|kubernetes)\b/i.test(c.Command || '');
+        return { name, image, networks, sharesNetworkWithSidecar, isKubernetes, detectedVia };
+      });
       const payload = { sidecar: sidecarName, sidecarNetworks, collectors: candidates };
       collectorsCache = { ts: Date.now(), payload };
       res.json(payload);
