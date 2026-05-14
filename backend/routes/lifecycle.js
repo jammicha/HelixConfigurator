@@ -40,13 +40,14 @@ const readEnvAsArray = () => {
 // editing HELIX_ENDPOINT in the UI saved the new value to disk but the
 // gateway kept shipping to the placeholder https://your-tenant.onbmc.com
 // until the container was recreated. Now this endpoint does that recreate.
-const recreateGateway = async (docker, name) => {
+const recreateGateway = async (docker, name, { addNetwork } = {}) => {
   const old = docker.getContainer(name);
   const inspect = await old.inspect();
 
   const freshEnv = readEnvAsArray();
   const envArray = freshEnv && freshEnv.length > 0 ? freshEnv : (inspect.Config?.Env || []);
-  const allNetworks = Object.keys(inspect.NetworkSettings?.Networks || {});
+  const allNetworks = new Set(Object.keys(inspect.NetworkSettings?.Networks || {}));
+  if (addNetwork) allNetworks.add(addNetwork);
 
   // Generous stop timeout so the exporter has a chance to flush its sending
   // queue. Tolerate 304 ("already stopped") and 404 (already gone).
@@ -69,21 +70,30 @@ const recreateGateway = async (docker, name) => {
     ExposedPorts: inspect.Config?.ExposedPorts,
     HostConfig: inspect.HostConfig,
   });
-  await fresh.start();
 
-  // Reattach to any additional networks the original was on. The primary
-  // network is already attached via HostConfig.NetworkMode at create; extras
-  // (e.g. a customer compose network the user bridged in Step 3) need an
-  // explicit connect. 403 = already attached, fine.
+  // CRITICAL — attach extras BEFORE start, not after. A Docker network
+  // attached after the container's process starts is invisible to any
+  // sockets that already bound; the OTLP HTTP listener on 0.0.0.0:4318
+  // only accepts on interfaces present at bind time. That's the
+  // root cause of "gateway reachable by DNS on the customer's compose
+  // network but TCP returns connection refused" reports.
+  //
+  // The primary network is already attached via HostConfig.NetworkMode at
+  // create. We pre-attach every other inspected network here, in the
+  // gap between createContainer and start.
+  const primary = inspect.HostConfig?.NetworkMode || 'default';
   for (const net of allNetworks) {
+    if (net === primary) continue;
     try {
       await docker.getNetwork(net).connect({ Container: name });
     } catch (e) {
       if (e.statusCode !== 403) {
-        console.warn(`recreateGateway: reattach ${name} to ${net} warning:`, e.message);
+        console.warn(`recreateGateway: pre-start connect ${name} to ${net} warning:`, e.message);
       }
     }
   }
+
+  await fresh.start();
 };
 
 function register(app, { docker }) {
@@ -217,25 +227,37 @@ function register(app, { docker }) {
     });
     const picked = inspected[0].name;
 
+    // Attach (idempotent), then recreate so the OTLP listener binds with the
+    // new interface visible. See recreateGateway for the late-attachment
+    // rationale; a plain `docker network connect` on a running container
+    // adds the interface but existing sockets don't accept on it.
+    let alreadyAttached = false;
     try {
       await docker.getNetwork(picked).connect({ Container: sidecarName });
-      res.json({
-        message: `Successfully bridged ${sidecarName} to network: ${picked}`,
-        network: picked,
-        candidates: inspected.map(i => i.name),
-        targetContainer: targetName,
-      });
     } catch (e) {
       if (e.statusCode === 403 || /already exists/i.test(e.message || '')) {
-        return res.json({
-          message: `${sidecarName} already attached to ${picked}`,
-          network: picked,
-          candidates: inspected.map(i => i.name),
-          targetContainer: targetName,
-        });
+        alreadyAttached = true;
+      } else {
+        return res.status(500).json({ error: 'Failed to bridge networks', details: e.message });
       }
-      res.status(500).json({ error: 'Failed to bridge networks', details: e.message });
     }
+    try {
+      await recreateGateway(docker, sidecarName, { addNetwork: picked });
+    } catch (e) {
+      return res.status(500).json({
+        error: 'Network attached but gateway recreate failed — telemetry may not flow until restart',
+        details: e.message,
+        network: picked,
+      });
+    }
+    res.json({
+      message: alreadyAttached
+        ? `${sidecarName} already attached to ${picked} (rebuilt to refresh listener)`
+        : `Successfully bridged ${sidecarName} to network: ${picked}`,
+      network: picked,
+      candidates: inspected.map(i => i.name),
+      targetContainer: targetName,
+    });
   });
 
   // POST attach the sidecar to an arbitrary Docker network by name. Used by
@@ -251,18 +273,37 @@ function register(app, { docker }) {
     if (['host', 'none', 'ingress', 'helix-bridge'].includes(network)) {
       return res.status(400).json({ error: `Refusing to bridge to system network "${network}"` });
     }
+    // Idempotent attach + recreate. Same rationale as the auto-bridge route:
+    // a runtime `docker network connect` adds the interface but doesn't
+    // surface it to already-bound listening sockets, so the gateway has to
+    // be recreated for the customer's collector to actually reach it.
+    let alreadyAttached = false;
     try {
       await docker.getNetwork(network).connect({ Container: sidecarName });
-      res.json({ message: `Attached ${sidecarName} to ${network}`, network });
     } catch (e) {
       if (e.statusCode === 403 || /already exists/i.test(e.message || '')) {
-        return res.json({ message: `${sidecarName} already attached to ${network}`, network });
-      }
-      if (e.statusCode === 404) {
+        alreadyAttached = true;
+      } else if (e.statusCode === 404) {
         return res.status(404).json({ error: `Network "${network}" not found` });
+      } else {
+        return res.status(500).json({ error: 'Failed to attach network', details: e.message });
       }
-      res.status(500).json({ error: 'Failed to attach network', details: e.message });
     }
+    try {
+      await recreateGateway(docker, sidecarName, { addNetwork: network });
+    } catch (e) {
+      return res.status(500).json({
+        error: 'Network attached but gateway recreate failed — telemetry may not flow until restart',
+        details: e.message,
+        network,
+      });
+    }
+    res.json({
+      message: alreadyAttached
+        ? `${sidecarName} already attached to ${network} (rebuilt to refresh listener)`
+        : `Attached ${sidecarName} to ${network}`,
+      network,
+    });
   });
 
   // POST restart an OTel collector container by name. Used by the "stream
