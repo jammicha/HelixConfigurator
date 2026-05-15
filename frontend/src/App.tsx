@@ -92,12 +92,10 @@ const App = () => {
   const [confirmDialog, setConfirmDialog] = useState<ConfirmRequest | null>(null);
   const [verifyingTrace, setVerifyingTrace] = useState(false);
   const [traceVerifyResult, setTraceVerifyResult] = useState<{ status: string; message: string; remediation?: string } | null>(null);
-  // Bridge outcome from Step 1's /api/lifecycle/bridge call. Drives the
-  // banner at the top of Step 2 so the user knows whether the auto-bridge
-  // succeeded, was skipped, or failed — and what to do about it.
+  // Result of Step 1's recreate call. Used only to surface a recreate
+  // failure on Step 3/4 ("env changes may not have taken effect"). Network
+  // wiring is Step 3's job now and no longer flows through this state.
   const [bridgeStatus, setBridgeStatus] = useState<
-    | { kind: 'success'; network: string; targetContainer: string }
-    | { kind: 'skipped'; reason: string }
     | { kind: 'error'; reason: string }
     | null
   >(null);
@@ -870,34 +868,22 @@ const App = () => {
       });
       if (!envRes.ok) throw new Error('Failed to save settings');
 
-      // Apply: /api/lifecycle/bridge attaches the gateway to APP_URL's network
-      // (when resolvable) AND recreates the gateway, which picks up the
-      // .env values we just persisted. Previously this was two separate
-      // calls (/api/lifecycle/restart THEN /api/lifecycle/bridge) — each
-      // recreated the gateway, doubling the apply time. The bridge endpoint
-      // now always recreates whether or not auto-bridge actually attached.
-      const bridgeRes = await fetch('/api/lifecycle/bridge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ APP_URL: envVars.APP_URL })
-      });
+      // Apply Step 1's env changes by recreating the gateway. Compose only
+      // evaluates env_file at container create time, so a plain restart
+      // wouldn't pick up the values we just persisted to .env. Network
+      // wiring lives in Step 3 (it was previously bundled into this call
+      // and driven off APP_URL — that conflated two unrelated concerns).
+      setBridgeStatus(null);
+      const bridgeRes = await fetch('/api/lifecycle/bridge', { method: 'POST' });
 
       // Poll until the gateway reports running. Slow hosts used to false-fail
       // the network diagnostic on a blind 3s sleep.
       const ready = await waitForGatewayRunning(15000);
       if (!ready) throw new Error('Gateway did not reach running state within 15s');
-      let bridgedTarget = '';
-      const bridgeData = await bridgeRes.json().catch(() => ({}));
-      if (bridgeRes.ok) {
-        if (bridgeData.skipped) {
-          setBridgeStatus({ kind: 'skipped', reason: bridgeData.reason || 'No Application URL provided.' });
-        } else if (bridgeData.network) {
-          bridgedTarget = bridgeData.targetContainer || '';
-          setBridgeStatus({ kind: 'success', network: bridgeData.network, targetContainer: bridgedTarget });
-        }
-      } else {
+      if (!bridgeRes.ok) {
+        const bridgeData = await bridgeRes.json().catch(() => ({}));
         const reason = bridgeData.error || bridgeData.details || 'Unknown error';
-        console.warn('Automated network bridging failed:', reason);
+        console.warn('Gateway recreate failed:', reason);
         setBridgeStatus({ kind: 'error', reason });
       }
 

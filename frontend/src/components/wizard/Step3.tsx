@@ -28,9 +28,10 @@ export type DetectedCollector = {
   detectedVia?: 'image+ports' | 'image' | 'ports';
 };
 
+// Step 1's gateway-recreate result. Network wiring is no longer driven by
+// Step 1; this only surfaces the "env apply failed" case so Step 3/4 can
+// warn the user the values they typed in Step 1 didn't take effect.
 export type BridgeStatus =
-  | { kind: 'success'; network: string; targetContainer: string }
-  | { kind: 'skipped'; reason: string }
   | { kind: 'error'; reason: string }
   | null;
 
@@ -143,46 +144,17 @@ export const Step3: React.FC<Props> = ({
           : 'helix-gateway and your collector need to share a Docker network so their OTLP traffic can flow over loopback.'}
       </p>
 
-      {bridgeStatus?.kind === 'success' && (
-        <div className="mb-4 flex items-start gap-3 p-3 bg-success/10 border border-success/40 rounded text-sm">
-          <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
-          <span className="text-gray-200"><span className="font-semibold">helix-gateway was automatically attached to your app's network.</span> It joined <code className="font-mono">{bridgeStatus.network}</code> (matched container <code className="font-mono">{bridgeStatus.targetContainer}</code>).</span>
-        </div>
-      )}
-      {bridgeStatus?.kind === 'skipped' && (
-        // Auto-bridge intentionally skipped (no APP_URL, loopback APP_URL,
-        // off-host APP_URL hostname). Lead with WHAT auto-bridge would do so
-        // the reason makes sense — without the lead-in, "No APP_URL provided"
-        // reads as a non-sequitur (why does the app's URL control network
-        // attachment?). The link back to Step 1 lets a user who didn't
-        // realize APP_URL had this dual role enable auto-bridge without
-        // hunting through the stepper.
-        <div className="mb-4 p-3 bg-gray-1000 border border-gray-800 rounded text-sm">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1 space-y-1.5">
-              <div className="text-gray-300">
-                <span className="font-semibold text-gray-200">Auto-bridge skipped.</span>{' '}
-                When <code className="font-mono text-gray-300">APP_URL</code>'s hostname matches a running container on this host, Step 1 auto-attaches helix-gateway to that container's Docker network so they can talk over loopback. {bridgeStatus.reason}
-              </div>
-              <div className="flex items-center gap-3 flex-wrap text-tiny">
-                <button
-                  onClick={() => onJumpToStep(1)}
-                  className="font-semibold text-active hover:underline"
-                  title="Edit APP_URL on Step 1 — set it to your app's Docker container name (e.g. http://payment-service:8080) to enable auto-bridge"
-                >
-                  Edit APP_URL in Step 1 →
-                </button>
-                <span className="text-gray-500">or attach manually using the controls below.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       {bridgeStatus?.kind === 'error' && (
+        // Step 1's "apply env + recreate gateway" call failed. Network
+        // wiring is unrelated — Step 3's manual attach below will work
+        // regardless — but the user should know the env values they typed
+        // may not be live yet.
         <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
           <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-          <span className="text-gray-200"><span className="font-semibold">Auto-attach failed: </span>{bridgeStatus.reason}. Use the controls below to connect manually.</span>
+          <span className="text-gray-200">
+            <span className="font-semibold">Step 1 didn't fully apply: </span>{bridgeStatus.reason}.{' '}
+            Go back to Step 1 to retry, or proceed and restart helix-gateway from the dashboard.
+          </span>
         </div>
       )}
 

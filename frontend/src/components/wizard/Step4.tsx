@@ -144,11 +144,14 @@ export const Step4: React.FC<Props> = ({
       <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
       <p className="text-sm text-gray-400 mb-5">Restart your app or collector first if you just changed config.</p>
 
-      {bridgeStatus?.kind === 'skipped' && !someoneAttached && (
+      {!someoneAttached && (
+        // Step 3 hasn't wired the gateway to any detected collector's
+        // network yet. Live counters will stay at zero on this page until
+        // they do. Auto-bridge no longer exists — Step 3 is the only path.
         <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
           <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
           <span className="text-gray-200">
-            <span className="font-semibold">Auto-attach was skipped and helix-gateway isn't sharing a network with any detected collector.</span>{' '}
+            <span className="font-semibold">helix-gateway isn't sharing a network with any detected collector yet.</span>{' '}
             Live counters will stay at zero until you{' '}
             <button onClick={() => onJumpToStep(3)} className="text-active hover:underline font-semibold">go back to Step 3</button>{' '}
             and attach.
@@ -159,9 +162,9 @@ export const Step4: React.FC<Props> = ({
         <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
           <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
           <span className="text-gray-200">
-            <span className="font-semibold">Auto-attach failed in Step 1: </span>{bridgeStatus.reason}.{' '}
-            <button onClick={() => onJumpToStep(3)} className="text-active hover:underline font-semibold">Go back to Step 3</button>{' '}
-            to connect manually if you haven't already.
+            <span className="font-semibold">Step 1 didn't fully apply: </span>{bridgeStatus.reason}.{' '}
+            <button onClick={() => onJumpToStep(1)} className="text-active hover:underline font-semibold">Go back to Step 1</button>{' '}
+            to retry or restart helix-gateway from the dashboard.
           </span>
         </div>
       )}
