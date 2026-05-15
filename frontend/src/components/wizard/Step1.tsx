@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, X } from 'lucide-react';
 import { parseHelixKeyBundle } from '../../utils/helixKey';
+import { extractServiceKey } from '../otel-data/utils';
 
 export type EnvVars = {
   HELIX_ENDPOINT: string;
@@ -184,6 +185,31 @@ export const Step1: React.FC<Props> = ({
           {envVars.APP_URL && errors.APP_URL && (
             <p id="helix-app-url-error" className="text-tiny text-danger">{errors.APP_URL}</p>
           )}
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
+            <span>AIOps Business Service Key</span>
+            <span className="normal-case tracking-normal text-gray-500 font-normal">— optional</span>
+          </label>
+          <input
+            type="text"
+            name="helix-business-service-key"
+            autoComplete="off"
+            spellCheck={false}
+            data-1p-ignore
+            data-lpignore="true"
+            value={envVars.BUSINESS_SERVICE_KEY}
+            // Accept the bare opaque key, a URL fragment, or the full AIOps
+            // service URL. extractServiceKey normalizes all three to the
+            // opaque key the backend stores — saves the user a paste-trim-
+            // copy round trip when they grab the URL from their browser bar.
+            onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
+            className="w-full bg-gray-1000 border border-gray-800 focus:border-active rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
+            placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS — or paste the full AIOps service URL"
+          />
+          <p className="text-tiny text-gray-500">
+            Enables the "Open in AIOps" deep-link on the dashboard and the per-trace "Send to AIOps" pin on the trace viewer. Find it at <code className="font-mono">https://&lt;tenant&gt;/aiops/#/entities/service/&lt;KEY&gt;?type=key</code> — paste either the key or the full URL.
+          </p>
         </div>
       </div>
 
