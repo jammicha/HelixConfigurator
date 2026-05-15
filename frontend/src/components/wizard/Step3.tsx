@@ -52,6 +52,10 @@ type Props = {
   onApplyK8sTemplate: () => void;
   onBack: () => void;
   onNext: () => void;
+  // Jump straight to Step 1 — used by the "Edit APP_URL" affordance in the
+  // auto-bridge skip banner. Without this, the user reads "skipped because
+  // APP_URL …" and has no direct path to fix the underlying setting.
+  onJumpToStep: (step: number) => void;
 };
 
 export const Step3: React.FC<Props> = ({
@@ -69,6 +73,7 @@ export const Step3: React.FC<Props> = ({
   onApplyK8sTemplate,
   onBack,
   onNext,
+  onJumpToStep,
 }) => {
   const k8sDetected = detectedCollectors.some(c => c.isKubernetes);
   const someoneAttached = detectedCollectors.some(c => c.sharesNetworkWithSidecar);
@@ -146,11 +151,32 @@ export const Step3: React.FC<Props> = ({
       )}
       {bridgeStatus?.kind === 'skipped' && (
         // Auto-bridge intentionally skipped (no APP_URL, loopback APP_URL,
-        // off-host APP_URL hostname). The reason is informational, not an
-        // error — the user can still wire manually below.
-        <div className="mb-4 flex items-start gap-3 p-3 bg-gray-1000 border border-gray-800 rounded text-sm">
-          <AlertTriangle className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
-          <span className="text-gray-300"><span className="font-semibold text-gray-200">Auto-bridge skipped.</span> {bridgeStatus.reason}</span>
+        // off-host APP_URL hostname). Lead with WHAT auto-bridge would do so
+        // the reason makes sense — without the lead-in, "No APP_URL provided"
+        // reads as a non-sequitur (why does the app's URL control network
+        // attachment?). The link back to Step 1 lets a user who didn't
+        // realize APP_URL had this dual role enable auto-bridge without
+        // hunting through the stepper.
+        <div className="mb-4 p-3 bg-gray-1000 border border-gray-800 rounded text-sm">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-1.5">
+              <div className="text-gray-300">
+                <span className="font-semibold text-gray-200">Auto-bridge skipped.</span>{' '}
+                When <code className="font-mono text-gray-300">APP_URL</code>'s hostname matches a running container on this host, Step 1 auto-attaches helix-gateway to that container's Docker network so they can talk over loopback. {bridgeStatus.reason}
+              </div>
+              <div className="flex items-center gap-3 flex-wrap text-tiny">
+                <button
+                  onClick={() => onJumpToStep(1)}
+                  className="font-semibold text-active hover:underline"
+                  title="Edit APP_URL on Step 1 — set it to your app's Docker container name (e.g. http://payment-service:8080) to enable auto-bridge"
+                >
+                  Edit APP_URL in Step 1 →
+                </button>
+                <span className="text-gray-500">or attach manually using the controls below.</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
       {bridgeStatus?.kind === 'error' && (

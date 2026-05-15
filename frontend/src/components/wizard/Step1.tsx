@@ -176,8 +176,11 @@ export const Step1: React.FC<Props> = ({
             aria-invalid={!!(envVars.APP_URL && errors.APP_URL)}
             aria-describedby={envVars.APP_URL && errors.APP_URL ? 'helix-app-url-error' : undefined}
             className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.APP_URL && errors.APP_URL ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-            placeholder="URL of the application you're instrumenting"
+            placeholder="http://payment-service:8080"
           />
+          <p className="text-tiny text-gray-500">
+            Two purposes: powers the "Open application" link on the dashboard, AND — when the hostname is a Docker container name on this host — lets Step 3 auto-attach helix-gateway to your app's network. <code className="font-mono">localhost</code>, an IP, or a public URL is fine; auto-attach just skips in those cases and you wire the network manually on Step 3.
+          </p>
           {envVars.APP_URL && errors.APP_URL && (
             <p id="helix-app-url-error" className="text-tiny text-danger">{errors.APP_URL}</p>
           )}

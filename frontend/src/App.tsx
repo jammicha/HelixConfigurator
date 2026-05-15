@@ -1651,6 +1651,7 @@ ${logsData.logs || '(no logs available)'}
                   onApplyK8sTemplate={requestApplyK8sTemplate}
                   onBack={() => setSetupStep(2)}
                   onNext={() => setSetupStep(4)}
+                  onJumpToStep={setSetupStep}
                 />
               )}
 
