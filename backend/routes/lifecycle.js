@@ -72,6 +72,10 @@ const forgetBridgedNetwork = (network) => {
 // Run once at startup. For each persisted network, ensure helix-gateway is
 // attached. Network gone (404) → drop from the list and move on. Other
 // failures → log and leave the entry so the next boot can retry.
+//
+// Reconnects fan out in parallel: each `network.connect` is wrapped in its
+// own 5s timeout and a user with N bridged networks shouldn't wait N×5s on
+// boot if Docker is slow. Each reconnect's outcome is independent.
 const reconcileBridgedNetworks = async (docker) => {
   const wanted = loadBridgedNetworks();
   if (wanted.length === 0) return;
@@ -86,21 +90,25 @@ const reconcileBridgedNetworks = async (docker) => {
     console.log(`bridged-networks: skipping reconcile (gateway not inspectable: ${e.message})`);
     return;
   }
-  let dropped = [];
-  for (const net of wanted) {
-    if (attached.has(net)) continue;
+  const todo = wanted.filter(net => !attached.has(net));
+  if (todo.length === 0) return;
+  const results = await Promise.all(todo.map(async net => {
     try {
       await withDockerTimeout(docker.getNetwork(net).connect({ Container: sidecar }), 'network.connect', 5_000);
       console.log(`bridged-networks: re-attached ${sidecar} to ${net}`);
+      return { net, drop: false };
     } catch (e) {
       if (e.statusCode === 404) {
         console.log(`bridged-networks: dropping ${net} (network no longer exists)`);
-        dropped.push(net);
-      } else if (e.statusCode !== 403 && !/already exists/i.test(e.message || '')) {
+        return { net, drop: true };
+      }
+      if (e.statusCode !== 403 && !/already exists/i.test(e.message || '')) {
         console.warn(`bridged-networks: failed to re-attach ${net}: ${e.message}`);
       }
+      return { net, drop: false };
     }
-  }
+  }));
+  const dropped = results.filter(r => r.drop).map(r => r.net);
   if (dropped.length) saveBridgedNetworks(wanted.filter(n => !dropped.includes(n)));
 };
 
