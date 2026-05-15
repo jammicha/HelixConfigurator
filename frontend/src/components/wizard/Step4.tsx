@@ -88,6 +88,12 @@ export const Step4: React.FC<Props> = ({
   // payload directly to Helix to disambiguate "key rejected" from
   // "pipeline broken" (the verify-trace check can fail for both reasons).
   const probeIsSuccess = apiKeyProbe?.status === 'valid';
+  // Probe failures (rejected/tenant-error/network-error/helix-error) all
+  // either point at Step 1 fields (HELIX_API_KEY, HELIX_ENDPOINT) or, in the
+  // network-error case, a typo or misconfigured URL — also a Step 1 fix.
+  // Offer a direct jump-back so the user doesn't have to click their way
+  // up the Stepper looking for the right field.
+  const probeNeedsStep1Fix = apiKeyProbe != null && apiKeyProbe.status !== 'valid';
   const renderApiKeyProbe = () => (
     <div className="mt-2 pt-2 border-t border-gray-800/60">
       {apiKeyProbe ? (
@@ -101,6 +107,18 @@ export const Step4: React.FC<Props> = ({
               <span className="text-gray-300">{apiKeyProbe.message}</span>
             </div>
             {apiKeyProbe.remediation && <p className="text-gray-400 mt-0.5">{apiKeyProbe.remediation}</p>}
+            {probeNeedsStep1Fix && (
+              <div className="mt-1.5 flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={() => onJumpToStep(1)}
+                  className="inline-flex items-center gap-1 text-tiny font-semibold text-active hover:underline"
+                  title="Go back to Step 1 to update HELIX_API_KEY or HELIX_ENDPOINT"
+                >
+                  Fix in Step 1 →
+                </button>
+                <span className="text-tiny text-gray-500">After saving Step 1, come back here and click Re-test or Verify again.</span>
+              </div>
+            )}
           </div>
           <button
             onClick={onProbeApiKey}
@@ -216,8 +234,14 @@ export const Step4: React.FC<Props> = ({
                 Run <button onClick={onVerifyTelemetry} disabled={verifyingTrace} className="text-active hover:underline font-semibold disabled:opacity-60">again</button> any time.
               </div>
               {envVars.HELIX_API_KEY && envVars.HELIX_API_KEY.startsWith('FAKE-') && (
-                <div className="mt-2 text-tiny text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1.5">
-                  <span className="font-semibold">Heads up:</span> your <code className="font-mono">HELIX_API_KEY</code> is a placeholder — Helix returns 200 for any request. Replace it with a real tenant key.
+                <div className="mt-2 text-tiny text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1.5 flex items-start gap-2">
+                  <span className="flex-1">
+                    <span className="font-semibold">Heads up:</span> your <code className="font-mono">HELIX_API_KEY</code> is a placeholder — Helix returns 200 for any request. Replace it with a real tenant key.
+                  </span>
+                  <button
+                    onClick={() => onJumpToStep(1)}
+                    className="font-semibold text-active hover:underline flex-shrink-0"
+                  >Fix in Step 1 →</button>
                 </div>
               )}
             </div>
