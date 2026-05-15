@@ -64,6 +64,30 @@ const containerHasCollectorImage = (container) => {
       || /otelcol/i.test(command);
 };
 
+// Well-known telemetry *backends* (terminal stores / visualization) that
+// expose OTLP receive ports but don't act as upstream collectors. They'd
+// otherwise be caught by the port-exposure signal and clutter the bridge
+// list with candidates the user almost never wants — Jaeger v2, Prometheus
+// (with the OTLP receiver feature), Tempo, Loki, Zipkin (otlp-bridge),
+// SigNoz, ClickHouse-via-otelcol, and similar. Wiring helix-gateway as a
+// downstream exporter of these doesn't generally help because they're
+// terminal — they don't re-export. Skip them up front; users who do have
+// the unusual "forward from Jaeger" wiring can still attach via the
+// Manual tab.
+const TERMINAL_BACKEND_IMAGE_PATTERNS = [
+  /jaegertracing\//i,
+  /grafana\/tempo/i,
+  /grafana\/loki/i,
+  /grafana\/mimir/i,
+  /prom\/prometheus/i,
+  /openzipkin\/zipkin/i,
+  /signoz\//i,
+];
+const containerLooksLikeTerminalBackend = (container) => {
+  const image = (container && container.Image) || '';
+  return TERMINAL_BACKEND_IMAGE_PATTERNS.some(re => re.test(image));
+};
+
 // Classify a list of docker.listContainers() results into collector candidates.
 // Combines two signals: image/command regex (catches renamed contrib builds
 // and `otelcol`-invoking entrypoints) and OTLP port exposure (catches vendor
@@ -83,6 +107,11 @@ const detectCollectorContainers = (containers, { sidecarName, includeHelix = fal
     if (!name) continue;
     if (name === sidecar) continue;
     if (!includeHelix && name.startsWith('helix-')) continue;
+    // Known telemetry backends (Jaeger v2, Prometheus, Tempo, Loki, Zipkin,
+    // ...) expose OTLP receive ports but aren't upstream collectors. Skip
+    // them so the bridge list doesn't surface "attach to Jaeger" as an
+    // option when the user really wants their app's collector.
+    if (containerLooksLikeTerminalBackend(c)) continue;
     const byImage = containerHasCollectorImage(c);
     const byPorts = containerExposesOtlp(c);
     if (!byImage && !byPorts) continue;
@@ -201,5 +230,6 @@ module.exports = {
   detectCollectorContainers,
   containerExposesOtlp,
   containerHasCollectorImage,
+  containerLooksLikeTerminalBackend,
   OTLP_PORTS,
 };

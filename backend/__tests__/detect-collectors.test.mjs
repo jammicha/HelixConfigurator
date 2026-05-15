@@ -3,6 +3,7 @@ import {
   detectCollectorContainers,
   containerExposesOtlp,
   containerHasCollectorImage,
+  containerLooksLikeTerminalBackend,
 } from '../util.js';
 
 // Fixture shape matches what docker.listContainers() returns. Only the
@@ -140,6 +141,37 @@ describe('detectCollectorContainers', () => {
     ];
     const result = detectCollectorContainers(containers, { sidecarName: 'something-else', includeHelix: true });
     expect(result).toHaveLength(1);
+  });
+
+  it('skips known telemetry backends caught only by OTLP port (Jaeger v2)', () => {
+    // Jaeger v2 is built on the OTel collector and accepts OTLP, so the port
+    // signal alone fires on it. But it's a terminal store, not an upstream
+    // forwarder — listing it as a bridge target was a real false positive
+    // observed in the OTel demo on 2026-05-15.
+    const containers = [
+      make('jaeger', { image: 'jaegertracing/jaeger:2.14.1', ports: [otlpPort(4317), otlpPort(4318)] }),
+      make('real-collector', { image: 'otel/opentelemetry-collector-contrib:latest' }),
+    ];
+    const result = detectCollectorContainers(containers);
+    expect(result.map(r => r.name)).toEqual(['real-collector']);
+  });
+
+  it('skips Prometheus / Tempo / Loki / Zipkin', () => {
+    const containers = [
+      make('prom', { image: 'prom/prometheus:v2.55.0', ports: [otlpPort(4318)] }),
+      make('tempo', { image: 'grafana/tempo:2.6.0', ports: [otlpPort(4317)] }),
+      make('loki', { image: 'grafana/loki:3.2.1', ports: [otlpPort(4318)] }),
+      make('zipkin', { image: 'openzipkin/zipkin:3.4', ports: [otlpPort(4318)] }),
+      make('keep-me', { image: 'vendor/agent:1', ports: [otlpPort(4318)] }),
+    ];
+    const result = detectCollectorContainers(containers);
+    expect(result.map(r => r.name)).toEqual(['keep-me']);
+  });
+
+  it('containerLooksLikeTerminalBackend identifies Jaeger', () => {
+    expect(containerLooksLikeTerminalBackend(make('x', { image: 'jaegertracing/jaeger:2.14.1' }))).toBe(true);
+    expect(containerLooksLikeTerminalBackend(make('x', { image: 'jaegertracing/all-in-one:1.62' }))).toBe(true);
+    expect(containerLooksLikeTerminalBackend(make('x', { image: 'otel/opentelemetry-collector:latest' }))).toBe(false);
   });
 
   it('skips containers with no name', () => {
