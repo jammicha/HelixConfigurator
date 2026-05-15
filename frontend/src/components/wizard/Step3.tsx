@@ -42,6 +42,11 @@ type Props = {
   attachingNetwork: string | null;
   attachResult: { network: string; ok: boolean; message: string } | null;
   onAttachNetwork: (network: string) => void;
+  // Detach helix-gateway from a previously-bridged network. Lets the user
+  // recover from an "attached the wrong one" without dropping to the
+  // docker CLI. Also useful while testing the verify-trace verdicts.
+  onDetachNetwork: (network: string) => void;
+  detachingNetwork: string | null;
   k8sApplying: boolean;
   k8sApplyResult: 'applied' | 'failed' | null;
   onApplyK8sTemplate: () => void;
@@ -57,6 +62,8 @@ export const Step3: React.FC<Props> = ({
   attachingNetwork,
   attachResult,
   onAttachNetwork,
+  onDetachNetwork,
+  detachingNetwork,
   k8sApplying,
   k8sApplyResult,
   onApplyK8sTemplate,
@@ -81,9 +88,15 @@ export const Step3: React.FC<Props> = ({
   useEffect(() => {
     if (!bridgedCollector) {
       setVerifyResult(null);
+      setVerifying(false);
       return;
     }
     let cancelled = false;
+    // Reset prior result so the previous collector's verdict doesn't briefly
+    // render against the new one's identity. The render path below uses
+    // `verifyResult == null` as the spinner trigger, so this guarantees a
+    // clean transition: spinner immediately → result when fetch returns.
+    setVerifyResult(null);
     setVerifying(true);
     fetch('/api/diagnostics/step3-verify', {
       method: 'POST',
@@ -92,9 +105,26 @@ export const Step3: React.FC<Props> = ({
     })
       .then(r => r.ok ? r.json() : null)
       .then((data: Step3Verify | null) => {
-        if (!cancelled && data) setVerifyResult(data);
+        if (cancelled) return;
+        if (data) setVerifyResult(data);
+        else setVerifyResult({
+          // Fetch failed (network blip, 500). Surface as yellow so the user
+          // isn't stuck on a spinner, and let them continue to Step 4 where
+          // the trace inject will do its own deeper verification.
+          topology: 'unknown', gatewayReceiver: 'unknown', collectorExporter: 'not-probed',
+          sharedNetwork: null, overall: 'yellow',
+          message: 'Couldn\'t reach the verification endpoint.',
+          remediation: 'You can continue to Verify; Step 4 will do its own checks.',
+        });
       })
-      .catch(() => { /* fall through to topology-only banner */ })
+      .catch(() => {
+        if (!cancelled) setVerifyResult({
+          topology: 'unknown', gatewayReceiver: 'unknown', collectorExporter: 'not-probed',
+          sharedNetwork: null, overall: 'yellow',
+          message: 'Verification call failed.',
+          remediation: 'You can continue to Verify; Step 4 will do its own checks.',
+        });
+      })
       .finally(() => { if (!cancelled) setVerifying(false); });
     return () => { cancelled = true; };
   }, [bridgedCollector?.name]);
@@ -112,6 +142,15 @@ export const Step3: React.FC<Props> = ({
         <div className="mb-4 flex items-start gap-3 p-3 bg-success/10 border border-success/40 rounded text-sm">
           <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
           <span className="text-gray-200"><span className="font-semibold">helix-gateway was automatically attached to your app's network.</span> It joined <code className="font-mono">{bridgeStatus.network}</code> (matched container <code className="font-mono">{bridgeStatus.targetContainer}</code>).</span>
+        </div>
+      )}
+      {bridgeStatus?.kind === 'skipped' && (
+        // Auto-bridge intentionally skipped (no APP_URL, loopback APP_URL,
+        // off-host APP_URL hostname). The reason is informational, not an
+        // error — the user can still wire manually below.
+        <div className="mb-4 flex items-start gap-3 p-3 bg-gray-1000 border border-gray-800 rounded text-sm">
+          <AlertTriangle className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+          <span className="text-gray-300"><span className="font-semibold text-gray-200">Auto-bridge skipped.</span> {bridgeStatus.reason}</span>
         </div>
       )}
       {bridgeStatus?.kind === 'error' && (
@@ -211,7 +250,37 @@ export const Step3: React.FC<Props> = ({
                       </div>
                     </div>
                     {reachable ? (
-                      <span className="px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-success/20 text-success border border-success/40">Attached</span>
+                      // Show the shared-network name + an Unattach action.
+                      // Was a static "Attached" pill — that gave the user no
+                      // way to back out of a wrong attach without dropping
+                      // to the docker CLI. The "Detach from" label names
+                      // the network we'll disconnect so the action is
+                      // unambiguous when a collector is on multiple.
+                      (() => {
+                        const sharedNetworks = c.networks.filter(n => attachable.includes(n)
+                          ? false /* attachable is "not shared yet"; if reachable, the shared one isn't here */
+                          : true) || [];
+                        // Best-effort: pick a non-system network that isn't in the
+                        // attachable (unshared) list — that's the one we're already on.
+                        const sharedNetwork = c.networks.find(n => !attachable.includes(n) && n !== 'helix-bridge') || c.networks[0];
+                        return (
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-success/20 text-success border border-success/40">
+                              Attached{sharedNetwork ? <> on <code className="font-mono normal-case tracking-normal">{sharedNetwork}</code></> : null}
+                            </span>
+                            {sharedNetwork && sharedNetwork !== 'helix-bridge' && (
+                              <button
+                                onClick={() => onDetachNetwork(sharedNetwork)}
+                                disabled={detachingNetwork === sharedNetwork}
+                                className="text-tiny text-gray-400 hover:text-gray-200 underline disabled:opacity-60"
+                                title={`Disconnect helix-gateway from ${sharedNetwork}. Use this if you attached the wrong network.`}
+                              >
+                                {detachingNetwork === sharedNetwork ? 'Detaching…' : 'Detach'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()
                     ) : attachable.length === 0 ? (
                       <span className="text-tiny text-gray-500 self-center">no user networks</span>
                     ) : attachable.length === 1 ? (
@@ -272,28 +341,29 @@ export const Step3: React.FC<Props> = ({
       )}
 
       {someoneAttached && (
-        // Tri-state. Verifying first (loader), then either the deep-verify
-        // result if it landed, or a topology-only fallback if the probe
-        // hadn't returned yet or failed. Each state names the collector and
-        // the shared network so the user sees the same identifiers Step 4
-        // will operate on, not a vague "your collector."
-        verifying && !verifyResult ? (
+        // Two states only: spinner while we don't have a verdict yet
+        // (initial render before the effect fires, or the fetch in flight),
+        // then the tri-state result. No "topology-only fallback green" —
+        // that was causing the green-flash → spinner → result jitter you
+        // reported. The error branches in the effect always set verifyResult
+        // to *something*, so we won't get stuck on the spinner.
+        verifyResult == null ? (
           <div className="mt-4 flex items-start gap-3 p-2.5 bg-gray-1000 border border-gray-800 rounded text-tiny text-gray-400">
             <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0 mt-0.5" />
-            <span>Verifying receiver and exporter…</span>
+            <span>Verifying network connection and gateway receiver…</span>
           </div>
-        ) : verifyResult?.overall === 'green' ? (
+        ) : verifyResult.overall === 'green' ? (
           <div className="mt-4 flex items-start gap-3 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
             <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0 mt-0.5" />
             <span>
               <span className="font-semibold text-gray-100">{verifyResult.message}</span>{' '}
-              {bridgedCollector && verifyResult.sharedNetwork && (
-                <>helix-gateway is bridged to <code className="font-mono">{verifyResult.sharedNetwork}</code> with <code className="font-mono">{bridgedCollector.name}</code>.</>
+              {verifyResult.sharedNetwork && bridgedCollector && (
+                <>helix-gateway shares <code className="font-mono">{verifyResult.sharedNetwork}</code> with <code className="font-mono">{bridgedCollector.name}</code>.</>
               )}{' '}
               Continue to Verify.
             </span>
           </div>
-        ) : verifyResult?.overall === 'yellow' ? (
+        ) : verifyResult.overall === 'yellow' ? (
           <div className="mt-4 flex items-start gap-3 p-2.5 bg-warning/10 border border-warning/40 rounded text-tiny text-gray-300">
             <AlertTriangle className="w-3.5 h-3.5 text-warning flex-shrink-0 mt-0.5" />
             <span>
@@ -301,23 +371,12 @@ export const Step3: React.FC<Props> = ({
               {verifyResult.remediation}
             </span>
           </div>
-        ) : verifyResult?.overall === 'red' ? (
+        ) : (
           <div className="mt-4 flex items-start gap-3 p-2.5 bg-danger/10 border border-danger/40 rounded text-tiny text-gray-300">
             <X className="w-3.5 h-3.5 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
             <span>
               <span className="font-semibold text-gray-100">{verifyResult.message}</span>{' '}
               {verifyResult.remediation}
-            </span>
-          </div>
-        ) : (
-          // Probe hasn't returned yet (or errored). Show the topology-only
-          // signal — same message we had before — so the user isn't blocked
-          // on a network blip to the verify endpoint.
-          <div className="mt-4 flex items-start gap-3 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
-            <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0 mt-0.5" />
-            <span>
-              <span className="font-semibold text-gray-100">helix-gateway is already on a network with a detected collector.</span>{' '}
-              You can continue to Verify.
             </span>
           </div>
         )

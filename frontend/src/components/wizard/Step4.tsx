@@ -299,8 +299,16 @@ export const Step4: React.FC<Props> = ({
           {verifyingTrace ? 'Verifying…' : 'Verify gateway → Helix'}
         </button>
         <button
+          // Disabled until Verify has run at least once. The user could
+          // technically launch without running it (and pre-this gate, often
+          // did), then hit a wall on the dashboard because nothing had
+          // confirmed the gateway → Helix path is healthy. Any verify
+          // outcome unlocks — even pending/queued/rejected — because if
+          // they're debugging, the dashboard is the right next surface.
           onClick={onLaunchDashboard}
-          className="flex-1 bg-success hover:bg-success-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm"
+          disabled={!traceVerifyResult}
+          title={!traceVerifyResult ? 'Run Verify gateway → Helix first so we know your pipeline is wired up before you leave onboarding.' : 'Open the gateway dashboard'}
+          className="flex-1 bg-success hover:bg-success-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm disabled:opacity-60 disabled:cursor-not-allowed"
         >Launch dashboard</button>
       </div>
 

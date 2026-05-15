@@ -106,6 +106,7 @@ const App = () => {
   // collector can one-click attach helix-gateway to that collector's network.
   const [detectedCollectors, setDetectedCollectors] = useState<DetectedCollector[]>([]);
   const [attachingNetwork, setAttachingNetwork] = useState<string | null>(null);
+  const [detachingNetwork, setDetachingNetwork] = useState<string | null>(null);
   const [attachResult, setAttachResult] = useState<{ network: string; ok: boolean; message: string } | null>(null);
   // Wizard redesign — Step 3 + Step 4 state.
   const [gatewayConfigOpen, setGatewayConfigOpen] = useState(false);
@@ -972,6 +973,31 @@ const App = () => {
     }
   };
 
+  // Reverse of attachSidecarToNetwork — disconnect helix-gateway from a
+  // previously-bridged network and refresh the detected list so the row's
+  // "reachable" badge clears. Also drops the entry from the persisted
+  // bridged-networks.json on the backend, so a future configurator restart
+  // doesn't re-attach to the network we just told it to leave.
+  const detachSidecarFromNetwork = async (network: string) => {
+    if (detachingNetwork) return;
+    setDetachingNetwork(network);
+    setAttachResult(null);
+    try {
+      const res = await fetch('/api/lifecycle/unbridge-network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ network }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setAttachResult({ network, ok: res.ok, message: data.message || data.error || 'Detached' });
+      if (res.ok) refreshDetectedCollectors();
+    } catch (e: any) {
+      setAttachResult({ network, ok: false, message: e.message || 'Request failed' });
+    } finally {
+      setDetachingNetwork(null);
+    }
+  };
+
   // Step 2 / Step 4 — fetch the live gateway config for the read-only modal.
   // Lazy-load: only hit the endpoint the first time the modal opens.
   const openGatewayConfigModal = async () => {
@@ -1618,6 +1644,8 @@ ${logsData.logs || '(no logs available)'}
                   attachingNetwork={attachingNetwork}
                   attachResult={attachResult}
                   onAttachNetwork={attachSidecarToNetwork}
+                  onDetachNetwork={detachSidecarFromNetwork}
+                  detachingNetwork={detachingNetwork}
                   k8sApplying={k8sApplying}
                   k8sApplyResult={k8sApplyResult}
                   onApplyK8sTemplate={requestApplyK8sTemplate}

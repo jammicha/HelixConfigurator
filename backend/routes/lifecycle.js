@@ -439,6 +439,58 @@ function register(app, { docker }) {
     }
   });
 
+  // POST detach the sidecar from a previously-bridged network. Mirrors the
+  // bridge-network route in reverse: disconnect helix-gateway from the
+  // named network, drop the network from the persisted list, and recreate
+  // the gateway so its OTLP listener stops accepting on that interface
+  // (otherwise the customer collector could still resolve & post traffic
+  // until the next gateway restart — confusing during the "I attached the
+  // wrong network" recovery case).
+  app.post('/api/lifecycle/unbridge-network', async (req, res) => {
+    const { network } = req.body || {};
+    const sidecarName = TARGET_CONTAINER();
+    if (!network || typeof network !== 'string' || !/^[a-zA-Z0-9_.-]+$/.test(network)) {
+      return res.status(400).json({ error: 'Invalid network name' });
+    }
+    // Refuse to detach from our own primary network — that's how
+    // helix-gateway and helix-configurator talk to each other; detaching it
+    // would brick the dashboard until a recreate.
+    if (network === 'helix-bridge') {
+      return res.status(400).json({ error: 'Refusing to detach from helix-bridge (gateway and configurator share it)' });
+    }
+    try {
+      await withDockerTimeout(
+        docker.getNetwork(network).disconnect({ Container: sidecarName }),
+        'network.disconnect',
+        10_000,
+      );
+    } catch (e) {
+      if (e.statusCode === 404) {
+        // Network gone, or sidecar wasn't on it. Still purge from
+        // persistence so future reconciles don't try to re-attach.
+        forgetBridgedNetwork(network);
+        return res.status(404).json({ error: `Network "${network}" not found or sidecar wasn't attached` });
+      }
+      if (sendDockerTimeoutResponse(res, e)) return;
+      return res.status(500).json({ error: 'Failed to detach network', details: e.message });
+    }
+    forgetBridgedNetwork(network);
+    // Recreate so the OTLP listener drops the interface cleanly. Without
+    // this, the listener stays bound to the now-detached network on
+    // sockets that opened at start time — confusing because the customer
+    // collector would think it's still connected.
+    try {
+      await recreateGateway(docker, sidecarName);
+    } catch (e) {
+      return res.status(500).json({
+        error: 'Network detached but gateway recreate failed — restart it from the dashboard to refresh the listener',
+        details: e.message,
+        network,
+      });
+    }
+    res.json({ message: `Detached ${sidecarName} from ${network}`, network });
+  });
+
   // GET the persisted list of networks the gateway is supposed to be bridged
   // to. Surfaced for the dashboard so the user can see what survives a
   // compose recreate, and to debug a stale entry.

@@ -266,18 +266,26 @@ function register(app, { docker, containerLogs, configPath }) {
       }
     }
 
-    // Tri-state overall verdict — strict: any explicit failure → red;
-    // any unknown on a probe we attempted → yellow; otherwise green.
+    // Tri-state overall verdict. The exporter check is informational at
+    // Step 3 — exporter=unknown is the *common* state immediately after
+    // bridging (smart-add may not have applied yet, or the collector
+    // hasn't restarted to pick up the helix-targeted exporter). Treating
+    // unknown as yellow misleads users into thinking Step 3 has a problem
+    // when really the wiring just hasn't been validated end-to-end yet.
+    // Only an active "failing" signal pulls the verdict down — that means
+    // the exporter exists and is logging real failures.
     let overall = 'green';
-    let message = 'helix-gateway is bridged and the collector exporter is succeeding.';
+    let message = collector
+      ? `Network connection to \`${collector}\` is good. helix-gateway's OTLP receiver is reachable.`
+      : 'Network connection is good. helix-gateway\'s OTLP receiver is reachable.';
     let remediation;
     if (topology === 'missing' || gatewayReceiver === 'unreachable' || collectorExporter === 'failing') {
       overall = 'red';
       if (topology === 'missing') {
         message = collector
-          ? `helix-gateway and \`${collector}\` don't share a network.`
+          ? `helix-gateway and \`${collector}\` don't share a Docker network.`
           : 'helix-gateway isn\'t on any user network yet.';
-        remediation = 'Re-attach via Step 3 or the Bridge controls below.';
+        remediation = 'Re-attach via the Detected list above.';
       } else if (gatewayReceiver === 'unreachable') {
         message = 'helix-gateway\'s OTLP receiver isn\'t reachable on :4318.';
         remediation = 'The gateway is running but the receiver isn\'t listening — check Step 1 saved a valid YAML and the container restarted cleanly.';
@@ -285,12 +293,19 @@ function register(app, { docker, containerLogs, configPath }) {
         message = `\`${collector}\`'s helix exporter is failing (failed +${exporterDetail?.failedDelta || 0} in 3s, sent +${exporterDetail?.sentDelta || 0}).`;
         remediation = 'The collector can\'t deliver to helix-gateway. Most common causes: DNS for "helix-gateway" doesn\'t resolve from the collector\'s network, or TLS/auth mismatched.';
       }
-    } else if (gatewayReceiver === 'unknown' || (collector && collectorExporter === 'unknown') || topology === 'unknown') {
+    } else if (gatewayReceiver === 'unknown' || topology === 'unknown') {
       overall = 'yellow';
-      message = collector
-        ? `Topology looks good but I couldn't fully verify ${collectorExporter === 'unknown' ? `\`${collector}\`'s exporter` : 'the gateway receiver'}.`
-        : 'Topology looks good but I couldn\'t fully verify the gateway receiver.';
+      message = 'Network connection looks good but I couldn\'t verify the gateway receiver from this side.';
       remediation = 'You can continue to Verify; the Step 4 check will catch lingering issues.';
+    }
+    // Note: collector exporter status is appended as informational context
+    // only — it never alone determines the verdict at Step 3.
+    if (overall === 'green' && collector) {
+      if (collectorExporter === 'ok') {
+        message = `Network connection to \`${collector}\` is good, and its helix exporter is succeeding.`;
+      } else if (collectorExporter === 'not-probed' || collectorExporter === 'unknown') {
+        message += ' (Exporter status will be confirmed in Step 4.)';
+      }
     }
     res.json({
       topology,
