@@ -62,6 +62,16 @@ export const Step2: React.FC<Props> = ({
     ? (<span className="inline-flex items-center gap-1 text-tiny text-warning"><AlertTriangle className="w-3 h-3" /> Not detected — apply the snippet and restart the collector, then re-verify</span>)
     : null;
 
+  // After a successful smart-add apply, collapse the page to just the
+  // "Verify exporter" affordance: hide the Review-changes button (the
+  // change is already applied) and the manual snippet/pipeline blocks
+  // below (they're a fallback path the user no longer needs). If verify
+  // comes back as 'not-configured' — collector didn't restart, file
+  // didn't take effect, smart-add hit a corner case — restore the full
+  // view so the user can re-apply or copy the snippets manually. Same
+  // expansion happens when the user dismisses the success banner.
+  const compactAfterApply = smartAddResult?.ok === true && verifyStatus !== 'not-configured';
+
   return (
   <div className="adapt-card">
     <h2 className="text-lg font-semibold mb-4 text-gray-200">Step 2: Add helix-gateway as an exporter</h2>
@@ -133,16 +143,22 @@ export const Step2: React.FC<Props> = ({
           <>
             <p className="text-tiny text-gray-300 mb-3">
               Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
-              We'll add <code className="font-mono text-gray-100">{smartAddProposal.exporterName}</code> as an exporter and wire it into{' '}
-              <strong className="text-gray-200">{(smartAddProposal.addedToPipelines || []).join(', ')}</strong> pipelines.
+              {compactAfterApply ? (
+                <>Smart-add applied. Run <strong className="text-gray-200">Verify exporter</strong> after the collector finishes restarting to confirm the wiring.</>
+              ) : (
+                <>We'll add <code className="font-mono text-gray-100">{smartAddProposal.exporterName}</code> as an exporter and wire it into{' '}
+                <strong className="text-gray-200">{(smartAddProposal.addedToPipelines || []).join(', ')}</strong> pipelines.</>
+              )}
             </p>
             <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={onOpenSmartAddPreview}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-primary hover:bg-primary-hover text-white"
-              >
-                Review changes
-              </button>
+              {!compactAfterApply && (
+                <button
+                  onClick={onOpenSmartAddPreview}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-primary hover:bg-primary-hover text-white"
+                >
+                  Review changes
+                </button>
+              )}
               {onVerifyExporter && (
                 <button
                   onClick={handleVerify}
@@ -152,7 +168,9 @@ export const Step2: React.FC<Props> = ({
                 >Verify exporter</button>
               )}
               {verifyBadge}
-              <span className="text-tiny text-gray-500">Or copy the snippets below to apply manually.</span>
+              {!compactAfterApply && (
+                <span className="text-tiny text-gray-500">Or copy the snippets below to apply manually.</span>
+              )}
             </div>
           </>
         )}
@@ -164,10 +182,17 @@ export const Step2: React.FC<Props> = ({
       </div>
     )}
 
-    <div className="mb-2 flex items-baseline justify-between gap-3">
-      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Exporter</span>
-    </div>
-    <SnippetBlock text={`exporters:
+    {/* Manual snippet path. Hidden once smart-add successfully applied —
+        the snippets are a fallback for the no-detection / smart-add-failed
+        flows, not something the user needs to look at after we've already
+        edited their config for them. A verify failure flips compactAfterApply
+        false and brings these back. */}
+    {!compactAfterApply && (
+      <>
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Exporter</span>
+        </div>
+        <SnippetBlock text={`exporters:
   otlphttp/helix_sidecar:
     endpoint: "http://helix-gateway:4318"
     tls:
@@ -176,16 +201,16 @@ export const Step2: React.FC<Props> = ({
       enabled: true
       num_consumers: 100
       queue_size: 10000`} />
-    <p className="text-tiny text-gray-500 -mt-4 mb-6">
-      In your main collector config (e.g. <code className="font-mono">otelcol-config.yaml</code>). No API key needed here —{' '}
-      <button onClick={onOpenGatewayConfig} className="text-active hover:underline font-semibold">view gateway config to see where it's set</button>.{' '}
-      The <code className="font-mono">sending_queue</code> matches what helix-gateway uses — 100 parallel HTTP workers, 10k batch queue — so bursts don't drop.
-    </p>
+        <p className="text-tiny text-gray-500 -mt-4 mb-6">
+          In your main collector config (e.g. <code className="font-mono">otelcol-config.yaml</code>). No API key needed here —{' '}
+          <button onClick={onOpenGatewayConfig} className="text-active hover:underline font-semibold">view gateway config to see where it's set</button>.{' '}
+          The <code className="font-mono">sending_queue</code> matches what helix-gateway uses — 100 parallel HTTP workers, 10k batch queue — so bursts don't drop.
+        </p>
 
-    <div className="mb-2 flex items-baseline justify-between gap-3">
-      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pipelines</span>
-    </div>
-    <SnippetBlock text={`service:
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pipelines</span>
+        </div>
+        <SnippetBlock text={`service:
   pipelines:
     traces:
       exporters: [..., otlphttp/helix_sidecar]
@@ -193,12 +218,14 @@ export const Step2: React.FC<Props> = ({
       exporters: [..., otlphttp/helix_sidecar]
     logs:
       exporters: [..., otlphttp/helix_sidecar]`} />
-    <p className="text-tiny text-gray-500 -mt-4 mb-6">Wire into whichever pipelines your collector uses. Restart your collector after saving.</p>
+        <p className="text-tiny text-gray-500 -mt-4 mb-6">Wire into whichever pipelines your collector uses. Restart your collector after saving.</p>
 
-    <div className="mb-3 flex items-start gap-2.5 p-3 rounded border border-warning/40 bg-warning/10 text-tiny text-gray-300">
-      <span className="text-warning font-bold flex-shrink-0 leading-tight" aria-hidden="true">!</span>
-      <span>After saving, restart your collector container so the new exporter takes effect.</span>
-    </div>
+        <div className="mb-3 flex items-start gap-2.5 p-3 rounded border border-warning/40 bg-warning/10 text-tiny text-gray-300">
+          <span className="text-warning font-bold flex-shrink-0 leading-tight" aria-hidden="true">!</span>
+          <span>After saving, restart your collector container so the new exporter takes effect.</span>
+        </div>
+      </>
+    )}
     <div className="flex gap-4">
       <button
         onClick={onBack}

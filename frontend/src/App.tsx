@@ -998,6 +998,48 @@ const App = () => {
     } catch { /* non-fatal */ }
   };
 
+  // Wipe wizard state and restart onboarding from Step 1. Asks for confirm
+  // first — destructive. Calls the backend reset (clears .env, drops
+  // bridged-networks persistence, recreates the gateway with clean env),
+  // then resets every piece of React state the wizard relies on, drops
+  // localStorage keys, and lands the user back on Step 1.
+  const [resetting, setResetting] = useState(false);
+  const requestResetOnboarding = () => {
+    if (resetting) return;
+    setConfirmDialog({
+      title: 'Reset onboarding and start over?',
+      message: 'This clears your Helix endpoint, API key, X-Source, App URL, and Business Service key from .env, drops any bridged networks the gateway is on, and recreates the gateway with empty values. The OTel trace store and your gateway YAML config are left alone. You\'ll land back on Step 1.',
+      confirmLabel: 'Reset',
+      onConfirm: async () => {
+        setResetting(true);
+        try {
+          const res = await fetch('/api/lifecycle/reset-onboarding', { method: 'POST' });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            console.warn('reset-onboarding failed:', data);
+          }
+        } catch (e) {
+          console.warn('reset-onboarding threw:', e);
+        }
+        // Clear UI state regardless of backend outcome — the user explicitly
+        // asked to start over, so a backend partial failure shouldn't strand
+        // them on a half-cleared page.
+        setEnvVars({ HELIX_ENDPOINT: '', HELIX_API_KEY: '', X_SOURCE: '', APP_URL: '', BUSINESS_SERVICE_KEY: '' });
+        setBridgeStatus(null);
+        setAttachResult(null);
+        setTraceVerifyResult(null);
+        setApiKeyProbe(null);
+        setSetupError('');
+        setTelemetryStatus('idle');
+        setIsSetupComplete(false);
+        setSetupStep(1);
+        localStorage.removeItem('helix-configurator.onboarded');
+        localStorage.removeItem('helix-configurator.setupStep');
+        setResetting(false);
+      },
+    });
+  };
+
   // Step 3 — apply the K8s Attribute Enrichment template via the existing
   // /api/templates and /api/config endpoints. No new backend route needed.
   // Confirmation guarded: this overwrites the entire gateway YAML, including
@@ -1594,6 +1636,21 @@ ${logsData.logs || '(no logs available)'}
               <h1 className="text-2xl font-semibold text-center text-gray-100">Welcome to Helix Configurator</h1>
 
               <Stepper current={setupStep} onJump={setSetupStep} />
+
+              {/* Single discoverable escape hatch for "this got into a weird
+                  state, let me start over." Lives on every wizard step so a
+                  user mid-flow can wipe and restart without navigating away.
+                  Confirmed before any destructive action. */}
+              <div className="flex justify-end -mt-2">
+                <button
+                  onClick={requestResetOnboarding}
+                  disabled={resetting}
+                  className="text-tiny text-gray-500 hover:text-gray-300 underline disabled:opacity-60"
+                  title="Clear .env (endpoint, API key, X-Source, App URL, business-service key), drop bridged networks, and restart from Step 1"
+                >
+                  {resetting ? 'Resetting…' : 'Reset onboarding and start over'}
+                </button>
+              </div>
 
               {setupStep === 1 && (
                 <Step1

@@ -346,6 +346,58 @@ function register(app, { docker }) {
     }
   });
 
+  // POST wipe wizard state and start fresh. Clears the configurator-managed
+  // .env values, drops the bridged-networks persistence, and recreates the
+  // gateway with a clean environment. Does NOT touch UI_AUTH_PASSWORD or
+  // IS_DEMO_INSTALL (deployment config, not wizard state) and does NOT wipe
+  // the OTel trace store (separate concern; users can reset that from the
+  // dashboard if they need a clean data slate too).
+  app.post('/api/lifecycle/reset-onboarding', async (req, res) => {
+    const sidecarName = TARGET_CONTAINER();
+    const WIZARD_KEYS = ['HELIX_ENDPOINT', 'HELIX_API_KEY', 'X_SOURCE', 'APP_URL', 'BUSINESS_SERVICE_KEY', 'HELIX_EVENTS_ENDPOINT'];
+
+    // 1. Clear the wizard-managed .env values. Preserve other lines (like
+    //    UI_AUTH_PASSWORD or TARGET_CONTAINER_NAME) so deployment config
+    //    survives the reset.
+    try {
+      const envContent = fs.readFileSync(ENV_PATH, 'utf8');
+      const lines = envContent.split('\n').map(line => {
+        for (const key of WIZARD_KEYS) {
+          if (line.startsWith(`${key}=`)) return `${key}=`;
+        }
+        return line;
+      });
+      fs.writeFileSync(ENV_PATH, lines.join('\n'), 'utf8');
+      for (const key of WIZARD_KEYS) {
+        process.env[key] = '';
+      }
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to clear .env', details: e.message });
+    }
+
+    // 2. Drop persisted bridged-networks so the next boot's reconcile doesn't
+    //    re-attach the gateway to whatever the user just walked away from.
+    saveBridgedNetworks([]);
+
+    // 3. Recreate the gateway with the cleared environment. Best-effort —
+    //    even if the recreate fails, the env and persistence are cleared
+    //    and a manual restart from the dashboard will pick up the fresh
+    //    values. Networks attached at runtime drop on the recreate.
+    let recreateError = null;
+    try {
+      await recreateGateway(docker, sidecarName);
+    } catch (e) {
+      recreateError = e.message;
+      console.warn('reset-onboarding: recreate failed:', e.message);
+    }
+
+    res.json({
+      message: 'Onboarding reset',
+      clearedKeys: WIZARD_KEYS,
+      recreateError,
+    });
+  });
+
   // POST detach the sidecar from a previously-bridged network. Mirrors the
   // bridge-network route in reverse: disconnect helix-gateway from the
   // named network, drop the network from the persisted list, and recreate
