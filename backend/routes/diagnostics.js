@@ -198,57 +198,58 @@ function register(app, { docker, containerLogs, configPath }) {
     const collector = (typeof collectorName === 'string' && /^[a-zA-Z0-9_.-]+$/.test(collectorName))
       ? collectorName : null;
 
-    // Topology check: confirm gateway and collector still share a network.
-    // Cheaper than the receiver/exporter probes and a useful sanity check
-    // for callers that didn't pre-confirm via /api/discovery/collectors.
+    // Independent probes fan out in parallel: gateway inspect, collector
+    // inspect (if named), receiver HTTP, and exporter baseline. The 3s wait
+    // for the exporter delta is the dominant cost; folding the inspects and
+    // receiver probe into the same Promise.all shaves the obvious 5s+2s
+    // serial wait. `Promise.allSettled` lets each probe fail independently
+    // — a topology failure shouldn't drag the receiver verdict down.
+    const probes = await Promise.allSettled([
+      withDockerTimeout(docker.getContainer(targetContainer).inspect(), 'container.inspect', 5_000),
+      collector ? withDockerTimeout(docker.getContainer(collector).inspect(), 'container.inspect', 5_000) : Promise.resolve(null),
+      axios.get(`http://${targetContainer}:4318/`, { timeout: 2000, validateStatus: () => true }),
+      collector ? fetchCustomerCollectorCounters(collector) : Promise.resolve(null),
+    ]);
+    const [gwInspectRes, colInspectRes, receiverRes, exporterBaselineRes] = probes;
+
+    // Topology: derive from the inspect results.
     let topology = 'unknown';
     let sharedNetwork = null;
-    try {
-      const gwInspect = await withDockerTimeout(docker.getContainer(targetContainer).inspect(), 'container.inspect', 5_000);
-      const gwNetworks = new Set(Object.keys(gwInspect.NetworkSettings?.Networks || {}));
-      if (collector) {
-        const colInspect = await withDockerTimeout(docker.getContainer(collector).inspect(), 'container.inspect', 5_000);
-        const colNetworks = Object.keys(colInspect.NetworkSettings?.Networks || {});
+    if (gwInspectRes.status === 'fulfilled') {
+      const gwNetworks = new Set(Object.keys(gwInspectRes.value.NetworkSettings?.Networks || {}));
+      if (collector && colInspectRes.status === 'fulfilled' && colInspectRes.value) {
+        const colNetworks = Object.keys(colInspectRes.value.NetworkSettings?.Networks || {});
         sharedNetwork = colNetworks.find(n => gwNetworks.has(n)) || null;
         topology = sharedNetwork ? 'ok' : 'missing';
-      } else {
-        // No collector name passed — caller is asking "is the gateway alive
-        // at all" on some non-helix-bridge network. Treat any non-helix-
-        // bridge network as evidence of topology being in place.
+      } else if (!collector) {
+        // No collector named — caller is asking "is the gateway alive at all"
+        // on some non-helix-bridge network. Any user network counts.
         const userNetworks = [...gwNetworks].filter(n => n !== 'helix-bridge' && n !== 'host' && n !== 'none' && n !== 'ingress');
         sharedNetwork = userNetworks[0] || null;
         topology = sharedNetwork ? 'ok' : 'missing';
       }
-    } catch (e) {
-      // Inspect failed — most often "gateway not running." Caller's UI shows
-      // this as 'unknown' rather than implying topology is broken.
-      console.warn('step3-verify topology probe:', e.message);
+    } else {
+      console.warn('step3-verify topology probe:', gwInspectRes.reason?.message || gwInspectRes.reason);
     }
 
-    // Receiver probe: a tiny HTTP GET against the gateway's OTLP receiver.
-    // 404 is fine — the receiver responds to GET with a method-not-allowed
-    // but the listener is bound. Connection refused or timeout → not bound.
+    // Receiver verdict: 404 is fine — proves the listener is bound. Only
+    // connection-refused / timeout means it's actually down.
     let gatewayReceiver = 'unknown';
-    try {
-      await axios.get(`http://${targetContainer}:4318/`, { timeout: 2000, validateStatus: () => true });
+    if (receiverRes.status === 'fulfilled') {
       gatewayReceiver = 'ok';
-    } catch (e) {
-      if (e.code === 'ECONNREFUSED' || e.code === 'ECONNABORTED' || /timeout/i.test(e.message || '')) {
-        gatewayReceiver = 'unreachable';
-      } else {
-        gatewayReceiver = 'unknown';
-      }
+    } else {
+      const err = receiverRes.reason || {};
+      gatewayReceiver = (err.code === 'ECONNREFUSED' || err.code === 'ECONNABORTED' || /timeout/i.test(err.message || ''))
+        ? 'unreachable' : 'unknown';
     }
 
-    // Exporter probe: 3-second delta on the customer collector's
-    // helix-targeted exporter counters. Failing means non-zero growth in
-    // send_failed_* over the window; ok means send_failed stable at the
-    // baseline OR sent grew at least as fast. Skipped (not-probed) when
-    // no collector was named or the collector doesn't expose metrics.
+    // Exporter: needs a 3s second sample after the baseline to detect a
+    // non-zero send_failed delta. Baseline was fetched in the parallel
+    // phase above; only the "after" measurement stays serial.
     let collectorExporter = 'not-probed';
     let exporterDetail = null;
     if (collector) {
-      const baseline = await fetchCustomerCollectorCounters(collector);
+      const baseline = exporterBaselineRes.status === 'fulfilled' ? exporterBaselineRes.value : null;
       if (!baseline) {
         collectorExporter = 'unknown';
       } else {
@@ -260,8 +261,7 @@ function register(app, { docker, containerLogs, configPath }) {
           const sentDelta = after.sent - baseline.sent;
           const failedDelta = after.failed - baseline.failed;
           exporterDetail = { sentDelta, failedDelta };
-          if (failedDelta > 0 && sentDelta <= 0) collectorExporter = 'failing';
-          else collectorExporter = 'ok';
+          collectorExporter = (failedDelta > 0 && sentDelta <= 0) ? 'failing' : 'ok';
         }
       }
     }

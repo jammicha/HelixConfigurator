@@ -94,6 +94,40 @@ export const Step4: React.FC<Props> = ({
   // Offer a direct jump-back so the user doesn't have to click their way
   // up the Stepper looking for the right field.
   const probeNeedsStep1Fix = apiKeyProbe != null && apiKeyProbe.status !== 'valid';
+
+  // Shared shell for the 4 failure-tone trace-verify banners (rejected /
+  // queued_customer / queued_gateway / pending / error). Each used to be
+  // 7 lines of nearly-identical JSX. Each tone maps to color + icon.
+  type BannerTone = 'success' | 'warning' | 'danger';
+  const renderTraceBanner = (
+    tone: BannerTone,
+    title: string,
+    message: string,
+    remediation: string | undefined,
+    includeProbe: boolean,
+  ) => {
+    const toneClasses = tone === 'success'
+      ? 'bg-success/10 border-success/40'
+      : tone === 'warning'
+        ? 'bg-warning/10 border-warning/40'
+        : 'bg-danger/10 border-danger/40';
+    const icon = tone === 'success'
+      ? <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+      : tone === 'warning'
+        ? <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+        : <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />;
+    return (
+      <div className={`flex items-start gap-3 p-3 border rounded text-sm ${toneClasses}`}>
+        {icon}
+        <div className="flex-1">
+          <span className="text-gray-200 font-semibold">{title}</span>
+          <span className="text-gray-300 ml-1">{message}.</span>
+          {remediation && <p className="text-tiny text-gray-400 mt-1">{remediation}</p>}
+          {includeProbe && renderApiKeyProbe()}
+        </div>
+      </div>
+    );
+  };
   const renderApiKeyProbe = () => (
     <div className="mt-2 pt-2 border-t border-gray-800/60">
       {apiKeyProbe ? (
@@ -250,59 +284,18 @@ export const Step4: React.FC<Props> = ({
             </div>
           </div>
         ) : traceVerifyResult && traceVerifyResult.status === 'rejected' ? (
-          <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
-            <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
-            <div className="flex-1">
-              <span className="text-gray-200 font-semibold">Helix rejected the trace.</span>
-              <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
-              {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-              {renderApiKeyProbe()}
-            </div>
-          </div>
+          renderTraceBanner('danger', 'Helix rejected the trace.', traceVerifyResult.message, traceVerifyResult.remediation, true)
         ) : traceVerifyResult && traceVerifyResult.status === 'queued_customer' ? (
           // Customer collector is queueing or failing — gateway is unreachable
-          // from its side. Visually distinct from the gateway-queued case
-          // because the remediation lives in Step 3, not in Helix tenant config.
-          <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-            <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <span className="text-gray-200 font-semibold">Trace stuck at your collector — helix-gateway not reachable from it.</span>
-              <span className="text-gray-300 ml-1">{traceVerifyResult.message}</span>
-              {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-            </div>
-          </div>
+          // from its side. Remediation lives in Step 3, so suppress the API
+          // key probe (it'd be misleading here).
+          renderTraceBanner('warning', 'Trace stuck at your collector — helix-gateway not reachable from it.', traceVerifyResult.message, traceVerifyResult.remediation, false)
         ) : traceVerifyResult && traceVerifyResult.status === 'queued_gateway' ? (
-          // Gateway queue is backed up but not draining — Helix is slow or
-          // rejecting at the BMC side, not a collector-side networking problem.
-          <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-            <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <span className="text-gray-200 font-semibold">Trace queued at the gateway — Helix hasn't acknowledged.</span>
-              <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
-              {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-              {renderApiKeyProbe()}
-            </div>
-          </div>
+          renderTraceBanner('warning', "Trace queued at the gateway — Helix hasn't acknowledged.", traceVerifyResult.message, traceVerifyResult.remediation, true)
         ) : traceVerifyResult && traceVerifyResult.status === 'pending' ? (
-          <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
-            <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <span className="text-gray-200 font-semibold">Trace queued but not yet exported.</span>
-              <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
-              {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-              {renderApiKeyProbe()}
-            </div>
-          </div>
+          renderTraceBanner('warning', 'Trace queued but not yet exported.', traceVerifyResult.message, traceVerifyResult.remediation, true)
         ) : traceVerifyResult && traceVerifyResult.status === 'error' ? (
-          <div className="flex items-start gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm">
-            <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
-            <div className="flex-1">
-              <span className="text-gray-200 font-semibold">Verification failed.</span>
-              <span className="text-gray-300 ml-1">{traceVerifyResult.message}.</span>
-              {traceVerifyResult.remediation && <p className="text-tiny text-gray-400 mt-1">{traceVerifyResult.remediation}</p>}
-              {renderApiKeyProbe()}
-            </div>
-          </div>
+          renderTraceBanner('danger', 'Verification failed.', traceVerifyResult.message, traceVerifyResult.remediation, true)
         ) : (
           <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
             <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />

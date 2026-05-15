@@ -90,20 +90,22 @@ export const Step3: React.FC<Props> = ({
   // (rare: only when the topology shifts mid-wizard).
   const bridgedCollector = detectedCollectors.find(c => c.sharesNetworkWithSidecar);
   const [verifyResult, setVerifyResult] = useState<Step3Verify | null>(null);
-  const [verifying, setVerifying] = useState(false);
   useEffect(() => {
     if (!bridgedCollector) {
       setVerifyResult(null);
-      setVerifying(false);
       return;
     }
     let cancelled = false;
-    // Reset prior result so the previous collector's verdict doesn't briefly
-    // render against the new one's identity. The render path below uses
-    // `verifyResult == null` as the spinner trigger, so this guarantees a
-    // clean transition: spinner immediately → result when fetch returns.
+    // Reset so a stale verdict doesn't render against the new collector
+    // identity. The render path below uses `verifyResult == null` as the
+    // spinner trigger.
     setVerifyResult(null);
-    setVerifying(true);
+    const fallback: Step3Verify = {
+      topology: 'unknown', gatewayReceiver: 'unknown', collectorExporter: 'not-probed',
+      sharedNetwork: null, overall: 'yellow',
+      message: 'Couldn\'t reach the verification endpoint.',
+      remediation: 'You can continue to Verify; Step 4 will do its own checks.',
+    };
     fetch('/api/diagnostics/step3-verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -112,26 +114,9 @@ export const Step3: React.FC<Props> = ({
       .then(r => r.ok ? r.json() : null)
       .then((data: Step3Verify | null) => {
         if (cancelled) return;
-        if (data) setVerifyResult(data);
-        else setVerifyResult({
-          // Fetch failed (network blip, 500). Surface as yellow so the user
-          // isn't stuck on a spinner, and let them continue to Step 4 where
-          // the trace inject will do its own deeper verification.
-          topology: 'unknown', gatewayReceiver: 'unknown', collectorExporter: 'not-probed',
-          sharedNetwork: null, overall: 'yellow',
-          message: 'Couldn\'t reach the verification endpoint.',
-          remediation: 'You can continue to Verify; Step 4 will do its own checks.',
-        });
+        setVerifyResult(data || fallback);
       })
-      .catch(() => {
-        if (!cancelled) setVerifyResult({
-          topology: 'unknown', gatewayReceiver: 'unknown', collectorExporter: 'not-probed',
-          sharedNetwork: null, overall: 'yellow',
-          message: 'Verification call failed.',
-          remediation: 'You can continue to Verify; Step 4 will do its own checks.',
-        });
-      })
-      .finally(() => { if (!cancelled) setVerifying(false); });
+      .catch(() => { if (!cancelled) setVerifyResult(fallback); });
     return () => { cancelled = true; };
   }, [bridgedCollector?.name]);
 
