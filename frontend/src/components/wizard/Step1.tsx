@@ -96,33 +96,6 @@ export const Step1: React.FC<Props> = ({
           )}
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2 flex-wrap">
-            <span className="flex items-center gap-2">
-              X-Source
-              {!errors.X_SOURCE && envVars.X_SOURCE && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
-            </span>
-            <span className="normal-case tracking-normal text-gray-500 font-normal">— Business Service name in Helix topology &amp; AIOps</span>
-          </label>
-          <input
-            type="text"
-            name="helix-x-source"
-            autoComplete="off"
-            spellCheck={false}
-            data-1p-ignore
-            data-lpignore="true"
-            value={envVars.X_SOURCE}
-            onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
-            aria-invalid={!!(envVars.X_SOURCE && errors.X_SOURCE)}
-            aria-describedby={envVars.X_SOURCE && errors.X_SOURCE ? 'helix-x-source-error' : undefined}
-            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.X_SOURCE && errors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
-            placeholder="e.g. payment-service"
-          />
-          <p className="text-tiny text-gray-500">Choose a name that will map to a business service in Helix AIOps.</p>
-          {envVars.X_SOURCE && errors.X_SOURCE && (
-            <p id="helix-x-source-error" className="text-tiny text-danger">{errors.X_SOURCE}</p>
-          )}
-        </div>
-        <div className="space-y-1">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             X-API Key
             {!errors.HELIX_API_KEY && envVars.HELIX_API_KEY && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
@@ -157,6 +130,33 @@ export const Step1: React.FC<Props> = ({
           <p className="text-tiny text-gray-500">Paste the full key — the format is parsed automatically.</p>
           {envVars.HELIX_API_KEY && errors.HELIX_API_KEY && (
             <p id="helix-api-key-error" className="text-tiny text-danger">{errors.HELIX_API_KEY}</p>
+          )}
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2 flex-wrap">
+            <span className="flex items-center gap-2">
+              X-Source
+              {!errors.X_SOURCE && envVars.X_SOURCE && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
+            </span>
+            <span className="normal-case tracking-normal text-gray-500 font-normal">— Business Service name in Helix topology &amp; AIOps</span>
+          </label>
+          <input
+            type="text"
+            name="helix-x-source"
+            autoComplete="off"
+            spellCheck={false}
+            data-1p-ignore
+            data-lpignore="true"
+            value={envVars.X_SOURCE}
+            onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
+            aria-invalid={!!(envVars.X_SOURCE && errors.X_SOURCE)}
+            aria-describedby={envVars.X_SOURCE && errors.X_SOURCE ? 'helix-x-source-error' : undefined}
+            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.X_SOURCE && errors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
+            placeholder="e.g. payment-service"
+          />
+          <p className="text-tiny text-gray-500">Choose a name that will map to a business service in Helix AIOps.</p>
+          {envVars.X_SOURCE && errors.X_SOURCE && (
+            <p id="helix-x-source-error" className="text-tiny text-danger">{errors.X_SOURCE}</p>
           )}
         </div>
         <div className="space-y-1">
