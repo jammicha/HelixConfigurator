@@ -510,6 +510,21 @@ function register(app, { docker }) {
     console.warn('bridged-networks: reconcile threw:', e.message);
     errorLog.push('bridged-networks.reconcile', `reconcile threw: ${e.message}`);
   });
+
+  // Watchdog: re-run the bridge reconcile every ~5 min so a network
+  // dropped after boot (compose down/up on a peer, manual disconnect,
+  // etc.) heals without requiring a configurator restart. Configurable
+  // via env var; 0 disables. unref'd so it doesn't block process exit.
+  const watchdogIntervalMs = Number.parseInt(process.env.BRIDGED_NETWORKS_WATCHDOG_INTERVAL_MS, 10);
+  const effectiveInterval = Number.isFinite(watchdogIntervalMs) ? watchdogIntervalMs : 5 * 60 * 1000;
+  if (effectiveInterval > 0) {
+    setInterval(() => {
+      reconcileBridgedNetworks(docker).catch(e => {
+        console.warn('bridged-networks: watchdog threw:', e.message);
+        errorLog.push('bridged-networks.watchdog', e.message);
+      });
+    }, effectiveInterval).unref();
+  }
 }
 
 module.exports = { register };
