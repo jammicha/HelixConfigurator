@@ -73,6 +73,22 @@ export const Step4: React.FC<Props> = ({
   onVerifyTelemetry,
   onLaunchDashboard,
 }) => {
+  const [testTraceStatus, setTestTraceStatus] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+
+  const sendTestTrace = async () => {
+    if (testTraceStatus === 'sending') return;
+    setTestTraceStatus('sending');
+    try {
+      const res = await fetch('/api/diagnostics/inject-trace', { method: 'POST' });
+      if (!res.ok) throw new Error('Inject failed');
+      setTestTraceStatus('sent');
+      setTimeout(() => setTestTraceStatus('idle'), 3000);
+    } catch {
+      setTestTraceStatus('error');
+      setTimeout(() => setTestTraceStatus('idle'), 5000);
+    }
+  };
+
   const dSpans = delta(receiverNow?.acceptedSpans, receiverBaseline?.acceptedSpans);
   const dMetrics = delta(receiverNow?.acceptedMetricPoints, receiverBaseline?.acceptedMetricPoints);
   const dLogs = delta(receiverNow?.acceptedLogRecords, receiverBaseline?.acceptedLogRecords);
@@ -317,6 +333,16 @@ export const Step4: React.FC<Props> = ({
         >
           {verifyingTrace && <Loader2 className="w-4 h-4 animate-spin" />}
           {verifyingTrace ? 'Verifying…' : 'Verify gateway → Helix'}
+        </button>
+        <button
+          type="button"
+          onClick={sendTestTrace}
+          disabled={testTraceStatus === 'sending'}
+          className="px-4 py-3 rounded font-semibold text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60 inline-flex items-center justify-center gap-2"
+          title="Inject one synthetic trace, fire-and-forget. Different from Verify — no polling, no verdict."
+        >
+          {testTraceStatus === 'sending' && <Loader2 className="w-4 h-4 animate-spin" />}
+          {testTraceStatus === 'sending' ? 'Sending…' : testTraceStatus === 'sent' ? 'Sent ✓' : testTraceStatus === 'error' ? 'Failed — retry' : 'Send test trace'}
         </button>
         <button
           // Disabled until Verify has run at least once. The user could
