@@ -1167,6 +1167,22 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
       res.status(500).json({ status: 'error', message: `Probe setup failed: ${e.message}` });
     }
   });
+
+  // POST probe Helix reachability with in-request credentials. Accepts
+  // { endpoint, apiKey } in the body and delegates to runOtlpProbe. Used by
+  // Step 1's Test Connection button to let users probe Helix with what they've
+  // typed into the form, before saving and triggering a gateway recreate.
+  app.post('/api/diagnostics/test-connection', async (req, res) => {
+    const { endpoint, apiKey } = req.body || {};
+    if (typeof endpoint !== 'string' || !/^https?:\/\/[^\s]+$/.test(endpoint)) {
+      return res.status(400).json({ status: 'invalid-input', error: 'Invalid endpoint URL' });
+    }
+    if (typeof apiKey !== 'string' || !/^[^:]+::[^:]+::[^:]+$/.test(apiKey)) {
+      return res.status(400).json({ status: 'invalid-input', error: 'API key must be three :: separated parts' });
+    }
+    const result = await runOtlpProbe(endpoint, apiKey);
+    res.json(result);
+  });
 }
 
 module.exports = { register, closeActiveLogProcesses, runOtlpProbe };
