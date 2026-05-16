@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, X, Loader2, AlertTriangle } from 'lucide-react';
 import { parseHelixKeyBundle } from '../../utils/helixKey';
 import { extractServiceKey } from '../otel-data/utils';
 
@@ -19,6 +19,9 @@ type Props = {
   setupError: string;
   isVerifying: boolean;
   onInitialize: () => void;
+  onTestConnection: () => void;
+  testConnectionResult: { status: string; message: string; remediation?: string; httpStatus?: number; latencyMs?: number } | null;
+  testingConnection: boolean;
 };
 
 // Per-field validation. Returns null when valid, or a short user-facing error.
@@ -59,6 +62,9 @@ export const Step1: React.FC<Props> = ({
   setupError,
   isVerifying,
   onInitialize,
+  onTestConnection,
+  testConnectionResult,
+  testingConnection,
 }) => {
   const errors = {
     HELIX_ENDPOINT: validateEndpoint(envVars.HELIX_ENDPOINT),
@@ -219,6 +225,31 @@ export const Step1: React.FC<Props> = ({
           <div><span className="text-danger font-semibold">Verification failed:</span> <span className="text-gray-300">{setupError}</span></div>
         </div>
       )}
+
+      <div className="space-y-2 mb-3">
+        <button
+          type="button"
+          onClick={onTestConnection}
+          disabled={testingConnection || !canSubmit}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
+          title={!canSubmit ? 'Fill in valid Endpoint and API Key first' : 'Probe Helix with the values above (does not save)'}
+        >
+          {testingConnection ? (<><Loader2 className="w-4 h-4 animate-spin" /> Testing…</>) : 'Test connection →'}
+        </button>
+        {testConnectionResult && (
+          <div className={`flex items-start gap-2 text-tiny p-2.5 rounded border ${
+            testConnectionResult.status === 'valid' ? 'bg-success/10 border-success/40 text-success' : 'bg-warning/10 border-warning/40 text-warning'
+          }`}>
+            {testConnectionResult.status === 'valid'
+              ? <Check className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              : <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />}
+            <div className="flex-1">
+              <div className="text-gray-200">{testConnectionResult.message}</div>
+              {testConnectionResult.remediation && <p className="text-gray-400 mt-0.5">{testConnectionResult.remediation}</p>}
+            </div>
+          </div>
+        )}
+      </div>
 
       <button
         onClick={onInitialize}
