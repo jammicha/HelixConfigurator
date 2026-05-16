@@ -1180,8 +1180,12 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     if (typeof apiKey !== 'string' || !/^[^:]+::[^:]+::[^:]+$/.test(apiKey)) {
       return res.status(400).json({ status: 'invalid-input', error: 'API key must be three :: separated parts' });
     }
-    const result = await runOtlpProbe(endpoint, apiKey);
-    res.json(result);
+    try {
+      const result = await runOtlpProbe(endpoint, apiKey);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ status: 'error', message: `Probe setup failed: ${e.message}` });
+    }
   });
 }
 
