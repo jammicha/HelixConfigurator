@@ -234,10 +234,10 @@ export const Step1: React.FC<Props> = ({
           className="inline-flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
           title={!canSubmit ? 'Fill in valid Endpoint and API Key first' : 'Probe Helix with the values above (does not save)'}
         >
-          {testingConnection ? (<><Loader2 className="w-4 h-4 animate-spin" /> Testing…</>) : 'Test connection →'}
+          {testingConnection ? (<><Loader2 className="w-4 h-4 animate-spin" /> Testing…</>) : 'Test connection'}
         </button>
         {testConnectionResult && (
-          <div className={`flex items-start gap-2 text-tiny p-2.5 rounded border ${
+          <div role="status" aria-live="polite" className={`flex items-start gap-2 text-tiny p-2.5 rounded border ${
             testConnectionResult.status === 'valid' ? 'bg-success/10 border-success/40 text-success' : 'bg-warning/10 border-warning/40 text-warning'
           }`}>
             {testConnectionResult.status === 'valid'
