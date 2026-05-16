@@ -36,6 +36,11 @@ services:
       - .env
     volumes:
       - ./helix-otel-collector.yaml:/etc/otelcol-contrib/config.yaml
+      # Step 0 Layer 1 pre-mounts — let hostmetrics + dockerstats receivers
+      # scrape host telemetry without per-receiver container surgery.
+      - /proc:/hostfs/proc:ro
+      - /sys:/hostfs/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - helix-bridge
 
