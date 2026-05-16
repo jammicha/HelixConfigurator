@@ -1181,7 +1181,9 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
       return res.status(400).json({ status: 'invalid-input', error: 'API key must be three :: separated parts' });
     }
     try {
-      const result = await runOtlpProbe(endpoint, apiKey);
+      // Strip trailing slash so the probe URL doesn't become https://foo//v1/traces
+      // — matches the apikey-probe route's normalization for consistency.
+      const result = await runOtlpProbe(endpoint.replace(/\/$/, ''), apiKey);
       res.json(result);
     } catch (e) {
       res.status(500).json({ status: 'error', message: `Probe setup failed: ${e.message}` });
