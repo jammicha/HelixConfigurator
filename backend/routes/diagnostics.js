@@ -151,6 +151,108 @@ const fetchCustomerCollectorCounters = async (collectorName, port = 8888) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// runOtlpProbe(endpoint, apiKey)
+//
+// Posts a minimal synthetic OTLP traces span directly to
+// `${endpoint}/v1/traces` and returns a structured result object:
+//
+//   { status, httpStatus?, latencyMs?, message, remediation? }
+//
+// `status` is one of: 'valid' | 'rejected' | 'tenant-error' | 'helix-error'
+//                    | 'network-error'
+//
+// Extracted from the /api/diagnostics/apikey-probe route so that other
+// routes (e.g. /api/diagnostics/test-connection) can probe with in-request
+// credentials rather than process.env values.
+// ---------------------------------------------------------------------------
+async function runOtlpProbe(endpoint, apiKey) {
+  const url = `${endpoint}/v1/traces`;
+
+  // Tagged with our service name so it's identifiable in Helix if the probe span lands.
+  const payload = {
+    resourceSpans: [{
+      resource: { attributes: [{ key: 'service.name', value: { stringValue: 'helix-configurator-probe' } }] },
+      scopeSpans: [{
+        spans: [{
+          traceId: crypto.randomBytes(16).toString('hex'),
+          spanId: crypto.randomBytes(8).toString('hex'),
+          name: 'apikey-probe',
+          kind: 1,
+          startTimeUnixNano: Date.now() * 1_000_000,
+          endTimeUnixNano: (Date.now() + 1) * 1_000_000,
+          status: { code: 1 },
+        }],
+      }],
+    }],
+  };
+
+  const t0 = Date.now();
+  try {
+    const r = await axios.post(url, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': apiKey,
+        'X-Source': 'helix-configurator-probe',
+      },
+      timeout: 8000,
+      validateStatus: () => true,
+    });
+    const latencyMs = Date.now() - t0;
+    if (r.status >= 200 && r.status < 300) {
+      return {
+        status: 'valid',
+        httpStatus: r.status,
+        latencyMs,
+        message: `Helix accepted the probe trace (HTTP ${r.status} in ${latencyMs}ms).`,
+      };
+    }
+    if (r.status === 401) {
+      return {
+        status: 'rejected',
+        httpStatus: 401,
+        message: 'Helix rejected the API key (HTTP 401 Unauthorized).',
+        remediation: 'The key is malformed, expired, or revoked. Generate a new one in the BMC Helix Portal and paste it on Step 1.',
+      };
+    }
+    if (r.status === 403) {
+      return {
+        status: 'rejected',
+        httpStatus: 403,
+        message: 'Helix accepted the key but the tenant refused this request (HTTP 403).',
+        remediation: 'The key is recognized but lacks permission, or the tenant is blocking the source IP. Verify the key role in the BMC Helix Portal.',
+      };
+    }
+    if (r.status >= 400 && r.status < 500) {
+      return {
+        status: 'tenant-error',
+        httpStatus: r.status,
+        message: `Helix returned HTTP ${r.status}.`,
+        remediation: 'The endpoint accepted the connection but rejected the request. Check that HELIX_ENDPOINT is the tenant-root URL (no trailing /otlp/v1/traces).',
+      };
+    }
+    return {
+      status: 'helix-error',
+      httpStatus: r.status,
+      message: `Helix returned HTTP ${r.status}.`,
+      remediation: 'Helix-side error. Retry shortly; if persistent, check the tenant status page.',
+    };
+  } catch (e) {
+    const code = e.code || '';
+    const isTimeout = code === 'ECONNABORTED' || /timeout/i.test(e.message || '');
+    const isConnect = code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'EAI_AGAIN';
+    return {
+      status: 'network-error',
+      message: isTimeout
+        ? `Probe timed out talking to ${url}.`
+        : isConnect
+        ? `Could not reach ${url} (${code || 'connection error'}).`
+        : `Probe failed: ${e.message}`,
+      remediation: 'Verify HELIX_ENDPOINT is reachable from this host (firewall, DNS, https://).',
+    };
+  }
+}
+
 function register(app, { docker, containerLogs, configPath, otelStore }) {
   // Strip debug logs from the collector YAML and restart. Used as both the
   // 5-minute failsafe (so a forgotten debug session doesn't pin the gateway)
@@ -1043,7 +1145,6 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
 
       const endpoint = (vars.HELIX_ENDPOINT || '').replace(/\/$/, '');
       const apiKey = vars.HELIX_API_KEY || '';
-      const xSource = vars.X_SOURCE || 'helix-configurator-probe';
       if (!endpoint) {
         return res.json({ status: 'misconfigured', message: 'HELIX_ENDPOINT is not set in .env' });
       }
@@ -1060,95 +1161,12 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
         });
       }
 
-      // Minimal OTLP traces payload — one zero-duration span tagged with our
-      // own service name so it's easy to identify in Helix if it lands.
-      const payload = {
-        resourceSpans: [{
-          resource: { attributes: [{ key: 'service.name', value: { stringValue: 'helix-configurator-probe' } }] },
-          scopeSpans: [{
-            spans: [{
-              traceId: crypto.randomBytes(16).toString('hex'),
-              spanId: crypto.randomBytes(8).toString('hex'),
-              name: 'apikey-probe',
-              kind: 1,
-              startTimeUnixNano: Date.now() * 1_000_000,
-              endTimeUnixNano: (Date.now() + 1) * 1_000_000,
-              status: { code: 1 },
-            }],
-          }],
-        }],
-      };
-
-      const url = `${endpoint}/v1/traces`;
-      const t0 = Date.now();
-      try {
-        const r = await axios.post(url, payload, {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Api-Key': apiKey,
-            'X-Source': xSource,
-          },
-          timeout: 8000,
-          // Don't throw on 4xx/5xx — we want to inspect the status.
-          validateStatus: () => true,
-        });
-        const latencyMs = Date.now() - t0;
-        if (r.status >= 200 && r.status < 300) {
-          return res.json({
-            status: 'valid',
-            httpStatus: r.status,
-            latencyMs,
-            message: `Helix accepted the probe trace (HTTP ${r.status} in ${latencyMs}ms).`,
-          });
-        }
-        if (r.status === 401) {
-          return res.json({
-            status: 'rejected',
-            httpStatus: 401,
-            message: 'Helix rejected the API key (HTTP 401 Unauthorized).',
-            remediation: 'The key is malformed, expired, or revoked. Generate a new one in the BMC Helix Portal and paste it on Step 1.',
-          });
-        }
-        if (r.status === 403) {
-          return res.json({
-            status: 'rejected',
-            httpStatus: 403,
-            message: 'Helix accepted the key but the tenant refused this request (HTTP 403).',
-            remediation: 'The key is recognized but lacks permission, or the tenant is blocking the source IP. Verify the key role in the BMC Helix Portal.',
-          });
-        }
-        if (r.status >= 400 && r.status < 500) {
-          return res.json({
-            status: 'tenant-error',
-            httpStatus: r.status,
-            message: `Helix returned HTTP ${r.status}.`,
-            remediation: 'The endpoint accepted the connection but rejected the request. Check that HELIX_ENDPOINT is the tenant-root URL (no trailing /otlp/v1/traces).',
-          });
-        }
-        return res.json({
-          status: 'helix-error',
-          httpStatus: r.status,
-          message: `Helix returned HTTP ${r.status}.`,
-          remediation: 'Helix-side error. Retry shortly; if persistent, check the tenant status page.',
-        });
-      } catch (e) {
-        const code = e.code || '';
-        const isTimeout = code === 'ECONNABORTED' || /timeout/i.test(e.message || '');
-        const isConnect = code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'EAI_AGAIN';
-        return res.json({
-          status: 'network-error',
-          message: isTimeout
-            ? `Probe timed out talking to ${url}.`
-            : isConnect
-            ? `Could not reach ${url} (${code || 'connection error'}).`
-            : `Probe failed: ${e.message}`,
-          remediation: 'Verify HELIX_ENDPOINT is reachable from this host (firewall, DNS, https://).',
-        });
-      }
+      const result = await runOtlpProbe(endpoint, apiKey);
+      res.json(result);
     } catch (e) {
       res.status(500).json({ status: 'error', message: `Probe setup failed: ${e.message}` });
     }
   });
 }
 
-module.exports = { register, closeActiveLogProcesses };
+module.exports = { register, closeActiveLogProcesses, runOtlpProbe };
