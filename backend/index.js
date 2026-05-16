@@ -98,7 +98,7 @@ require('./routes/lifecycle').register(app, { docker });
 require('./routes/env').register(app);
 
 const diagnostics = require('./routes/diagnostics');
-diagnostics.register(app, { docker, containerLogs, configPath: CONFIG_PATH });
+diagnostics.register(app, { docker, containerLogs, configPath: CONFIG_PATH, otelStore });
 
 require('./routes/config').register(app, {
   docker,

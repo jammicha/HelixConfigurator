@@ -14,6 +14,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { PassThrough } = require('stream');
 const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse } = require('../util');
+const errorLog = require('../errorLog');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 
@@ -150,7 +151,7 @@ const fetchCustomerCollectorCounters = async (collectorName, port = 8888) => {
   }
 };
 
-function register(app, { docker, containerLogs, configPath }) {
+function register(app, { docker, containerLogs, configPath, otelStore }) {
   // Strip debug logs from the collector YAML and restart. Used as both the
   // 5-minute failsafe (so a forgotten debug session doesn't pin the gateway)
   // and the explicit "disable" toggle.
@@ -176,6 +177,26 @@ function register(app, { docker, containerLogs, configPath }) {
       console.error('Failsafe revert failed:', e.message);
     }
   };
+
+  // GET system-health summary — everything the dashboard's System Health panel
+  // needs in a single round-trip: gateway container status, OTel throughput,
+  // store usage, and recent logged errors.
+  app.get('/api/diagnostics/system-health', async (req, res) => {
+    const targetContainer = TARGET_CONTAINER();
+    let gatewayStatus = 'unknown';
+    let gatewayExitCode;
+    try {
+      const inspect = await withDockerTimeout(docker.getContainer(targetContainer).inspect(), 'container.inspect', 5_000);
+      gatewayStatus = inspect.State?.Status || 'unknown';
+      if (gatewayStatus !== 'running') gatewayExitCode = inspect.State?.ExitCode;
+    } catch (e) {
+      gatewayStatus = 'error';
+    }
+    const throughput = otelStore.recentThroughput();
+    const storeUsage = otelStore.storeUsage();
+    const recentErrors = errorLog.recent(10);
+    res.json({ gatewayStatus, gatewayExitCode, throughput, storeUsage, recentErrors });
+  });
 
   // POST deep verification of the Step 3 bridge. Step 3 today shows green
   // purely on a topology check (does the customer collector share a network

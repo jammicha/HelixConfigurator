@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers } = require('../util');
+const errorLog = require('../errorLog');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
@@ -104,6 +105,7 @@ const reconcileBridgedNetworks = async (docker) => {
       }
       if (e.statusCode !== 403 && !/already exists/i.test(e.message || '')) {
         console.warn(`bridged-networks: failed to re-attach ${net}: ${e.message}`);
+        errorLog.push('bridged-networks.reconcile', `${net}: ${e.message}`);
       }
       return { net, drop: false };
     }
@@ -155,6 +157,7 @@ const recreateGateway = async (docker, name, { addNetwork } = {}) => {
   try { await old.stop({ t: 10 }); } catch (e) {
     if (e.statusCode !== 304 && e.statusCode !== 404) {
       console.warn(`recreateGateway: stop ${name} warning:`, e.message);
+      errorLog.push('gateway.recreate.stop', `stop ${name}: ${e.message}`);
     }
   }
   try { await old.remove(); } catch (e) {
@@ -190,6 +193,7 @@ const recreateGateway = async (docker, name, { addNetwork } = {}) => {
     } catch (e) {
       if (e.statusCode !== 403) {
         console.warn(`recreateGateway: pre-start connect ${name} to ${net} warning:`, e.message);
+        errorLog.push('gateway.recreate.network', `pre-start connect to ${net}: ${e.message}`);
       }
     }
   }
@@ -307,6 +311,7 @@ function register(app, { docker }) {
     try {
       await recreateGateway(docker, sidecarName, { addNetwork: network });
     } catch (e) {
+      errorLog.push('bridge-network.recreate', e.message);
       return res.status(500).json({
         error: 'Network attached but gateway recreate failed — telemetry may not flow until restart',
         details: e.message,
@@ -397,6 +402,7 @@ function register(app, { docker }) {
     } catch (e) {
       recreateError = e.message;
       console.warn('reset-onboarding: recreate failed:', e.message);
+      errorLog.push('reset-onboarding.recreate', e.message);
     }
 
     res.json({
@@ -502,6 +508,7 @@ function register(app, { docker }) {
   // user can retry by clicking Bridge again from Step 3.
   reconcileBridgedNetworks(docker).catch(e => {
     console.warn('bridged-networks: reconcile threw:', e.message);
+    errorLog.push('bridged-networks.reconcile', `reconcile threw: ${e.message}`);
   });
 }
 

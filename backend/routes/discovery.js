@@ -11,6 +11,7 @@ const path = require('path');
 const yaml = require('js-yaml');
 const tarStream = require('tar-stream');
 const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers } = require('../util');
+const errorLog = require('../errorLog');
 
 function register(app, { docker }) {
   // -- Helpers ---------------------------------------------------------------
@@ -629,6 +630,7 @@ function register(app, { docker }) {
       });
     } catch (e) {
       console.error(`[smart-add] apply on ${name} failed:`, e);
+      errorLog.push('smart-add.apply', `${name}: ${e.message}`);
       if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to apply collector config', details: e.message });
     }
