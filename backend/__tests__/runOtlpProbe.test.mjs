@@ -62,6 +62,14 @@ describe('runOtlpProbe', () => {
     expect(r.status).toBe('network-error');
   });
 
+  it('returns network-error on ENOTFOUND (DNS failure)', async () => {
+    const e = new Error('getaddrinfo ENOTFOUND tenant.onbmc.com');
+    e.code = 'ENOTFOUND';
+    postSpy.mockRejectedValue(e);
+    const r = await runOtlpProbe('https://tenant.onbmc.com', 'TenantID::Access::Secret');
+    expect(r.status).toBe('network-error');
+  });
+
   it('returns network-error on timeout', async () => {
     const e = new Error('timeout of 8000ms exceeded');
     e.code = 'ECONNABORTED';
