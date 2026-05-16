@@ -17,6 +17,7 @@ import type { DetectedCollector } from './components/wizard/Step3';
 import { Step4 } from './components/wizard/Step4';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle } from './utils/helixKey';
+import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
 
 const App = () => {
   const monaco = useMonaco();
@@ -156,6 +157,7 @@ const App = () => {
   const [authStatus, setAuthStatus] = useState<{ required: boolean; authenticated: boolean } | null>(null);
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
   const [isTogglingDiag, setIsTogglingDiag] = useState(false);
+  const [systemHealth, setSystemHealth] = useState<any>(null);
   const handleUpdateConfigRef = useRef<() => void>(() => {});
   const telemetryTimerRef = useRef<any>(null);
 
@@ -502,6 +504,19 @@ const App = () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVis);
     };
+  }, [isSetupComplete]);
+
+  useEffect(() => {
+    if (!isSetupComplete) return;
+    const fetchHealth = async () => {
+      try {
+        const r = await fetch('/api/diagnostics/system-health');
+        if (r.ok) setSystemHealth(await r.json());
+      } catch { /* keep last known good */ }
+    };
+    fetchHealth();
+    const id = setInterval(fetchHealth, 30_000);
+    return () => clearInterval(id);
   }, [isSetupComplete]);
 
   // Stream logs for whichever target is active: the attached app if any, else the gateway.
@@ -1753,6 +1768,7 @@ ${logsData.logs || '(no logs available)'}
             </div>
           ) : (
             <>
+              <SystemHealthPanel health={systemHealth} />
               {/* Row 1 */}
               <div className="grid grid-cols-2 gap-6">
                 {/* Helix Gateway Status */}
