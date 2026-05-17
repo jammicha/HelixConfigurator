@@ -8,6 +8,26 @@ const fs = require('fs');
 const { addReceiverAndPipeline, hasReceiver } = require('./yaml-helpers');
 const { waitForGatewaySettle, extractCollectorError } = require('../config');
 const { withDockerTimeout, sendDockerTimeoutResponse } = require('../../util');
+const axios = require('axios');
+
+// Sum the receiver_accepted_metric_points counter for a specific receiver
+// label, scraped from the gateway's Prometheus self-metrics. Returns 0 when
+// the receiver hasn't emitted anything yet or the scrape fails.
+const fetchAcceptedForReceiver = async (targetContainer, receiverName) => {
+  try {
+    const { data } = await axios.get(`http://${targetContainer}:8888/metrics`, { timeout: 2000 });
+    const needle = `receiver="${receiverName}"`;
+    let sum = 0;
+    for (const line of String(data).split('\n')) {
+      if (!line.startsWith('otelcol_receiver_accepted_metric_points_total')) continue;
+      if (!line.includes(needle)) continue;
+      const parts = line.trim().split(/\s+/);
+      const v = parseFloat(parts[parts.length - 1]);
+      if (!isNaN(v)) sum += v;
+    }
+    return Math.round(sum);
+  } catch { return 0; }
+};
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 
@@ -63,14 +83,26 @@ const applyReceiverEdit = async ({ res, docker, containerLogs, configPath, recei
   res.json({ enabled: true, receiverName, pipelineName });
 };
 
-function register(app, { docker, containerLogs, configPath }) {
+function register(app, { docker, containerLogs, configPath, fetchAcceptedForReceiver: injectedFetcher }) {
+  // Allow tests to inject a stub for the Prometheus scrape. In production
+  // index.js doesn't pass one, so we fall back to the module-level default.
+  const fetchAccepted = injectedFetcher || fetchAcceptedForReceiver;
   // GET enabled-state per receiver.
   app.get('/api/step-zero/agentless/status', async (req, res) => {
     try {
       const text = fs.readFileSync(configPath, 'utf8');
+      const hostmetricsEnabled = hasReceiver(text, 'hostmetrics');
+      const dockerstatsEnabled = hasReceiver(text, 'docker_stats');
+      const target = TARGET_CONTAINER();
+      // Only scrape live counts for receivers that are configured — saves a
+      // round-trip per call when nothing's enabled yet.
+      const [hmCount, dsCount] = await Promise.all([
+        hostmetricsEnabled ? fetchAccepted(target, 'hostmetrics') : Promise.resolve(0),
+        dockerstatsEnabled ? fetchAccepted(target, 'docker_stats') : Promise.resolve(0),
+      ]);
       res.json({
-        hostmetrics: { enabled: hasReceiver(text, 'hostmetrics') },
-        dockerstats: { enabled: hasReceiver(text, 'docker_stats') },
+        hostmetrics: { enabled: hostmetricsEnabled, acceptedMetricPoints: hmCount },
+        dockerstats: { enabled: dockerstatsEnabled, acceptedMetricPoints: dsCount },
       });
     } catch (e) {
       res.status(500).json({ error: 'Failed to read gateway config', details: e.message });

@@ -116,3 +116,26 @@ describe('POST /api/step-zero/agentless/dockerstats/enable', () => {
     expect(newYaml).toMatch(/endpoint: unix:\/\/\/var\/run\/docker\.sock/);
   });
 });
+
+describe('GET /api/step-zero/agentless/status with live counts', () => {
+  it('includes acceptedMetricPoints for hostmetrics when receiver is present', async () => {
+    const configPath = tmpConfig(BASE_YAML.replace('receivers:', 'receivers:\n  hostmetrics:\n    root_path: /hostfs'));
+    // Inject a stub scraper. The route accepts `fetchAcceptedForReceiver` as
+    // an optional dep so tests can avoid hitting a live gateway. Vitest's
+    // vi.mock('axios') doesn't propagate to the route's CJS require('axios'),
+    // so DI is the cleaner seam here.
+    const fetchAcceptedForReceiver = vi.fn(async (_target, name) => {
+      if (name === 'hostmetrics') return 600;
+      return 0;
+    });
+    const app = makeApp({
+      docker: { listContainers: vi.fn().mockResolvedValue([]) },
+      configPath,
+      fetchAcceptedForReceiver,
+    });
+    const r = await request(app).get('/api/step-zero/agentless/status');
+    expect(r.body.hostmetrics.enabled).toBe(true);
+    expect(r.body.hostmetrics.acceptedMetricPoints).toBe(600);
+    expect(r.body.dockerstats.acceptedMetricPoints).toBe(0);
+  });
+});
