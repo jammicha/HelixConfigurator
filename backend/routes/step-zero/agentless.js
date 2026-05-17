@@ -104,6 +104,22 @@ function register(app, { docker, containerLogs, configPath }) {
       exporters: ['otlphttp/bmchelix'],
     });
   });
+
+  // POST enable docker_stats — one-click. Requires /var/run/docker.sock to
+  // be mounted into the gateway container (see docker-compose.yml).
+  app.post('/api/step-zero/agentless/dockerstats/enable', async (req, res) => {
+    await applyReceiverEdit({
+      res, docker, containerLogs, configPath,
+      receiverName: 'docker_stats',
+      receiverConfig: {
+        endpoint: 'unix:///var/run/docker.sock',
+        collection_interval: '30s',
+      },
+      pipelineName: 'metrics/host',
+      pipelineSignal: 'metrics',
+      exporters: ['otlphttp/bmchelix'],
+    });
+  });
 }
 
 module.exports = { register };

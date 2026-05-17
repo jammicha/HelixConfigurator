@@ -101,4 +101,23 @@ describe('addReceiverAndPipeline', () => {
       exporters: ['otlphttp/bmchelix'],
     })).toThrow(/pipelineSignal/);
   });
+
+  it('appends to an existing pipeline rather than overwriting its receivers', () => {
+    const once = addReceiverAndPipeline(BASE_YAML, {
+      receiverName: 'hostmetrics',
+      receiverConfig: { collection_interval: '30s' },
+      pipelineName: 'metrics/host',
+      pipelineSignal: 'metrics',
+      exporters: ['otlphttp/bmchelix'],
+    });
+    const twice = addReceiverAndPipeline(once, {
+      receiverName: 'docker_stats',
+      receiverConfig: { endpoint: 'unix:///var/run/docker.sock' },
+      pipelineName: 'metrics/host',
+      pipelineSignal: 'metrics',
+      exporters: ['otlphttp/bmchelix'],
+    });
+    const parsed = yaml.load(twice);
+    expect(parsed.service.pipelines['metrics/host'].receivers.sort()).toEqual(['docker_stats', 'hostmetrics']);
+  });
 });

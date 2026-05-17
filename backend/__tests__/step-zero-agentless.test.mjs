@@ -95,3 +95,24 @@ describe('POST /api/step-zero/agentless/hostmetrics/enable', () => {
     expect(fs.readFileSync(configPath, 'utf8')).toBe(originalYaml);
   });
 });
+
+describe('POST /api/step-zero/agentless/dockerstats/enable', () => {
+  it('writes docker_stats receiver into the YAML and reports success', async () => {
+    const configPath = tmpConfig();
+    const docker = {
+      listContainers: vi.fn().mockResolvedValue([]),
+      getContainer: vi.fn().mockReturnValue({
+        restart: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({ State: { Status: 'running', StartedAt: new Date(Date.now() - 3000).toISOString() } }),
+      }),
+    };
+    const containerLogs = vi.fn().mockResolvedValue('');
+    const app = makeApp({ docker, configPath, containerLogs });
+    const r = await request(app).post('/api/step-zero/agentless/dockerstats/enable').send({});
+    expect(r.status).toBe(200);
+    expect(r.body.enabled).toBe(true);
+    const newYaml = fs.readFileSync(configPath, 'utf8');
+    expect(newYaml).toMatch(/docker_stats:/);
+    expect(newYaml).toMatch(/endpoint: unix:\/\/\/var\/run\/docker\.sock/);
+  });
+});

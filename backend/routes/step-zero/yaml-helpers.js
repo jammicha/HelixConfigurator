@@ -38,11 +38,14 @@ const addReceiverAndPipeline = (yamlText, opts) => {
   // no half-state we need to merge.
   parsed.receivers[receiverName] = receiverConfig;
 
-  // Pipeline: ensure it exists with the requested receiver list. Don't merge
-  // existing arbitrary pipelines named the same — names like "metrics/host"
-  // are ours, so overwriting is the intended behavior.
+  // Pipeline: append the receiver into the existing pipeline's receivers
+  // list, or create a new pipeline if absent. We append (not overwrite)
+  // because multiple Step 0 receivers share the metrics/host pipeline —
+  // enabling docker_stats after hostmetrics must NOT drop hostmetrics.
+  const existing = parsed.service.pipelines[pipelineName] || { receivers: [], exporters: [...exporters] };
+  const mergedReceivers = Array.from(new Set([...(existing.receivers || []), receiverName]));
   parsed.service.pipelines[pipelineName] = {
-    receivers: [receiverName],
+    receivers: mergedReceivers,
     exporters: [...exporters],
   };
 
