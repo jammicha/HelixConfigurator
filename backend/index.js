@@ -100,7 +100,7 @@ require('./routes/situations').register(app, { otelStore });
 require('./routes/discovery').register(app, { docker });
 require('./routes/containers').register(app, { docker });
 require('./routes/lifecycle').register(app, { docker });
-require('./routes/step-zero/agentless').register(app, { docker, configPath: CONFIG_PATH });
+require('./routes/step-zero/agentless').register(app, { docker, containerLogs, configPath: CONFIG_PATH });
 require('./routes/env').register(app);
 
 const diagnostics = require('./routes/diagnostics');

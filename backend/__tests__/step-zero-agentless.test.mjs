@@ -54,3 +54,44 @@ describe('GET /api/step-zero/agentless/status', () => {
     expect(r.body.dockerstats.enabled).toBe(false);
   });
 });
+
+describe('POST /api/step-zero/agentless/hostmetrics/enable', () => {
+  it('writes hostmetrics receiver into the YAML and reports success', async () => {
+    const configPath = tmpConfig();
+    const docker = {
+      listContainers: vi.fn().mockResolvedValue([]),
+      getContainer: vi.fn().mockReturnValue({
+        restart: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({ State: { Status: 'running', StartedAt: new Date(Date.now() - 3000).toISOString() } }),
+      }),
+    };
+    const containerLogs = vi.fn().mockResolvedValue('');
+    const app = makeApp({ docker, configPath, containerLogs });
+    const r = await request(app).post('/api/step-zero/agentless/hostmetrics/enable').send({});
+    expect(r.status).toBe(200);
+    expect(r.body.enabled).toBe(true);
+    const newYaml = fs.readFileSync(configPath, 'utf8');
+    expect(newYaml).toMatch(/hostmetrics:/);
+    expect(newYaml).toMatch(/root_path: \/hostfs/);
+    expect(newYaml).toMatch(/metrics\/host:/);
+  });
+
+  it('rolls back the YAML if the gateway fails to come back up', async () => {
+    const configPath = tmpConfig();
+    const originalYaml = fs.readFileSync(configPath, 'utf8');
+    const docker = {
+      listContainers: vi.fn().mockResolvedValue([]),
+      getContainer: vi.fn().mockReturnValue({
+        restart: vi.fn().mockResolvedValue(undefined),
+        // Container exits — waitForGatewaySettle returns running:false.
+        inspect: vi.fn().mockResolvedValue({ State: { Status: 'exited', ExitCode: 1, StartedAt: new Date().toISOString() } }),
+      }),
+    };
+    const containerLogs = vi.fn().mockResolvedValue('Error: invalid receiver config');
+    const app = makeApp({ docker, configPath, containerLogs });
+    const r = await request(app).post('/api/step-zero/agentless/hostmetrics/enable').send({});
+    expect(r.status).toBe(500);
+    expect(r.body.rolledBack).toBe(true);
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(originalYaml);
+  });
+});

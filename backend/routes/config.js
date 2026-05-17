@@ -170,4 +170,4 @@ function register(app, { docker, containerLogs, configPath, templatesDir }) {
   });
 }
 
-module.exports = { register };
+module.exports = { register, waitForGatewaySettle, extractCollectorError };
