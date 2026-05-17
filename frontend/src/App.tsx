@@ -1641,7 +1641,14 @@ ${logsData.logs || '(no logs available)'}
                   state, let me start over." Lives on every wizard step so a
                   user mid-flow can wipe and restart without navigating away.
                   Confirmed before any destructive action. */}
-              <div className="flex justify-end -mt-2">
+              <div className="flex justify-between items-center -mt-2">
+                <a
+                  href="/step-zero"
+                  className="text-tiny text-gray-400 hover:text-gray-200 underline"
+                  title="No OTel collector or instrumented apps yet? Start here to get data flowing without touching your apps."
+                >
+                  Starting from zero? →
+                </a>
                 <button
                   onClick={requestResetOnboarding}
                   disabled={resetting}
