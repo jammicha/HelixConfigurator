@@ -45,7 +45,7 @@ export const StepZero: React.FC = () => {
   }, [refresh]);
 
   return (
-    <div className="min-h-screen bg-gray-1100 text-gray-100">
+    <div className="min-h-screen bg-gray-1000 text-gray-100">
       <main className="max-w-4xl mx-auto p-6 space-y-6">
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold">Start from zero</h1>
