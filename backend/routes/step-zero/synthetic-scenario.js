@@ -74,7 +74,7 @@ const COLD_START_TARGETS = ['checkout-web', 'cart-api', 'payment-service', 'noti
 
 const randomHex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 
-const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, errored, errorMessage, statusCode, attributes }) => {
+const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, errored, errorMessage, statusCode, attributes, kind }) => {
   const startNs = String(BigInt(Math.round(startMs)) * 1_000_000n);
   const endNs = String(BigInt(Math.round(startMs + durationMs)) * 1_000_000n);
   // Allow explicit statusCode override (used by retry storm so we can mark
@@ -84,7 +84,7 @@ const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, e
     traceId,
     spanId,
     name,
-    kind: 2, // SPAN_KIND_SERVER
+    kind: kind !== undefined ? kind : 2, // default SPAN_KIND_SERVER; DB/client spans pass kind: 3
     startTimeUnixNano: startNs,
     endTimeUnixNano: endNs,
     status: { code },
@@ -303,10 +303,31 @@ const generateTrace = () => {
   if (injectCartCacheMiss) cartAttributes.push({ key: 'cache.hit', value: { boolValue: false } });
   if (coldStartService === 'cart-api') cartAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
 
-  // Inventory-db attributes (per-span). Pool-wait attaches to every inv span.
-  const invAttributesPerSpan = injectInvPoolWait
-    ? [{ key: 'db.pool.wait_ms', value: { intValue: 10 } }]
-    : [];
+  // Inventory-db: every span carries the standard OTel DB semantic-convention
+  // attributes so /otel-data's DB detection and N+1 detector (which look for
+  // db.system + db.operation, not for span-name patterns) actually fire.
+  // The viewer matches on EITHER db.system or db.system.name; we emit the
+  // older name for broader compatibility. db.statement varies per call so the
+  // trace detail surfaces different queries, but db.operation + db.name stay
+  // identical across the N+1 set so the N+1 detector groups them correctly.
+  const buildInvDbAttributes = (callIndex) => {
+    const itemId = 1000 + (callIndex || 0);
+    const attrs = [
+      { key: 'db.system', value: { stringValue: 'postgresql' } },
+      { key: 'db.name', value: { stringValue: 'inventory' } },
+      { key: 'db.namespace', value: { stringValue: 'inventory' } },
+      { key: 'db.operation', value: { stringValue: 'SELECT' } },
+      { key: 'db.sql.table', value: { stringValue: 'stock' } },
+      {
+        key: 'db.statement',
+        value: { stringValue: `SELECT quantity, last_updated FROM stock WHERE item_id = ${itemId}` },
+      },
+    ];
+    if (injectInvPoolWait) {
+      attrs.push({ key: 'db.pool.wait_ms', value: { intValue: 10 } });
+    }
+    return attrs;
+  };
 
   // Checkout-web attributes (cold-start).
   const checkoutAttributes = [];
@@ -351,7 +372,10 @@ const generateTrace = () => {
     },
     {
       // One resource entry holds all the inventory-db sibling spans so the
-      // service map still sees a single inventory-db service.
+      // service map still sees a single inventory-db service. Each span is
+      // kind=CLIENT (3) and carries the OTel DB semantic-convention
+      // attributes — /otel-data's DB detection + N+1 detector look at those,
+      // not at the service.name or span name.
       resource: resourceForService('inventory-db'),
       scopeSpans: [{
         scope: { name: 'step-zero-demo' },
@@ -360,7 +384,8 @@ const generateTrace = () => {
           name: 'SELECT stock', startMs: invStartMsList[i], durationMs: dur,
           errored: injectInventoryError,
           errorMessage: invErrMsg,
-          attributes: invAttributesPerSpan,
+          attributes: buildInvDbAttributes(i),
+          kind: 3, // SPAN_KIND_CLIENT
         })),
       }],
     },

@@ -277,4 +277,34 @@ describe('generateTrace', () => {
     // above the typical "2× p95" outlier threshold (~500-600ms).
     expect(rootDurationMs).toBeGreaterThan(2000);
   });
+
+  it('inventory-db spans carry OTel DB semantic-convention attributes', () => {
+    // The /otel-data viewer's DB detection (and built-in N+1 detector)
+    // look at db.system / db.operation / db.name — not at the span name
+    // or service name. Without these attributes, inventory queries don't
+    // get recognized as DB calls in the trace detail or N+1 callouts.
+    const t = generateTrace();
+    let inventorySpans = [];
+    for (const rs of t.traces.resourceSpans) {
+      const svc = serviceNameOf(rs);
+      if (svc !== 'inventory-db') continue;
+      for (const ss of rs.scopeSpans) {
+        for (const s of ss.spans) inventorySpans.push(s);
+      }
+    }
+    expect(inventorySpans.length).toBeGreaterThan(0);
+    for (const span of inventorySpans) {
+      // span.kind should be CLIENT (3) for DB calls per OTel conventions.
+      expect(span.kind).toBe(3);
+      const attrMap = Object.fromEntries(
+        (span.attributes || []).map(a => [a.key, a.value])
+      );
+      expect(attrMap['db.system']?.stringValue).toBe('postgresql');
+      expect(attrMap['db.name']?.stringValue).toBe('inventory');
+      expect(attrMap['db.operation']?.stringValue).toBe('SELECT');
+      expect(attrMap['db.sql.table']?.stringValue).toBe('stock');
+      expect(typeof attrMap['db.statement']?.stringValue).toBe('string');
+      expect(attrMap['db.statement'].stringValue).toMatch(/^SELECT /);
+    }
+  });
 });
