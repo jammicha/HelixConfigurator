@@ -157,9 +157,11 @@ export const Layer2Synthetic: React.FC = () => {
             View in /otel-data <ExternalLink className="w-3.5 h-3.5" />
           </a>
           <button
-            onClick={() => { setHaveRun(false); setStatus(null); }}
-            className="w-full text-tiny text-gray-500 hover:text-gray-300 py-1"
+            onClick={start}
+            disabled={starting}
+            className="w-full inline-flex items-center justify-center gap-2 rounded border border-gray-700 px-4 py-2 text-tiny font-semibold text-gray-100 hover:bg-gray-900 disabled:opacity-60"
           >
+            {starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             Run again
           </button>
         </div>
