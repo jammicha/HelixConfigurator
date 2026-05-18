@@ -138,13 +138,20 @@ function register(app, { docker, containerLogs, configPath, fetchAcceptedForRece
   });
 
   // POST enable docker_stats — one-click. Requires /var/run/docker.sock to
-  // be mounted into the gateway container (see docker-compose.yml).
+  // be mounted into the gateway container (see docker-compose.yml) and the
+  // gateway to run as root (UID 0:0) so it can read the socket.
+  //
+  // api_version is pinned to "1.40" because Docker Engine 26+ (which ships
+  // with current Docker Desktop) refuses API versions older than 1.40, and
+  // the receiver's default of 1.25 hits "client version too old". 1.40 was
+  // introduced in Docker 19.03 — safe floor for any modern install.
   app.post('/api/step-zero/agentless/dockerstats/enable', async (req, res) => {
     await applyReceiverEdit({
       res, docker, containerLogs, configPath,
       receiverName: 'docker_stats',
       receiverConfig: {
         endpoint: 'unix:///var/run/docker.sock',
+        api_version: '1.40',
         collection_interval: '30s',
       },
       pipelineName: 'metrics/host',

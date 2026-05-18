@@ -114,6 +114,8 @@ describe('POST /api/step-zero/agentless/dockerstats/enable', () => {
     const newYaml = fs.readFileSync(configPath, 'utf8');
     expect(newYaml).toMatch(/docker_stats:/);
     expect(newYaml).toMatch(/endpoint: unix:\/\/\/var\/run\/docker\.sock/);
+    // Pinned for Docker Engine 26+ which refuses API <1.40.
+    expect(newYaml).toMatch(/api_version: ['"]?1\.40['"]?/);
   });
 });
 
