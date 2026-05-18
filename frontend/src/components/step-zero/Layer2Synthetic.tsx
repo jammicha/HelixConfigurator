@@ -94,13 +94,13 @@ export const Layer2Synthetic: React.FC = () => {
       </h2>
       <p className="text-sm text-gray-400 mb-4">
         {showPostRun ? (
-          <>{status!.sent_traces} traces sent &middot; {status!.sent_with_errors} with errors. Your service map should now show 5 services with a small error rate on payment-svc.</>
+          <>{status!.sent_traces} traces sent &middot; {status!.sent_with_errors} with errors. Three diagnostic patterns to hunt for in Helix: a stripe-mock latency tail (~8%), inventory-db cascade errors (~3%), and N+1 inventory queries under cart-api (~5%).</>
         ) : isRunning ? (
           status?.destination === 'gateway'
             ? <>Streaming through Helix Gateway → your Helix tenant + <code>/otel-data</code></>
             : <>Helix not configured yet — streaming to <code>/otel-data</code> only. Complete Step 1 to also reach your tenant.</>
         ) : (
-          <>60-second burst of realistic e-commerce traffic across 5 services. Generates ~480 traces with injected payment failures and DB contention.</>
+          <>60-second burst of realistic e-commerce traffic across 5 services. Three diagnostic patterns are woven in — a slow downstream, a cascading error, and an N+1 query bug — so you can see how OTel surfaces each one.</>
         )}
       </p>
 
