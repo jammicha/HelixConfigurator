@@ -14,6 +14,17 @@ const SELF_BASE = () => `http://localhost:${process.env.PORT || 3001}`;
 let activeRun = null;
 const __resetForTests = () => { activeRun = null; };
 
+// Public reset: halts any in-flight loop and wipes the run record entirely.
+// Called from lifecycle.js's reset-onboarding handler so "Reset onboarding
+// and start over" returns Layer 2's panel to the idle pre-run state.
+const clearActiveRun = () => {
+  if (activeRun) {
+    activeRun.stopRequested = true;
+    activeRun.running = false;
+  }
+  activeRun = null;
+};
+
 const snapshot = () => {
   if (!activeRun) {
     return { running: false, sent_traces: 0, sent_with_errors: 0 };
@@ -197,4 +208,4 @@ function register(app, deps = {}) {
   });
 }
 
-module.exports = { register, __resetForTests };
+module.exports = { register, __resetForTests, clearActiveRun };

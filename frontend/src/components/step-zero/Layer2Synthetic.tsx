@@ -87,7 +87,7 @@ export const Layer2Synthetic: React.FC = () => {
   return (
     <section className="rounded-lg border border-gray-800 bg-gray-1000 p-6">
       <div className="flex items-baseline gap-2 mb-1">
-        <span className="text-tiny uppercase tracking-wider text-blue-300">Layer 2 — Demo</span>
+        <span className="text-tiny uppercase tracking-wider text-blue-300">Demo</span>
       </div>
       <h2 className="text-xl font-semibold text-gray-100 mb-1">
         {showPostRun ? 'Scenario complete' : isRunning ? 'Running scenario' : 'See Helix populated'}
