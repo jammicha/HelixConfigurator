@@ -144,19 +144,15 @@ export const Layer2Synthetic: React.FC = () => {
         </div>
       ) : showPostRun ? (
         <div className="space-y-2">
-          {status?.helix_deep_link && (
-            <a
-              href={status.helix_deep_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full inline-flex items-center justify-center gap-2 rounded bg-primary px-4 py-2 text-tiny font-semibold text-white hover:bg-primary/90"
-            >
-              Open service map in Helix <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          )}
+          {/*
+            The "Open service map in Helix" link was removed: the URL we
+            generated (OTelNamespaceOverview dashboard) is not actually the
+            service map. The backend still emits helix_deep_link for future
+            use once we wire up the correct service-map URL pattern.
+          */}
           <a
             href={status?.local_deep_link || '/otel-data'}
-            className="w-full inline-flex items-center justify-center gap-2 rounded border border-gray-700 px-4 py-2 text-tiny font-semibold text-gray-100 hover:bg-gray-900"
+            className="w-full inline-flex items-center justify-center gap-2 rounded bg-primary px-4 py-2 text-tiny font-semibold text-white hover:bg-primary/90"
           >
             View in /otel-data <ExternalLink className="w-3.5 h-3.5" />
           </a>
