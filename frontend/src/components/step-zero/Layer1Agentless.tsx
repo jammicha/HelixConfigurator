@@ -4,6 +4,7 @@ import type { AgentlessStatus, ReceiverStatus } from './types';
 
 type Props = {
   status: AgentlessStatus | null;
+  envReady: boolean;
   onEnable: (receiver: 'hostmetrics' | 'dockerstats') => Promise<void>;
 };
 
@@ -13,10 +14,11 @@ const ReceiverCard: React.FC<{
   title: string;
   description: string;
   status: ReceiverStatus | undefined;
+  envReady: boolean;
   onEnable: () => Promise<void>;
   loading: boolean;
   error: string | null;
-}> = ({ icon, title, description, status, onEnable, loading, error }) => {
+}> = ({ icon, title, description, status, envReady, onEnable, loading, error }) => {
   const enabled = !!status?.enabled;
   const flowing = enabled && (status?.acceptedMetricPoints ?? 0) > 0;
   return (
@@ -42,6 +44,14 @@ const ReceiverCard: React.FC<{
               <span className="text-tiny text-gray-500">
                 {flowing ? 'Active — flowing to Helix.' : 'Enabled — waiting for first scrape (up to 30s).'}
               </span>
+            ) : !envReady ? (
+              <a
+                href="/?view=onboarding"
+                className="inline-flex items-center gap-2 rounded border border-gray-700 px-3 py-1.5 text-tiny font-semibold text-gray-300 hover:bg-gray-900"
+                title="The gateway needs your Helix endpoint and API key before it can route Step 0 data. Set those in Step 1 first."
+              >
+                Complete Step 1 first →
+              </a>
             ) : (
               <button
                 onClick={onEnable}
@@ -59,7 +69,7 @@ const ReceiverCard: React.FC<{
   );
 };
 
-export const Layer1Agentless: React.FC<Props> = ({ status, onEnable }) => {
+export const Layer1Agentless: React.FC<Props> = ({ status, envReady, onEnable }) => {
   const [loading, setLoading] = useState<{ hostmetrics: boolean; dockerstats: boolean }>({ hostmetrics: false, dockerstats: false });
   const [error, setError] = useState<{ hostmetrics: string | null; dockerstats: string | null }>({ hostmetrics: null, dockerstats: null });
 
@@ -83,12 +93,19 @@ export const Layer1Agentless: React.FC<Props> = ({ status, onEnable }) => {
       <p className="text-sm text-gray-400 mb-4">
         Two zero-code receivers running inside the Helix Gateway. No changes to your apps.
       </p>
+      {!envReady && (
+        <div className="rounded border border-amber-900 bg-amber-950/20 p-3 text-tiny text-amber-200 mb-4">
+          Step 1 isn't complete yet. The gateway needs your Helix endpoint and API key before
+          Step 0 receivers can route data. <a className="underline" href="/?view=onboarding">Finish Step 1 →</a>
+        </div>
+      )}
       <div className="space-y-3">
         <ReceiverCard
           icon={<Cpu className="w-5 h-5" />}
           title="Host metrics"
           description="CPU, memory, disk, network, and load from the machine running Helix."
           status={status?.hostmetrics}
+          envReady={envReady}
           onEnable={() => click('hostmetrics')}
           loading={loading.hostmetrics}
           error={error.hostmetrics}
@@ -98,6 +115,7 @@ export const Layer1Agentless: React.FC<Props> = ({ status, onEnable }) => {
           title="Container stats"
           description="Per-container CPU, memory, network, and block I/O from every container running on this Docker host."
           status={status?.dockerstats}
+          envReady={envReady}
           onEnable={() => click('dockerstats')}
           loading={loading.dockerstats}
           error={error.dockerstats}

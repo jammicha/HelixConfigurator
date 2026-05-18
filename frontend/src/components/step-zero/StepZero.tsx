@@ -5,14 +5,31 @@ import type { AgentlessStatus } from './types';
 
 export const StepZero: React.FC = () => {
   const [status, setStatus] = useState<AgentlessStatus | null>(null);
+  // envReady gates the Enable buttons. The gateway's existing bmchelix exporter
+  // refuses to start without HELIX_ENDPOINT, so clicking Enable before Step 1
+  // is complete triggers a rollback. We block at the UI to avoid the cryptic
+  // "rolled back" error and surface a clear "Complete Step 1 first" affordance.
+  // Long-term fix is Option B in the design notes: wire Step 0 metrics into
+  // the local viewer so the bmchelix dependency is decoupled.
+  const [envReady, setEnvReady] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch('/api/step-zero/agentless/status', { credentials: 'include' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = (await r.json()) as AgentlessStatus;
+      // Fetch status and env in parallel — both are cheap reads, and the env
+      // re-check on every poll means Step 0 unlocks live when the user
+      // finishes Step 1 in another tab/window without a page reload.
+      const [statusRes, envRes] = await Promise.all([
+        fetch('/api/step-zero/agentless/status', { credentials: 'include' }),
+        fetch('/api/env', { credentials: 'include' }),
+      ]);
+      if (!statusRes.ok) throw new Error(`HTTP ${statusRes.status}`);
+      const data = (await statusRes.json()) as AgentlessStatus;
       setStatus(data);
+      if (envRes.ok) {
+        const env = await envRes.json().catch(() => ({}));
+        setEnvReady(!!(env && typeof env === 'object' && env.HELIX_ENDPOINT));
+      }
       setErr(null);
     } catch (e) {
       setErr((e as Error).message);
@@ -39,7 +56,10 @@ export const StepZero: React.FC = () => {
     });
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
-      throw new Error(body.error || body.details || `HTTP ${r.status}`);
+      // Surface the backend's `details` field alongside `error` so users see
+      // the actual collector rejection reason instead of just "rolled back".
+      const detail = body.details ? `: ${body.details}` : '';
+      throw new Error(`${body.error || `HTTP ${r.status}`}${detail}`);
     }
     await refresh();
   }, [refresh]);
@@ -61,7 +81,7 @@ export const StepZero: React.FC = () => {
           </div>
         )}
 
-        <Layer1Agentless status={status} onEnable={enable} />
+        <Layer1Agentless status={status} envReady={envReady} onEnable={enable} />
 
         <footer className="pt-4 border-t border-gray-800">
           <a
