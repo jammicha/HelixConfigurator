@@ -70,14 +70,12 @@ export const Step1: React.FC<Props> = ({
 
   return (
     <div className="adapt-card">
-      {!envVars.HELIX_API_KEY && (
-        <a
-          href="/step-zero"
-          className="block rounded border border-blue-900 bg-blue-950/30 p-3 text-tiny text-blue-200 hover:bg-blue-950/50 transition-colors mb-4"
-        >
-          New to OpenTelemetry? <span className="font-semibold underline">Start here</span>
-        </a>
-      )}
+      <a
+        href="/step-zero"
+        className="block rounded border border-blue-900 bg-blue-950/30 p-3 text-tiny text-blue-200 hover:bg-blue-950/50 transition-colors mb-4"
+      >
+        New to OpenTelemetry? <span className="font-semibold underline">Start here</span>
+      </a>
       <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 1: Configure helix-gateway</h2>
       <p className="text-sm text-gray-400 mb-6">Tell the sidecar where Helix lives and what to call your service. The gateway restarts on save.</p>
       <div className="space-y-4 mb-6">
