@@ -512,8 +512,10 @@ const TimelineChartImpl: React.FC<Props> = ({
         ))}
       </svg>
 
-      {/* Top-right meta: total count (volume mode) + percentile legend */}
-      <div className="absolute top-0.5 right-2 flex items-center gap-3 text-tiny text-gray-500 font-semibold uppercase tracking-wider pointer-events-none">
+      {/* Top-right meta: total count (volume mode) + percentile legend.
+          bg-gray-1000 with small padding prevents the chart's bars and
+          percentile lines from bleeding through the text underneath. */}
+      <div className="absolute top-0.5 right-2 flex items-center gap-3 text-tiny text-gray-500 font-semibold uppercase tracking-wider pointer-events-none bg-gray-1000/90 px-1.5 py-0.5 rounded">
         {!isLatency && <span>{totalCount.toLocaleString()} total</span>}
         {showPercentiles && (
           <>
