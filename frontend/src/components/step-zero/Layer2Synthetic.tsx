@@ -105,7 +105,7 @@ export const Layer2Synthetic: React.FC = () => {
       </p>
 
       {!isRunning && !showPostRun && (
-        <div className="font-mono text-tiny text-gray-300 bg-gray-1100 border border-gray-800 rounded p-3 mb-4 whitespace-pre">
+        <div className="font-mono text-tiny text-gray-300 bg-gray-900 border border-gray-800 rounded p-3 mb-4 whitespace-pre">
 {`checkout-web → cart-api → inventory-db
       ↳ payment-svc → stripe-mock
       ↳ notification-svc`}
