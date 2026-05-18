@@ -73,13 +73,9 @@ export const Step1: React.FC<Props> = ({
       {!envVars.HELIX_API_KEY && (
         <a
           href="/step-zero"
-          className="block rounded border border-blue-900 bg-blue-950/30 p-3 text-tiny hover:bg-blue-950/50 transition-colors mb-4"
+          className="block rounded border border-blue-900 bg-blue-950/30 p-3 text-tiny text-blue-200 hover:bg-blue-950/50 transition-colors mb-4"
         >
-          <span className="font-semibold text-blue-200">New to OpenTelemetry?</span>{' '}
-          <span className="text-blue-300/80">
-            Take the Step 0 detour first — get host and container metrics flowing in two clicks, no app changes needed.
-          </span>
-          <span className="text-blue-200 ml-1">→</span>
+          New to OpenTelemetry? <span className="font-semibold underline">Start here</span>
         </a>
       )}
       <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 1: Configure helix-gateway</h2>
