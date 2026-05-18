@@ -117,6 +117,28 @@ function register(app, deps = {}) {
     // The next task wires the generation loop here, using `send` to POST
     // OTLP payloads at the configured rate.
   });
+
+  app.post('/api/step-zero/synthetic/stop', async (req, res) => {
+    if (!activeRun) {
+      return res.status(404).json({ error: 'No active run' });
+    }
+    const requestedId = req.body && req.body.run_id;
+    if (requestedId && requestedId !== activeRun.runId) {
+      return res.status(409).json({
+        error: 'run_id does not match the active run',
+        active_run_id: activeRun.runId,
+      });
+    }
+    activeRun.stopRequested = true;
+    activeRun.running = false;
+    const elapsed_s = Math.round((Date.now() - activeRun.startedAt) / 1000);
+    res.json({
+      stopped: true,
+      sent_traces: activeRun.sentTraces,
+      sent_with_errors: activeRun.sentWithErrors,
+      elapsed_s,
+    });
+  });
 }
 
 module.exports = { register, __resetForTests };

@@ -94,3 +94,42 @@ describe('POST /api/step-zero/synthetic/start', () => {
     expect(status.body.continuous).toBe(true);
   });
 });
+
+describe('POST /api/step-zero/synthetic/stop', () => {
+  const baseEnv = { HELIX_ENDPOINT: 'https://helixdemo.onbmc.com', X_SOURCE: 'demo' };
+
+  it('returns 404 when no run is active', async () => {
+    const app = makeApp();
+    const r = await request(app).post('/api/step-zero/synthetic/stop').send({});
+    expect(r.status).toBe(404);
+  });
+
+  it('marks the active run as stopped and returns the final stats', async () => {
+    const app = makeApp({
+      probeGateway: vi.fn().mockResolvedValue(false),
+      readEnv: vi.fn().mockReturnValue(baseEnv),
+      send: vi.fn().mockResolvedValue(undefined),
+    });
+    const start = await request(app).post('/api/step-zero/synthetic/start').send({});
+    const r = await request(app).post('/api/step-zero/synthetic/stop').send({ run_id: start.body.run_id });
+    expect(r.status).toBe(200);
+    expect(r.body.stopped).toBe(true);
+    expect(r.body).toHaveProperty('sent_traces');
+    expect(r.body).toHaveProperty('sent_with_errors');
+
+    // Status reports running:false after stop.
+    const status = await request(app).get('/api/step-zero/synthetic/status');
+    expect(status.body.running).toBe(false);
+  });
+
+  it('rejects mismatched run_id with 409', async () => {
+    const app = makeApp({
+      probeGateway: vi.fn().mockResolvedValue(false),
+      readEnv: vi.fn().mockReturnValue(baseEnv),
+      send: vi.fn().mockResolvedValue(undefined),
+    });
+    await request(app).post('/api/step-zero/synthetic/start').send({});
+    const r = await request(app).post('/api/step-zero/synthetic/stop').send({ run_id: 'wrong-id' });
+    expect(r.status).toBe(409);
+  });
+});
