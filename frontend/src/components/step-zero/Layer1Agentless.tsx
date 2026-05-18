@@ -88,7 +88,7 @@ export const Layer1Agentless: React.FC<Props> = ({ status, envReady, onEnable })
   return (
     <section className="rounded-lg border border-gray-800 bg-gray-1000 p-6">
       <h2 className="text-lg font-semibold text-gray-100 mb-1">
-        Layer 1 — Collect what's already there
+        Collect what's already there
       </h2>
       <p className="text-sm text-gray-400 mb-4">
         Two zero-code receivers running inside the Helix Gateway. No changes to your apps.
