@@ -28,13 +28,6 @@ services:
   helix-gateway:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: helix-gateway
-    # Run as root so docker_stats receiver can read /var/run/docker.sock.
-    # The contrib image defaults to UID 10001 and group_add doesn't help on
-    # Docker Desktop (the socket is root-owned inside the container). All
-    # bind mounts here are :ro and the gateway only talks to helix-bridge,
-    # so the elevation is bounded. A future hardening pass could route
-    # docker.sock through Tecnativa's docker-socket-proxy instead.
-    user: "0:0"
     ports:
       - '4317:4317'
       - '4318:4318'
@@ -43,11 +36,6 @@ services:
       - .env
     volumes:
       - ./helix-otel-collector.yaml:/etc/otelcol-contrib/config.yaml
-      # Step 0 Layer 1 pre-mounts — let hostmetrics + dockerstats receivers
-      # scrape host telemetry without per-receiver container surgery.
-      - /proc:/hostfs/proc:ro
-      - /sys:/hostfs/sys:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - helix-bridge
 
