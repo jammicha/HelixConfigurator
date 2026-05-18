@@ -1,18 +1,15 @@
-// Step 0 Layer 2 — realistic synthetic scenario generator. Hosts three
-// endpoints (/start /stop /status) and the in-process generation loop.
-//
-// Module-scope state: `activeRun` holds the currently-running or
-// last-completed run's metadata. Only ONE run at a time — /start returns
-// 409 when activeRun.running is true.
+// Step 0 Layer 2 — realistic synthetic scenario generator.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const { buildHelixServiceMapLink } = require('./helix-link');
+const { generateTrace } = require('./synthetic-scenario');
 
 const DEFAULT_DURATION_S = 60;
 const DEFAULT_TRACES_PER_S = 8;
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
+const SELF_BASE = () => `http://localhost:${process.env.PORT || 3001}`;
 
 let activeRun = null;
 const __resetForTests = () => { activeRun = null; };
@@ -40,20 +37,15 @@ const snapshot = () => {
   };
 };
 
-// Default gateway-probe: 1s HEAD against :4318/. 4xx-but-reachable counts
-// as up. Replaced in tests via DI.
 const defaultProbeGateway = async () => {
   try {
     await axios.get(`http://${TARGET_CONTAINER()}:4318/`, {
-      timeout: 1000,
-      validateStatus: () => true,
+      timeout: 1000, validateStatus: () => true,
     });
     return true;
   } catch { return false; }
 };
 
-// Default env reader: parse the .env mounted at /app/.env (matching the
-// pattern in diagnostics.js#apikey-probe). Replaced in tests via DI.
 const defaultReadEnv = () => {
   const envPath = path.join(__dirname, '../../../.env');
   try {
@@ -67,14 +59,70 @@ const defaultReadEnv = () => {
   } catch { return {}; }
 };
 
-// Default sender: stubbed-no-op in this task. The next task replaces
-// this with the real OTLP POST sender plus the driving loop.
-const defaultSend = async () => { /* no-op stub */ };
+// Real sender: POST traces/logs/metrics to either the gateway (full
+// pipeline → Helix + local viewer) or the configurator's own ingest
+// endpoint (local fallback). Metrics are silently skipped on the local
+// path — the local viewer doesn't have a metrics endpoint today.
+const defaultSend = async ({ destination, payload }) => {
+  const isGateway = destination === 'gateway';
+  const tracesUrl = isGateway
+    ? `http://${TARGET_CONTAINER()}:4318/v1/traces`
+    : `${SELF_BASE()}/api/otlp/traces`;
+  const logsUrl = isGateway
+    ? `http://${TARGET_CONTAINER()}:4318/v1/logs`
+    : `${SELF_BASE()}/api/otlp/logs`;
+  const metricsUrl = isGateway ? `http://${TARGET_CONTAINER()}:4318/v1/metrics` : null;
+
+  const headers = { 'Content-Type': 'application/json' };
+  // Best-effort: each signal posts independently. A trace landing without
+  // its log is better than nothing landing because logs failed.
+  await Promise.allSettled([
+    axios.post(tracesUrl, payload.traces, { headers, timeout: 3000 }),
+    axios.post(logsUrl, payload.logs, { headers, timeout: 3000 }),
+    metricsUrl
+      ? axios.post(metricsUrl, payload.metrics, { headers, timeout: 3000 })
+      : Promise.resolve(),
+  ]);
+};
+
+// Async generation loop. Self-rate-limits with setTimeout between iterations
+// so it doesn't peg the event loop. Stops on duration, stopRequested, or
+// maxIterations (test-only override).
+const runLoop = async ({ send, rateHz, maxIterations }) => {
+  const intervalMs = Math.max(1, Math.round(1000 / rateHz));
+  const ceiling = maxIterations || Infinity;
+  let iterations = 0;
+  while (
+    activeRun &&
+    activeRun.running &&
+    !activeRun.stopRequested &&
+    iterations < ceiling &&
+    (activeRun.continuous || Date.now() < activeRun.expectedEndAt)
+  ) {
+    const payload = generateTrace();
+    const erroredTrace = payload.traces.resourceSpans.some(rs =>
+      rs.scopeSpans.some(ss => ss.spans.some(s => s.status && s.status.code === 2))
+    );
+    try {
+      await send({ destination: activeRun.destination, payload });
+      activeRun.sentTraces++;
+      if (erroredTrace) activeRun.sentWithErrors++;
+    } catch (e) {
+      // Best-effort: a single failed POST shouldn't kill the loop. Counter
+      // stays put for this iteration; loop continues.
+    }
+    iterations++;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  if (activeRun) activeRun.running = false;
+};
 
 function register(app, deps = {}) {
   const probeGateway = deps.probeGateway || defaultProbeGateway;
   const readEnv = deps.readEnv || defaultReadEnv;
   const send = deps.send || defaultSend;
+  const rateHz = deps.generationRateHz || DEFAULT_TRACES_PER_S;
+  const maxIterations = deps.maxIterations || null;
 
   app.get('/api/step-zero/synthetic/status', (req, res) => {
     res.json(snapshot());
@@ -114,8 +162,9 @@ function register(app, deps = {}) {
       local_deep_link: '/otel-data',
     });
 
-    // The next task wires the generation loop here, using `send` to POST
-    // OTLP payloads at the configured rate.
+    // Fire-and-forget the loop. The HTTP response has already been sent
+    // above; the loop runs to completion or stop independently.
+    runLoop({ send, rateHz, maxIterations }).catch(() => { /* loop is self-resilient */ });
   });
 
   app.post('/api/step-zero/synthetic/stop', async (req, res) => {

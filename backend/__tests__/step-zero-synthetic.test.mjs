@@ -133,3 +133,46 @@ describe('POST /api/step-zero/synthetic/stop', () => {
     expect(r.status).toBe(409);
   });
 });
+
+describe('generation loop', () => {
+  it('drives the send function and increments counters', async () => {
+    const sendCalls = [];
+    const send = vi.fn(async (payload) => { sendCalls.push(payload); });
+    const app = makeApp({
+      probeGateway: vi.fn().mockResolvedValue(false),
+      readEnv: vi.fn().mockReturnValue({}),
+      send,
+      // Speed knob for tests: override default rate + duration.
+      generationRateHz: 100,
+      maxIterations: 5,
+    });
+    const start = await request(app).post('/api/step-zero/synthetic/start').send({});
+    // Wait for the loop to drain its 5 iterations (~50ms at 100Hz).
+    await new Promise(r => setTimeout(r, 150));
+    expect(send.mock.calls.length).toBeGreaterThanOrEqual(5);
+    // Each call shape: { destination, payload: { traces, logs, metrics } }
+    expect(sendCalls[0].destination).toBe('local');
+    expect(sendCalls[0].payload).toHaveProperty('traces');
+
+    const status = await request(app).get('/api/step-zero/synthetic/status');
+    expect(status.body.sent_traces).toBeGreaterThanOrEqual(5);
+  });
+
+  it('stops sending after stopRequested', async () => {
+    const send = vi.fn(async () => {});
+    const app = makeApp({
+      probeGateway: vi.fn().mockResolvedValue(false),
+      readEnv: vi.fn().mockReturnValue({}),
+      send,
+      generationRateHz: 100,
+      maxIterations: 1000,
+    });
+    const start = await request(app).post('/api/step-zero/synthetic/start').send({});
+    await new Promise(r => setTimeout(r, 50));
+    await request(app).post('/api/step-zero/synthetic/stop').send({ run_id: start.body.run_id });
+    const callsAtStop = send.mock.calls.length;
+    await new Promise(r => setTimeout(r, 100));
+    // No more sends should fire after stop.
+    expect(send.mock.calls.length).toBeLessThanOrEqual(callsAtStop + 2);
+  });
+});
