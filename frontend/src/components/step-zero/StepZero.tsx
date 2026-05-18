@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { Layer1Agentless } from './Layer1Agentless';
+import { Layer2Synthetic } from './Layer2Synthetic';
 import type { AgentlessStatus } from './types';
 
 export const StepZero: React.FC = () => {
@@ -81,7 +82,16 @@ export const StepZero: React.FC = () => {
           </div>
         )}
 
-        <Layer1Agentless status={status} envReady={envReady} onEnable={enable} />
+        <Layer2Synthetic />
+
+        <details className="rounded-lg border border-gray-800 bg-gray-1000">
+          <summary className="cursor-pointer select-none px-6 py-4 text-tiny font-semibold text-gray-300 hover:text-gray-100">
+            ▸ Advanced: pull host/container metrics directly
+          </summary>
+          <div className="px-6 pb-6">
+            <Layer1Agentless status={status} envReady={envReady} onEnable={enable} />
+          </div>
+        </details>
 
         <footer className="pt-4 border-t border-gray-800">
           <a
