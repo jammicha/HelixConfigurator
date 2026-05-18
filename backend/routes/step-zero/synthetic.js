@@ -113,8 +113,15 @@ const runLoop = async ({ send, rateHz, maxIterations }) => {
     ) {
       try {
         const payload = generateTrace();
+        // Count a trace as "with errors" only when the user-visible root
+        // span errored. Retry-storm traces (2 failed attempts + 1 success)
+        // have intermediate errored spans, but the user ultimately got a
+        // successful response — those shouldn't count as user-visible
+        // failures. The root span is the one without a parentSpanId.
         const erroredTrace = payload.traces.resourceSpans.some(rs =>
-          rs.scopeSpans.some(ss => ss.spans.some(s => s.status && s.status.code === 2))
+          rs.scopeSpans.some(ss => ss.spans.some(s =>
+            !s.parentSpanId && s.status && s.status.code === 2
+          ))
         );
         await send({ destination: activeRun.destination, payload });
         activeRun.sentTraces++;
