@@ -242,7 +242,31 @@ const TimelineChartImpl: React.FC<Props> = ({
   const totalCount = buckets.reduce((acc, b) => acc + (b.total || 0), 0);
 
   return (
-    <div ref={containerRef} className="relative w-full select-none">
+    <div ref={containerRef} className="w-full select-none">
+      {/* Legend lives in its own row above the chart so it never overlaps
+          the bars or the percentile lines, even when the chart is busy. */}
+      <div className="flex justify-end items-center gap-3 text-tiny text-gray-500 font-semibold uppercase tracking-wider mb-1 h-4 pointer-events-none">
+        {!isLatency && <span>{totalCount.toLocaleString()} total</span>}
+        {showPercentiles && (
+          <>
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block w-3 h-px" style={{ background: TIMELINE_COLORS.p50, borderTop: `1px dashed ${TIMELINE_COLORS.p50}` }} />
+              p50
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p95 }} />
+              p95
+            </span>
+            {(percentiles || []).some(p => p?.p99 != null) && (
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p99 }} />
+                p99
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      <div className="relative">
       <svg
         width={width}
         height={height}
@@ -512,30 +536,9 @@ const TimelineChartImpl: React.FC<Props> = ({
         ))}
       </svg>
 
-      {/* Top-right meta: total count (volume mode) + percentile legend.
-          bg-gray-1000 with small padding prevents the chart's bars and
-          percentile lines from bleeding through the text underneath. */}
-      <div className="absolute top-0.5 right-2 flex items-center gap-3 text-tiny text-gray-500 font-semibold uppercase tracking-wider pointer-events-none bg-gray-1000/90 px-1.5 py-0.5 rounded">
-        {!isLatency && <span>{totalCount.toLocaleString()} total</span>}
-        {showPercentiles && (
-          <>
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block w-3 h-px" style={{ background: TIMELINE_COLORS.p50, borderTop: `1px dashed ${TIMELINE_COLORS.p50}` }} />
-              p50
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p95 }} />
-              p95
-            </span>
-            {(percentiles || []).some(p => p?.p99 != null) && (
-              <span className="inline-flex items-center gap-1">
-                <span className="inline-block w-3 h-0.5" style={{ background: TIMELINE_COLORS.p99 }} />
-                p99
-              </span>
-            )}
-          </>
-        )}
-      </div>
+      {/* Legend was here in absolute positioning; now lives above the SVG
+          (see the flex row at the top of this component) so it never sits
+          over the chart's bars or lines. */}
 
       {/* Loading veil */}
       {loading && (
@@ -619,6 +622,7 @@ const TimelineChartImpl: React.FC<Props> = ({
           )}
         </div>
       )}
+      </div>
     </div>
   );
 };
