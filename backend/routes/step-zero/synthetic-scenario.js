@@ -8,9 +8,9 @@
 //          │
 //          └─────▶ notification-svc
 //
-// Three independent diagnostic patterns weave into the same baseline. Each
-// Math.random() draw is independent, so a trace can hit 0, 1, 2, or all 3.
-// About 85% of traces remain baseline-healthy.
+// Eight independent diagnostic patterns weave into the same baseline. Each
+// Math.random() draw is independent, so a trace can hit any combination.
+// About 75% of traces remain baseline-healthy.
 //
 //   Pattern A — Stripe-mock latency tail (8%)
 //     stripe-mock runs 200-400ms (uniform) instead of ~40ms. Slowness cascades
@@ -26,6 +26,29 @@
 //     cart-api makes 5-10 sequential calls to inventory-db (each ~5ms) instead
 //     of one. All siblings under cart-api. Cart-api duration extends to cover
 //     them all.
+//
+//   Pattern D — Cart-api cache-miss tail (5%)
+//     cart-api runs ~5x slower (~40ms vs ~8ms baseline). cache.hit=false
+//     attribute attached to the cart-api span.
+//
+//   Pattern E — Inventory-db connection-pool wait (4%)
+//     each inventory-db span runs ~3x slower (~15ms vs ~5ms). Every inv-db
+//     span in the trace gets db.pool.wait_ms=10. Compounds with N+1.
+//
+//   Pattern F — Notification slow email render (2%)
+//     notification-svc runs ~8x slower (~100ms vs ~12ms) with
+//     template.render_ms=95. Only fires when notification fires (70% of traces).
+//
+//   Pattern G — Retry storm (2%)
+//     stripe-mock attempted 3 times: 2 timeouts (~30ms each, status=2) + 1
+//     successful retry (~40ms or 200-400ms if Pattern A also fires). Each
+//     attempt carries retry.attempt=N. Root status remains 1 (success).
+//
+//   Pattern H — Cold-start spike (0.5%)
+//     adds 1.5-2s of cold-start latency to one randomly-chosen service
+//     (one of checkout-web/cart-api/payment-service/notification-svc) and
+//     stamps startup.cold=true on that service's span. Latency propagates
+//     up naturally because parent durations are sums of their children.
 const crypto = require('crypto');
 
 // Log-normal sampler. Returns a positive number with median ~ exp(mu)
@@ -47,11 +70,16 @@ const SERVICE_PROFILES = {
   'notification-svc': { median: 12, sigma: 0.4 },
 };
 
+const COLD_START_TARGETS = ['checkout-web', 'cart-api', 'payment-service', 'notification-svc'];
+
 const randomHex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 
-const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, errored, errorMessage }) => {
+const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, errored, errorMessage, statusCode, attributes }) => {
   const startNs = String(BigInt(Math.round(startMs)) * 1_000_000n);
   const endNs = String(BigInt(Math.round(startMs + durationMs)) * 1_000_000n);
+  // Allow explicit statusCode override (used by retry storm so we can mark
+  // failed attempts without an "errored" cascade flag).
+  const code = statusCode !== undefined ? statusCode : (errored ? 2 : 1);
   const span = {
     traceId,
     spanId,
@@ -59,10 +87,11 @@ const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, e
     kind: 2, // SPAN_KIND_SERVER
     startTimeUnixNano: startNs,
     endTimeUnixNano: endNs,
-    status: { code: errored ? 2 : 1 }, // 2 = ERROR, 1 = OK
+    status: { code },
   };
   if (parentSpanId) span.parentSpanId = parentSpanId;
-  if (errored && errorMessage) span.status.message = errorMessage;
+  if (code === 2 && errorMessage) span.status.message = errorMessage;
+  if (attributes && attributes.length) span.attributes = attributes;
   return span;
 };
 
@@ -93,6 +122,40 @@ const metricDataPoint = ({ serviceName, latencyMs, errored, startMs }) => ({
   asDouble: latencyMs,
 });
 
+// Build the sequential 3-attempt stripe-mock span list for Pattern G.
+// successLatency lets the caller decide whether the successful retry is the
+// normal log-normal sample or a stripe-slowdown (Pattern A) tail.
+const buildRetryStormStripeSpans = ({ traceId, paymentSpanId, stripeStartMs, successLatency }) => {
+  const attempt1 = logNormalMs(30, 0.3);
+  const attempt2 = logNormalMs(30, 0.3);
+  const attempt3 = successLatency;
+  const t1Start = stripeStartMs;
+  const t2Start = t1Start + attempt1;
+  const t3Start = t2Start + attempt2;
+  const spans = [
+    buildSpan({
+      traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
+      name: 'POST /v1/charges', startMs: t1Start, durationMs: attempt1,
+      statusCode: 2, errorMessage: 'timeout',
+      attributes: [{ key: 'retry.attempt', value: { intValue: 1 } }],
+    }),
+    buildSpan({
+      traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
+      name: 'POST /v1/charges', startMs: t2Start, durationMs: attempt2,
+      statusCode: 2, errorMessage: 'service_unavailable',
+      attributes: [{ key: 'retry.attempt', value: { intValue: 2 } }],
+    }),
+    buildSpan({
+      traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
+      name: 'POST /v1/charges', startMs: t3Start, durationMs: attempt3,
+      statusCode: 1,
+      attributes: [{ key: 'retry.attempt', value: { intValue: 3 } }],
+    }),
+  ];
+  const totalStripeDuration = attempt1 + attempt2 + attempt3;
+  return { spans, totalStripeDuration };
+};
+
 // Generate one trace + its bundle of logs and metrics. Returns three OTLP
 // payloads ready to POST to /v1/traces, /v1/logs, /v1/metrics respectively.
 const generateTrace = () => {
@@ -103,44 +166,72 @@ const generateTrace = () => {
   const injectStripeSlowdown = Math.random() < 0.08;
   const injectInventoryError = Math.random() < 0.03;
   const injectN1 = Math.random() < 0.05;
+  const injectCartCacheMiss = Math.random() < 0.05;
+  const injectInvPoolWait = Math.random() < 0.04;
+  const injectNotifyRenderSlow = Math.random() < 0.02;
+  const injectRetryStorm = Math.random() < 0.02;
+  const injectColdStart = Math.random() < 0.005;
   // 30% of traces skip notification (out-of-stock branch); inventory always present.
   const includeNotification = Math.random() > 0.3;
 
+  // Pick a cold-start victim service if injected.
+  const coldStartService = injectColdStart
+    ? COLD_START_TARGETS[Math.floor(Math.random() * COLD_START_TARGETS.length)]
+    : null;
+  const coldStartExtraMs = injectColdStart ? 1500 + Math.random() * 500 : 0;
+  // Helper: returns the cold-start bump for a service if it's the chosen victim.
+  const coldStartBumpFor = (svc) => (coldStartService === svc ? coldStartExtraMs : 0);
+
   // Inventory-db latencies. Baseline is one call; N+1 generates 5-10 sequential
-  // calls (~5ms each). All children of cart-api.
+  // calls (~5ms each). All children of cart-api. Pool-wait (Pattern E) makes
+  // each call ~15ms instead of ~5ms.
   const invCount = injectN1 ? 5 + Math.floor(Math.random() * 6) : 1; // 5..10 when N+1
+  const invMedian = injectInvPoolWait ? 15 : SERVICE_PROFILES['inventory-db'].median;
+  const invSigma = injectInvPoolWait ? 0.3 : SERVICE_PROFILES['inventory-db'].sigma;
   const invLatencies = Array.from({ length: invCount }, () =>
-    injectN1
-      ? 4 + Math.random() * 2 // ~5ms each (uniform 4-6ms) for N+1
-      : logNormalMs(SERVICE_PROFILES['inventory-db'].median, SERVICE_PROFILES['inventory-db'].sigma),
+    injectN1 && !injectInvPoolWait
+      ? 4 + Math.random() * 2 // ~5ms each (uniform 4-6ms) for plain N+1
+      : injectN1 && injectInvPoolWait
+        ? 13 + Math.random() * 4 // ~15ms each for N+1 + pool wait
+        : logNormalMs(invMedian, invSigma),
   );
   const invTotalLatency = invLatencies.reduce((a, b) => a + b, 0);
 
-  // Cart-api owns its own work + must cover all inventory-db children. When N+1
-  // fires, force cart-api to cover the sequential sum + small buffer.
-  const cartOwnLatency = logNormalMs(SERVICE_PROFILES['cart-api'].median, SERVICE_PROFILES['cart-api'].sigma);
+  // Cart-api owns its own work + must cover all inventory-db children. Cache
+  // miss (Pattern D) pushes the baseline to ~40ms. Cold-start may add 1.5-2s.
+  const cartBaseMedian = injectCartCacheMiss ? 40 : SERVICE_PROFILES['cart-api'].median;
+  const cartOwnLatency =
+    logNormalMs(cartBaseMedian, SERVICE_PROFILES['cart-api'].sigma) +
+    coldStartBumpFor('cart-api');
   const n1Buffer = 4;
   const cartLatency = injectN1
     ? Math.max(cartOwnLatency, invTotalLatency + n1Buffer)
     : cartOwnLatency;
 
-  // Stripe-mock: 200-400ms uniform when slowdown injected, else log-normal ~40ms.
-  const stripeLatency = injectStripeSlowdown
+  // Stripe-mock baseline: 200-400ms uniform when slowdown injected, else log-normal ~40ms.
+  // When retry storm fires, this value is reused as the SUCCESSFUL-attempt latency
+  // so Pattern A + Pattern G compose naturally.
+  const stripeBaseLatency = injectStripeSlowdown
     ? 200 + Math.random() * 200
     : logNormalMs(SERVICE_PROFILES['stripe-mock'].median, SERVICE_PROFILES['stripe-mock'].sigma);
-  const paymentOwnLatency = logNormalMs(SERVICE_PROFILES['payment-service'].median, SERVICE_PROFILES['payment-service'].sigma);
-  const paymentLatency = stripeLatency + paymentOwnLatency;
+
+  const paymentOwnLatency =
+    logNormalMs(SERVICE_PROFILES['payment-service'].median, SERVICE_PROFILES['payment-service'].sigma) +
+    coldStartBumpFor('payment-service');
+
+  const notifyBaseMedian = injectNotifyRenderSlow ? 100 : SERVICE_PROFILES['notification-svc'].median;
+  const notifyBaseSigma = injectNotifyRenderSlow ? 0.4 : SERVICE_PROFILES['notification-svc'].sigma;
   const notifyLatency = includeNotification
-    ? logNormalMs(SERVICE_PROFILES['notification-svc'].median, SERVICE_PROFILES['notification-svc'].sigma)
+    ? logNormalMs(notifyBaseMedian, notifyBaseSigma) + coldStartBumpFor('notification-svc')
     : 0;
 
-  const rootOwnLatency = 5 + Math.random() * 10;
-  const rootLatency = cartLatency + paymentLatency + notifyLatency + rootOwnLatency;
+  const rootOwnLatency = 5 + Math.random() * 10 + coldStartBumpFor('checkout-web');
 
+  // Span IDs.
   const rootSpanId = randomHex(8);
   const cartSpanId = randomHex(8);
   const paymentSpanId = randomHex(8);
-  const stripeSpanId = randomHex(8);
+  const stripeSpanId = randomHex(8); // single-span case
   const notifySpanId = randomHex(8);
   const invSpanIds = invLatencies.map(() => randomHex(8));
 
@@ -167,14 +258,62 @@ const generateTrace = () => {
 
   const paymentStartMs = cursor;
   const stripeStartMs = paymentStartMs + paymentOwnLatency * 0.3;
+
+  // Build stripe-mock span(s). Retry storm produces 3 sequential spans;
+  // otherwise a single span. The total stripe duration drives payment-service's
+  // own duration so the parent covers all children.
+  let stripeMockSpans;
+  let totalStripeDuration;
+  if (injectRetryStorm) {
+    const result = buildRetryStormStripeSpans({
+      traceId, paymentSpanId, stripeStartMs,
+      successLatency: stripeBaseLatency, // composes naturally with Pattern A
+    });
+    stripeMockSpans = result.spans;
+    totalStripeDuration = result.totalStripeDuration;
+  } else {
+    stripeMockSpans = [buildSpan({
+      traceId, spanId: stripeSpanId, parentSpanId: paymentSpanId,
+      name: 'POST /v1/charges', startMs: stripeStartMs, durationMs: stripeBaseLatency,
+      errored: false,
+    })];
+    totalStripeDuration = stripeBaseLatency;
+  }
+
+  const paymentLatency = totalStripeDuration + paymentOwnLatency;
   cursor = paymentStartMs + paymentLatency;
 
   const notifyStartMs = cursor;
+
+  const rootLatency = cartLatency + paymentLatency + notifyLatency + rootOwnLatency;
 
   // Cascade error fields for Pattern B.
   const checkoutErrMsg = injectInventoryError ? 'checkout failed: inventory unavailable' : undefined;
   const cartErrMsg = injectInventoryError ? 'upstream inventory unavailable' : undefined;
   const invErrMsg = injectInventoryError ? 'connection refused: inventory-db unreachable' : undefined;
+
+  // Cart-api attributes: cache.hit (and cold-start if applicable).
+  const cartAttributes = [];
+  if (injectCartCacheMiss) cartAttributes.push({ key: 'cache.hit', value: { boolValue: false } });
+  if (coldStartService === 'cart-api') cartAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
+
+  // Inventory-db attributes (per-span). Pool-wait attaches to every inv span.
+  const invAttributesPerSpan = injectInvPoolWait
+    ? [{ key: 'db.pool.wait_ms', value: { intValue: 10 } }]
+    : [];
+
+  // Checkout-web attributes (cold-start).
+  const checkoutAttributes = [];
+  if (coldStartService === 'checkout-web') checkoutAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
+
+  // Payment-service attributes (cold-start).
+  const paymentAttributes = [];
+  if (coldStartService === 'payment-service') paymentAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
+
+  // Notification-svc attributes (template.render_ms + cold-start).
+  const notifyAttributes = [];
+  if (injectNotifyRenderSlow) notifyAttributes.push({ key: 'template.render_ms', value: { intValue: 95 } });
+  if (coldStartService === 'notification-svc') notifyAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
 
   // Build the resourceSpans array — one entry per service.
   const resourceSpans = [
@@ -187,6 +326,7 @@ const generateTrace = () => {
           startMs: rootStartMs, durationMs: rootLatency,
           errored: injectInventoryError,
           errorMessage: checkoutErrMsg,
+          attributes: checkoutAttributes,
         })],
       }],
     },
@@ -199,6 +339,7 @@ const generateTrace = () => {
           name: 'GET /cart/items', startMs: cartStartMs, durationMs: cartLatency,
           errored: injectInventoryError,
           errorMessage: cartErrMsg,
+          attributes: cartAttributes,
         })],
       }],
     },
@@ -213,6 +354,7 @@ const generateTrace = () => {
           name: 'SELECT stock', startMs: invStartMsList[i], durationMs: dur,
           errored: injectInventoryError,
           errorMessage: invErrMsg,
+          attributes: invAttributesPerSpan,
         })),
       }],
     },
@@ -224,6 +366,7 @@ const generateTrace = () => {
           traceId, spanId: paymentSpanId, parentSpanId: rootSpanId,
           name: 'POST /charge', startMs: paymentStartMs, durationMs: paymentLatency,
           errored: false,
+          attributes: paymentAttributes,
         })],
       }],
     },
@@ -231,11 +374,7 @@ const generateTrace = () => {
       resource: resourceForService('stripe-mock'),
       scopeSpans: [{
         scope: { name: 'step-zero-demo' },
-        spans: [buildSpan({
-          traceId, spanId: stripeSpanId, parentSpanId: paymentSpanId,
-          name: 'POST /v1/charges', startMs: stripeStartMs, durationMs: stripeLatency,
-          errored: false,
-        })],
+        spans: stripeMockSpans,
       }],
     },
   ];
@@ -249,6 +388,7 @@ const generateTrace = () => {
           traceId, spanId: notifySpanId, parentSpanId: rootSpanId,
           name: 'email send', startMs: notifyStartMs, durationMs: notifyLatency,
           errored: false,
+          attributes: notifyAttributes,
         })],
       }],
     });

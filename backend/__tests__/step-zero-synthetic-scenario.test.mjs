@@ -118,4 +118,124 @@ describe('generateTrace', () => {
       }
     }
   });
+
+  it('cart-api cache-miss tail fires on ~5% of traces (sample of 2000)', () => {
+    let slow = 0;
+    let sample;
+    for (let i = 0; i < 2000; i++) {
+      const t = generateTrace();
+      const cartSpans = spansForService(t, 'cart-api');
+      if (cartSpans.some(s => durationMs(s) > 25)) {
+        slow++;
+        if (!sample) sample = t;
+      }
+    }
+    // 5% over 2000 ~ 100. Note: N+1 pattern can also inflate cart-api duration
+    // because cart covers all sequential inv-db calls (5-10 * 5ms = 25-50ms),
+    // so this count will include some N+1 overlap. We just want a roughly
+    // increased count over baseline.
+    expect(slow).toBeGreaterThan(70);
+    expect(slow).toBeLessThan(250); // generous upper to account for N+1 overlap
+    // Spot-check: find a trace where cart-api > 25ms AND has cache.hit=false.
+    let foundCacheMiss = false;
+    for (let i = 0; i < 500 && !foundCacheMiss; i++) {
+      const t = generateTrace();
+      const cartSpans = spansForService(t, 'cart-api');
+      for (const s of cartSpans) {
+        const attr = (s.attributes || []).find(a => a.key === 'cache.hit');
+        if (attr && attr.value.boolValue === false) {
+          expect(durationMs(s)).toBeGreaterThan(15); // ~40ms median, allow wide
+          foundCacheMiss = true;
+          break;
+        }
+      }
+    }
+    expect(foundCacheMiss).toBe(true);
+  });
+
+  it('inventory-db pool wait fires on ~4% of traces with attribute on every inv span (sample of 2000)', () => {
+    let withWait = 0;
+    for (let i = 0; i < 2000; i++) {
+      const t = generateTrace();
+      const invSpans = spansForService(t, 'inventory-db');
+      const anyHas = invSpans.some(s =>
+        (s.attributes || []).some(a => a.key === 'db.pool.wait_ms'),
+      );
+      if (!anyHas) continue;
+      withWait++;
+      // When the pattern fires, ALL inv-db spans should have the attribute
+      // (handles N+1 interaction).
+      for (const s of invSpans) {
+        const attr = (s.attributes || []).find(a => a.key === 'db.pool.wait_ms');
+        expect(attr).toBeDefined();
+        expect(attr.value.intValue).toBe(10);
+      }
+    }
+    // 4% over 2000 ~ 80. Generous bounds.
+    expect(withWait).toBeGreaterThan(55);
+    expect(withWait).toBeLessThan(130);
+  });
+
+  it('notification email-render slow fires on ~1.4% of traces (sample of 2000)', () => {
+    let slow = 0;
+    for (let i = 0; i < 2000; i++) {
+      const t = generateTrace();
+      const notifySpans = spansForService(t, 'notification-svc');
+      if (notifySpans.some(s => durationMs(s) > 60)) slow++;
+    }
+    // 2% * 70% (notification present) over 2000 ~ 28. Generous bounds.
+    expect(slow).toBeGreaterThan(15);
+    expect(slow).toBeLessThan(60);
+  });
+
+  it('retry storm fires on ~2% of traces with 3 sequential stripe-mock spans (sample of 2000)', () => {
+    let retries = 0;
+    let sample;
+    for (let i = 0; i < 2000; i++) {
+      const t = generateTrace();
+      const stripeSpans = spansForService(t, 'stripe-mock');
+      if (stripeSpans.length > 1) {
+        retries++;
+        if (!sample) sample = stripeSpans;
+      }
+    }
+    // 2% over 2000 ~ 40. Generous bounds.
+    expect(retries).toBeGreaterThan(25);
+    expect(retries).toBeLessThan(75);
+    // Spot-check shape on a captured sample: 3 spans, first two errored, last OK.
+    expect(sample).toBeDefined();
+    expect(sample.length).toBe(3);
+    expect(sample[0].status.code).toBe(2);
+    expect(sample[1].status.code).toBe(2);
+    expect(sample[2].status.code).toBe(1);
+    // retry.attempt attributes
+    for (let i = 0; i < 3; i++) {
+      const attr = (sample[i].attributes || []).find(a => a.key === 'retry.attempt');
+      expect(attr).toBeDefined();
+      expect(attr.value.intValue).toBe(i + 1);
+    }
+  });
+
+  it('cold-start spike fires on ~0.5% of traces (sample of 2000)', () => {
+    let cold = 0;
+    for (let i = 0; i < 2000; i++) {
+      const t = generateTrace();
+      let found = false;
+      for (const rs of t.traces.resourceSpans) {
+        const svc = serviceNameOf(rs);
+        // Cold-start only targets these four services (skips stripe-mock + inventory-db).
+        if (!['checkout-web', 'cart-api', 'payment-service', 'notification-svc'].includes(svc)) continue;
+        for (const ss of rs.scopeSpans) {
+          for (const s of ss.spans) {
+            const attr = (s.attributes || []).find(a => a.key === 'startup.cold');
+            if (attr && attr.value.boolValue === true) found = true;
+          }
+        }
+      }
+      if (found) cold++;
+    }
+    // 0.5% over 2000 ~ 10. Very wide bounds for small sample noise.
+    expect(cold).toBeGreaterThan(3);
+    expect(cold).toBeLessThan(25);
+  });
 });
