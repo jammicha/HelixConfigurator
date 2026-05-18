@@ -47,6 +47,11 @@ app.get(/^\/otel-data(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
 });
 
+// SPA fallback for the Step 0 zero-to-OTel onboarding route.
+app.get(/^\/step-zero(\/.*)?$/, (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
+});
+
 // Auth endpoints (must register BEFORE the requireAuth middleware so the
 // login / logout / status routes themselves are reachable when auth is on).
 registerAuthRoutes(app);
@@ -95,6 +100,7 @@ require('./routes/situations').register(app, { otelStore });
 require('./routes/discovery').register(app, { docker });
 require('./routes/containers').register(app, { docker });
 require('./routes/lifecycle').register(app, { docker });
+require('./routes/step-zero/synthetic').register(app, { docker });
 require('./routes/env').register(app);
 
 const diagnostics = require('./routes/diagnostics');

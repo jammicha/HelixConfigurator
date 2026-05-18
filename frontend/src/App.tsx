@@ -1641,11 +1641,20 @@ ${logsData.logs || '(no logs available)'}
                   state, let me start over." Lives on every wizard step so a
                   user mid-flow can wipe and restart without navigating away.
                   Confirmed before any destructive action. */}
-              <div className="flex justify-end -mt-2">
+              <div className="flex items-center -mt-2">
+                {setupStep !== 1 && (
+                  <a
+                    href="/step-zero"
+                    className="text-tiny text-gray-400 hover:text-gray-200 underline"
+                    title="No OTel collector or instrumented apps yet? Start here to get data flowing without touching your apps."
+                  >
+                    Starting from zero? →
+                  </a>
+                )}
                 <button
                   onClick={requestResetOnboarding}
                   disabled={resetting}
-                  className="text-tiny text-gray-500 hover:text-gray-300 underline disabled:opacity-60"
+                  className="ml-auto text-tiny text-gray-500 hover:text-gray-300 underline disabled:opacity-60"
                   title="Clear .env (endpoint, API key, X-Source, App URL, business-service key), drop bridged networks, and restart from Step 1"
                 >
                   {resetting ? 'Resetting…' : 'Reset onboarding and start over'}

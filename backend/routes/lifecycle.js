@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers } = require('../util');
+const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
@@ -363,6 +364,12 @@ function register(app, { docker }) {
   app.post('/api/lifecycle/reset-onboarding', async (req, res) => {
     const sidecarName = TARGET_CONTAINER();
     const WIZARD_KEYS = ['HELIX_ENDPOINT', 'HELIX_API_KEY', 'X_SOURCE', 'APP_URL', 'BUSINESS_SERVICE_KEY', 'HELIX_EVENTS_ENDPOINT'];
+
+    // 0. Halt any in-flight Step 0 Layer 2 synthetic run and wipe its record
+    //    so the panel returns to its idle pre-run state after the reset.
+    //    Done first so the loop doesn't keep POSTing to the gateway as we
+    //    recreate it below.
+    try { clearSyntheticRun(); } catch { /* best effort */ }
 
     // 1. Clear the wizard-managed .env values. Preserve other lines (like
     //    UI_AUTH_PASSWORD or TARGET_CONTAINER_NAME) so deployment config
