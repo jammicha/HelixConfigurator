@@ -216,7 +216,7 @@ describe('generateTrace', () => {
     }
   });
 
-  it('cold-start spike fires on ~0.5% of traces (sample of 2000)', () => {
+  it('cold-start spike fires on ~2% of traces (sample of 2000)', () => {
     let cold = 0;
     for (let i = 0; i < 2000; i++) {
       const t = generateTrace();
@@ -234,8 +234,47 @@ describe('generateTrace', () => {
       }
       if (found) cold++;
     }
-    // 0.5% over 2000 ~ 10. Very wide bounds for small sample noise.
-    expect(cold).toBeGreaterThan(3);
-    expect(cold).toBeLessThan(25);
+    // 2% over 2000 ~ 40. ±2σ where σ ≈ √(2000·0.02·0.98) ≈ 6.3.
+    expect(cold).toBeGreaterThan(25);
+    expect(cold).toBeLessThan(70);
+  });
+
+  it('cold-start spike makes the root span well above the outlier threshold', () => {
+    // Verifies the diagnostic STORY: a cold-start trace's root duration
+    // should be far above 2× the operation's median, so /otel-data's
+    // outlier badge (>2× p95) reliably flags it.
+    let coldStartTrace = null;
+    for (let i = 0; i < 500 && !coldStartTrace; i++) {
+      const t = generateTrace();
+      for (const rs of t.traces.resourceSpans) {
+        for (const ss of rs.scopeSpans) {
+          for (const s of ss.spans) {
+            const attr = (s.attributes || []).find(a => a.key === 'startup.cold');
+            if (attr && attr.value.boolValue === true) {
+              coldStartTrace = t;
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (!coldStartTrace) {
+      throw new Error('Expected at least one cold-start in 500 samples but found none');
+    }
+    // Find the root span (no parentSpanId) — should be well above 1500ms.
+    let rootDurationMs = 0;
+    for (const rs of coldStartTrace.traces.resourceSpans) {
+      for (const ss of rs.scopeSpans) {
+        for (const s of ss.spans) {
+          if (!s.parentSpanId) {
+            rootDurationMs = Number(BigInt(s.endTimeUnixNano) - BigInt(s.startTimeUnixNano)) / 1_000_000;
+          }
+        }
+      }
+    }
+    // Cold-start magnitude is 2500-4000ms. Baseline root is ~110ms.
+    // Even at the bottom of the cold-start range, root duration is well
+    // above the typical "2× p95" outlier threshold (~500-600ms).
+    expect(rootDurationMs).toBeGreaterThan(2000);
   });
 });

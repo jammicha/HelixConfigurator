@@ -94,7 +94,7 @@ export const Layer2Synthetic: React.FC = () => {
       </h2>
       <p className="text-sm text-gray-400 mb-4">
         {showPostRun ? (
-          <>{status!.sent_traces} traces sent &middot; {status!.sent_with_errors} with errors. Eight diagnostic patterns to hunt for: stripe-mock latency tail (~8%), inventory cascade errors (~3%), N+1 inventory queries (~5%), cart-api cache misses (~5%), inventory pool waits (~4%), notification render slow (~2%), retry storms (~2%), and cold-start spikes (~0.5%).</>
+          <>{status!.sent_traces} traces sent &middot; {status!.sent_with_errors} with errors. Eight diagnostic patterns to hunt for: stripe-mock latency tail (~8%), inventory cascade errors (~3%), N+1 inventory queries (~5%), cart-api cache misses (~5%), inventory pool waits (~4%), notification render slow (~2%), retry storms (~2%), and cold-start spikes (~2%, visible as outlier badges in /otel-data).</>
         ) : isRunning ? (
           status?.destination === 'gateway'
             ? <>Streaming through Helix Gateway → your Helix tenant + <code>/otel-data</code></>

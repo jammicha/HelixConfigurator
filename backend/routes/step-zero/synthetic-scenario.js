@@ -170,7 +170,13 @@ const generateTrace = () => {
   const injectInvPoolWait = Math.random() < 0.04;
   const injectNotifyRenderSlow = Math.random() < 0.02;
   const injectRetryStorm = Math.random() < 0.02;
-  const injectColdStart = Math.random() < 0.005;
+  // Cold-start rate is set to make trace-list outlier badges (>2× p95)
+  // reliably visible. With Pattern A at 8%, p95 of POST /checkout inflates
+  // to ~250-300ms, so the outlier threshold becomes ~500-600ms. Cold-start
+  // magnitude (2500-4000ms) is well above that. The trace store caps at
+  // 500 traces, so 2% × 500 = ~10 cold-start outliers in the window —
+  // visible across multiple runs without being so common they dominate.
+  const injectColdStart = Math.random() < 0.02;
   // 30% of traces skip notification (out-of-stock branch); inventory always present.
   const includeNotification = Math.random() > 0.3;
 
@@ -178,7 +184,7 @@ const generateTrace = () => {
   const coldStartService = injectColdStart
     ? COLD_START_TARGETS[Math.floor(Math.random() * COLD_START_TARGETS.length)]
     : null;
-  const coldStartExtraMs = injectColdStart ? 1500 + Math.random() * 500 : 0;
+  const coldStartExtraMs = injectColdStart ? 2500 + Math.random() * 1500 : 0;
   // Helper: returns the cold-start bump for a service if it's the chosen victim.
   const coldStartBumpFor = (svc) => (coldStartService === svc ? coldStartExtraMs : 0);
 
