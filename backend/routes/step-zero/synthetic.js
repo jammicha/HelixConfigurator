@@ -92,29 +92,36 @@ const runLoop = async ({ send, rateHz, maxIterations }) => {
   const intervalMs = Math.max(1, Math.round(1000 / rateHz));
   const ceiling = maxIterations || Infinity;
   let iterations = 0;
-  while (
-    activeRun &&
-    activeRun.running &&
-    !activeRun.stopRequested &&
-    iterations < ceiling &&
-    (activeRun.continuous || Date.now() < activeRun.expectedEndAt)
-  ) {
-    const payload = generateTrace();
-    const erroredTrace = payload.traces.resourceSpans.some(rs =>
-      rs.scopeSpans.some(ss => ss.spans.some(s => s.status && s.status.code === 2))
-    );
-    try {
-      await send({ destination: activeRun.destination, payload });
-      activeRun.sentTraces++;
-      if (erroredTrace) activeRun.sentWithErrors++;
-    } catch (e) {
-      // Best-effort: a single failed POST shouldn't kill the loop. Counter
-      // stays put for this iteration; loop continues.
+  try {
+    while (
+      activeRun &&
+      activeRun.running &&
+      !activeRun.stopRequested &&
+      iterations < ceiling &&
+      (activeRun.continuous || Date.now() < activeRun.expectedEndAt)
+    ) {
+      try {
+        const payload = generateTrace();
+        const erroredTrace = payload.traces.resourceSpans.some(rs =>
+          rs.scopeSpans.some(ss => ss.spans.some(s => s.status && s.status.code === 2))
+        );
+        await send({ destination: activeRun.destination, payload });
+        activeRun.sentTraces++;
+        if (erroredTrace) activeRun.sentWithErrors++;
+      } catch (e) {
+        // Best-effort: a single failed iteration (bad generate, send failure)
+        // shouldn't kill the loop. Counter stays put for this iteration; loop
+        // continues until duration, stop, or maxIterations.
+      }
+      iterations++;
+      await new Promise(r => setTimeout(r, intervalMs));
     }
-    iterations++;
-    await new Promise(r => setTimeout(r, intervalMs));
+  } finally {
+    // Always clear the running flag on exit, even if the loop body throws
+    // an unexpected error. Otherwise activeRun.running stays true forever,
+    // /status reports stuck, and a new /start gets a 409.
+    if (activeRun) activeRun.running = false;
   }
-  if (activeRun) activeRun.running = false;
 };
 
 function register(app, deps = {}) {
