@@ -8,10 +8,24 @@
 //          │
 //          └─────▶ notification-svc
 //
-// 5% of traces inject a payment failure (stripe-mock returns ERROR, error
-// propagates up). 2% of traces inflate inventory-db latency to simulate
-// contention. The two are independent — a trace can hit both, neither, or
-// either.
+// Three independent diagnostic patterns weave into the same baseline. Each
+// Math.random() draw is independent, so a trace can hit 0, 1, 2, or all 3.
+// About 85% of traces remain baseline-healthy.
+//
+//   Pattern A — Stripe-mock latency tail (8%)
+//     stripe-mock runs 200-400ms (uniform) instead of ~40ms. Slowness cascades
+//     up through payment-service and checkout-web because those durations are
+//     sums of their children. No error — just slow.
+//
+//   Pattern B — Inventory-db connection cascade (3%)
+//     inventory-db errors with "connection refused". Status propagates up:
+//     cart-api → "upstream inventory unavailable", checkout-web → "checkout
+//     failed: inventory unavailable".
+//
+//   Pattern C — N+1 query pattern (5%)
+//     cart-api makes 5-10 sequential calls to inventory-db (each ~5ms) instead
+//     of one. All siblings under cart-api. Cart-api duration extends to cover
+//     them all.
 const crypto = require('crypto');
 
 // Log-normal sampler. Returns a positive number with median ~ exp(mu)
@@ -85,16 +99,35 @@ const generateTrace = () => {
   const traceId = randomHex(16);
   const baseMs = Date.now();
 
-  const injectPaymentFailure = Math.random() < 0.05;
-  const injectInventoryContention = Math.random() < 0.02;
+  // Independent draws for each diagnostic pattern.
+  const injectStripeSlowdown = Math.random() < 0.08;
+  const injectInventoryError = Math.random() < 0.03;
+  const injectN1 = Math.random() < 0.05;
   // 30% of traces skip notification (out-of-stock branch); inventory always present.
   const includeNotification = Math.random() > 0.3;
 
-  // Child latencies — sampled first so the root span's duration covers them.
-  const cartLatency = logNormalMs(SERVICE_PROFILES['cart-api'].median, SERVICE_PROFILES['cart-api'].sigma);
-  const invMedian = injectInventoryContention ? 80 : SERVICE_PROFILES['inventory-db'].median;
-  const invLatency = logNormalMs(invMedian, SERVICE_PROFILES['inventory-db'].sigma);
-  const stripeLatency = logNormalMs(SERVICE_PROFILES['stripe-mock'].median, SERVICE_PROFILES['stripe-mock'].sigma);
+  // Inventory-db latencies. Baseline is one call; N+1 generates 5-10 sequential
+  // calls (~5ms each). All children of cart-api.
+  const invCount = injectN1 ? 5 + Math.floor(Math.random() * 6) : 1; // 5..10 when N+1
+  const invLatencies = Array.from({ length: invCount }, () =>
+    injectN1
+      ? 4 + Math.random() * 2 // ~5ms each (uniform 4-6ms) for N+1
+      : logNormalMs(SERVICE_PROFILES['inventory-db'].median, SERVICE_PROFILES['inventory-db'].sigma),
+  );
+  const invTotalLatency = invLatencies.reduce((a, b) => a + b, 0);
+
+  // Cart-api owns its own work + must cover all inventory-db children. When N+1
+  // fires, force cart-api to cover the sequential sum + small buffer.
+  const cartOwnLatency = logNormalMs(SERVICE_PROFILES['cart-api'].median, SERVICE_PROFILES['cart-api'].sigma);
+  const n1Buffer = 4;
+  const cartLatency = injectN1
+    ? Math.max(cartOwnLatency, invTotalLatency + n1Buffer)
+    : cartOwnLatency;
+
+  // Stripe-mock: 200-400ms uniform when slowdown injected, else log-normal ~40ms.
+  const stripeLatency = injectStripeSlowdown
+    ? 200 + Math.random() * 200
+    : logNormalMs(SERVICE_PROFILES['stripe-mock'].median, SERVICE_PROFILES['stripe-mock'].sigma);
   const paymentOwnLatency = logNormalMs(SERVICE_PROFILES['payment-service'].median, SERVICE_PROFILES['payment-service'].sigma);
   const paymentLatency = stripeLatency + paymentOwnLatency;
   const notifyLatency = includeNotification
@@ -102,14 +135,14 @@ const generateTrace = () => {
     : 0;
 
   const rootOwnLatency = 5 + Math.random() * 10;
-  const rootLatency = cartLatency + invLatency + paymentLatency + notifyLatency + rootOwnLatency;
+  const rootLatency = cartLatency + paymentLatency + notifyLatency + rootOwnLatency;
 
   const rootSpanId = randomHex(8);
   const cartSpanId = randomHex(8);
-  const invSpanId = randomHex(8);
   const paymentSpanId = randomHex(8);
   const stripeSpanId = randomHex(8);
   const notifySpanId = randomHex(8);
+  const invSpanIds = invLatencies.map(() => randomHex(8));
 
   // Build spans in causal order so timestamps stack realistically.
   let cursor = baseMs;
@@ -117,7 +150,19 @@ const generateTrace = () => {
   cursor += 1; // checkout-web does a tiny bit of work before fanning out
 
   const cartStartMs = cursor;
-  const invStartMs = cartStartMs + (cartLatency - invLatency) * 0.4; // inventory-db is called mid-cart
+  // Inventory-db calls fire sequentially inside cart-api. Pack them starting
+  // a short way into cart-api's window so their sum still fits inside cartLatency.
+  const invFirstOffset = injectN1
+    ? 1
+    : (cartLatency - invLatencies[0]) * 0.4;
+  const invStartMsList = [];
+  {
+    let invCursor = cartStartMs + invFirstOffset;
+    for (const inv of invLatencies) {
+      invStartMsList.push(invCursor);
+      invCursor += inv;
+    }
+  }
   cursor = cartStartMs + cartLatency;
 
   const paymentStartMs = cursor;
@@ -125,6 +170,11 @@ const generateTrace = () => {
   cursor = paymentStartMs + paymentLatency;
 
   const notifyStartMs = cursor;
+
+  // Cascade error fields for Pattern B.
+  const checkoutErrMsg = injectInventoryError ? 'checkout failed: inventory unavailable' : undefined;
+  const cartErrMsg = injectInventoryError ? 'upstream inventory unavailable' : undefined;
+  const invErrMsg = injectInventoryError ? 'connection refused: inventory-db unreachable' : undefined;
 
   // Build the resourceSpans array — one entry per service.
   const resourceSpans = [
@@ -135,8 +185,8 @@ const generateTrace = () => {
         spans: [buildSpan({
           traceId, spanId: rootSpanId, name: 'POST /checkout',
           startMs: rootStartMs, durationMs: rootLatency,
-          errored: injectPaymentFailure,
-          errorMessage: injectPaymentFailure ? 'downstream payment failed' : undefined,
+          errored: injectInventoryError,
+          errorMessage: checkoutErrMsg,
         })],
       }],
     },
@@ -147,19 +197,23 @@ const generateTrace = () => {
         spans: [buildSpan({
           traceId, spanId: cartSpanId, parentSpanId: rootSpanId,
           name: 'GET /cart/items', startMs: cartStartMs, durationMs: cartLatency,
-          errored: false,
+          errored: injectInventoryError,
+          errorMessage: cartErrMsg,
         })],
       }],
     },
     {
+      // One resource entry holds all the inventory-db sibling spans so the
+      // service map still sees a single inventory-db service.
       resource: resourceForService('inventory-db'),
       scopeSpans: [{
         scope: { name: 'step-zero-demo' },
-        spans: [buildSpan({
-          traceId, spanId: invSpanId, parentSpanId: cartSpanId,
-          name: 'SELECT stock', startMs: invStartMs, durationMs: invLatency,
-          errored: false,
-        })],
+        spans: invLatencies.map((dur, i) => buildSpan({
+          traceId, spanId: invSpanIds[i], parentSpanId: cartSpanId,
+          name: 'SELECT stock', startMs: invStartMsList[i], durationMs: dur,
+          errored: injectInventoryError,
+          errorMessage: invErrMsg,
+        })),
       }],
     },
     {
@@ -169,8 +223,7 @@ const generateTrace = () => {
         spans: [buildSpan({
           traceId, spanId: paymentSpanId, parentSpanId: rootSpanId,
           name: 'POST /charge', startMs: paymentStartMs, durationMs: paymentLatency,
-          errored: injectPaymentFailure,
-          errorMessage: injectPaymentFailure ? 'card_declined' : undefined,
+          errored: false,
         })],
       }],
     },
@@ -181,8 +234,7 @@ const generateTrace = () => {
         spans: [buildSpan({
           traceId, spanId: stripeSpanId, parentSpanId: paymentSpanId,
           name: 'POST /v1/charges', startMs: stripeStartMs, durationMs: stripeLatency,
-          errored: injectPaymentFailure,
-          errorMessage: injectPaymentFailure ? 'card_declined' : undefined,
+          errored: false,
         })],
       }],
     },
@@ -202,7 +254,8 @@ const generateTrace = () => {
     });
   }
 
-  // Correlated log records — one or two short messages per trace.
+  // Correlated log records — one or two short messages per trace. Inventory log
+  // points to the first inventory span (the one that failed in the error case).
   const logResources = [
     {
       resource: resourceForService('payment-service'),
@@ -210,7 +263,7 @@ const generateTrace = () => {
         scope: { name: 'step-zero-demo' },
         logRecords: [logRecordForSpan({
           traceId, spanId: paymentSpanId, startMs: paymentStartMs,
-          message: injectPaymentFailure ? 'card_declined: insufficient funds' : 'payment authorized',
+          message: 'payment authorized',
         })],
       }],
     },
@@ -219,8 +272,8 @@ const generateTrace = () => {
       scopeLogs: [{
         scope: { name: 'step-zero-demo' },
         logRecords: [logRecordForSpan({
-          traceId, spanId: invSpanId, startMs: invStartMs,
-          message: 'stock decremented',
+          traceId, spanId: invSpanIds[0], startMs: invStartMsList[0],
+          message: injectInventoryError ? 'db connection refused' : 'stock decremented',
         })],
       }],
     },
@@ -239,7 +292,7 @@ const generateTrace = () => {
           gauge: {
             dataPoints: [metricDataPoint({
               serviceName: 'checkout-web', latencyMs: rootLatency,
-              errored: injectPaymentFailure, startMs: rootStartMs,
+              errored: injectInventoryError, startMs: rootStartMs,
             })],
           },
         }],
