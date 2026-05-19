@@ -223,9 +223,9 @@ export const Step3: React.FC<Props> = ({
                           </span>
                         )}
                         {reachable ? (
-                          <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/20 text-success">reachable</span>
+                          <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/20 text-success">bridged</span>
                         ) : (
-                          <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/20 text-warning">not reachable</span>
+                          <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/20 text-warning">not bridged</span>
                         )}
                       </div>
                       <div className="text-tiny text-gray-500 truncate" title={c.image}>
