@@ -17,13 +17,13 @@ describe('buildHelixServiceMapLink', () => {
   it('builds the namespace-overview URL with X_SOURCE as namespace', () => {
     const url = buildHelixServiceMapLink({
       HELIX_ENDPOINT: 'https://helixdemo.onbmc.com/',
-      X_SOURCE: 'step-zero-demo',
+      X_SOURCE: 'Helix-Configurator-Demo',
       HELIX_API_KEY: '1234567890::AKEY::SKEY',
     });
     expect(url).toContain('https://helixdemo.onbmc.com');
     expect(url).toContain('/dashboards/d/OTelNamespaceOverview/otel-namespace-overview');
-    expect(url).toContain('var-OTelNamespace=step-zero-demo');
-    expect(url).toContain('var-BusinessService=step-zero-demo');
+    expect(url).toContain('var-OTelNamespace=Helix-Configurator-Demo');
+    expect(url).toContain('var-BusinessService=Helix-Configurator-Demo');
     expect(url).toContain('orgId=1234567890');
     expect(url).not.toMatch(/\/\/\/dashboards/); // trailing slash stripped
   });

@@ -21,7 +21,7 @@ const buildHelixServiceMapLink = (env) => {
   const endpoint = env.HELIX_ENDPOINT;
   if (!endpoint || isPlaceholderEndpoint(endpoint)) return null;
   const baseUrl = String(endpoint).replace(/\/$/, '');
-  const source = env.X_SOURCE || 'step-zero-demo';
+  const source = env.X_SOURCE || 'Helix-Configurator-Demo';
   const tenantId = extractTenantId(env.HELIX_API_KEY);
 
   const params = new URLSearchParams({

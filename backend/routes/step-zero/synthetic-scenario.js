@@ -101,7 +101,7 @@ const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, e
 const resourceForService = (serviceName) => ({
   attributes: [
     { key: 'service.name', value: { stringValue: serviceName } },
-    { key: 'service.namespace', value: { stringValue: 'step-zero-demo' } },
+    { key: 'service.namespace', value: { stringValue: 'Helix-Configurator-Demo' } },
     { key: 'deployment.environment', value: { stringValue: 'demo' } },
   ],
 });
@@ -349,7 +349,7 @@ const generateTrace = () => {
     {
       resource: resourceForService('checkout-web'),
       scopeSpans: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         spans: [buildSpan({
           traceId, spanId: rootSpanId, name: 'POST /checkout',
           startMs: rootStartMs, durationMs: rootLatency,
@@ -362,7 +362,7 @@ const generateTrace = () => {
     {
       resource: resourceForService('cart-api'),
       scopeSpans: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         spans: [buildSpan({
           traceId, spanId: cartSpanId, parentSpanId: rootSpanId,
           name: 'GET /cart/items', startMs: cartStartMs, durationMs: cartLatency,
@@ -380,7 +380,7 @@ const generateTrace = () => {
       // not at the service.name or span name.
       resource: resourceForService('inventory-db'),
       scopeSpans: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         spans: invLatencies.map((dur, i) => buildSpan({
           traceId, spanId: invSpanIds[i], parentSpanId: cartSpanId,
           name: 'SELECT stock', startMs: invStartMsList[i], durationMs: dur,
@@ -394,7 +394,7 @@ const generateTrace = () => {
     {
       resource: resourceForService('payment-service'),
       scopeSpans: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         spans: [buildSpan({
           traceId, spanId: paymentSpanId, parentSpanId: rootSpanId,
           name: 'POST /charge', startMs: paymentStartMs, durationMs: paymentLatency,
@@ -406,7 +406,7 @@ const generateTrace = () => {
     {
       resource: resourceForService('stripe-mock'),
       scopeSpans: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         spans: stripeMockSpans,
       }],
     },
@@ -416,7 +416,7 @@ const generateTrace = () => {
     resourceSpans.push({
       resource: resourceForService('notification-svc'),
       scopeSpans: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         spans: [buildSpan({
           traceId, spanId: notifySpanId, parentSpanId: rootSpanId,
           name: 'email send', startMs: notifyStartMs, durationMs: notifyLatency,
@@ -433,7 +433,7 @@ const generateTrace = () => {
     {
       resource: resourceForService('payment-service'),
       scopeLogs: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         logRecords: [logRecordForSpan({
           traceId, spanId: paymentSpanId, startMs: paymentStartMs,
           message: 'payment authorized',
@@ -443,7 +443,7 @@ const generateTrace = () => {
     {
       resource: resourceForService('inventory-db'),
       scopeLogs: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         logRecords: [logRecordForSpan({
           traceId, spanId: invSpanIds[0], startMs: invStartMsList[0],
           message: injectInventoryError ? 'db connection refused' : 'stock decremented',
@@ -458,7 +458,7 @@ const generateTrace = () => {
     {
       resource: resourceForService('checkout-web'),
       scopeMetrics: [{
-        scope: { name: 'step-zero-demo' },
+        scope: { name: 'Helix-Configurator-Demo' },
         metrics: [{
           name: 'http.server.request.duration',
           unit: 'ms',

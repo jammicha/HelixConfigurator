@@ -32,7 +32,7 @@ describe('POST /api/step-zero/synthetic/start', () => {
   const baseEnv = {
     HELIX_ENDPOINT: 'https://helixdemo.onbmc.com',
     HELIX_API_KEY: '1234567890::AK::SK',
-    X_SOURCE: 'step-zero-demo',
+    X_SOURCE: 'Helix-Configurator-Demo',
   };
 
   it('starts a run via the gateway when the gateway probe succeeds', async () => {
