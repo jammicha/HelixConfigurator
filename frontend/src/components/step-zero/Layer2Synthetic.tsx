@@ -135,6 +135,12 @@ export const Layer2Synthetic: React.FC = () => {
               </div>
             )}
           </div>
+          <a
+            href={status?.local_deep_link || '/otel-data'}
+            className="w-full inline-flex items-center justify-center gap-2 rounded bg-primary px-4 py-2 text-tiny font-semibold text-white hover:bg-primary/90"
+          >
+            View in /otel-data <ExternalLink className="w-3.5 h-3.5" />
+          </a>
           <button
             onClick={stop}
             className="w-full inline-flex items-center justify-center gap-2 rounded border border-gray-700 px-4 py-2 text-tiny font-semibold text-gray-100 hover:bg-gray-900"
@@ -164,6 +170,15 @@ export const Layer2Synthetic: React.FC = () => {
             {starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             Run again
           </button>
+          <label className="flex items-center gap-2 text-tiny text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={continuous}
+              onChange={(e) => setContinuous(e.target.checked)}
+              className="cursor-pointer"
+            />
+            Continuous mode (run until stopped)
+          </label>
         </div>
       ) : (
         <>
