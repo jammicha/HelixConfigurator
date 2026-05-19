@@ -202,12 +202,14 @@ describe('generateTrace', () => {
     // 2% over 2000 ~ 40. Generous bounds.
     expect(retries).toBeGreaterThan(25);
     expect(retries).toBeLessThan(75);
-    // Spot-check shape on a captured sample: 3 spans, first two errored, last OK.
+    // Spot-check shape on a captured sample: 3 spans, first two errored, last
+    // succeeds (UNSET, per OTel idiom — Helix's default Status Filter is
+    // STATUS_CODE_UNSET, so the successful retry must not be marked OK).
     expect(sample).toBeDefined();
     expect(sample.length).toBe(3);
     expect(sample[0].status.code).toBe(2);
     expect(sample[1].status.code).toBe(2);
-    expect(sample[2].status.code).toBe(1);
+    expect(sample[2].status.code).toBe(0);
     // retry.attempt attributes
     for (let i = 0; i < 3; i++) {
       const attr = (sample[i].attributes || []).find(a => a.key === 'retry.attempt');

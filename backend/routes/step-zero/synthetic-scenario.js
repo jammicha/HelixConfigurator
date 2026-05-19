@@ -78,8 +78,11 @@ const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, e
   const startNs = String(BigInt(Math.round(startMs)) * 1_000_000n);
   const endNs = String(BigInt(Math.round(startMs + durationMs)) * 1_000_000n);
   // Allow explicit statusCode override (used by retry storm so we can mark
-  // failed attempts without an "errored" cascade flag).
-  const code = statusCode !== undefined ? statusCode : (errored ? 2 : 1);
+  // failed attempts without an "errored" cascade flag). Successful spans
+  // default to UNSET (0) — per OTel spec OK (1) is reserved for spans an
+  // app developer has explicitly validated, and Helix dashboards filter on
+  // STATUS_CODE_UNSET by default, so emitting OK hides traces.
+  const code = statusCode !== undefined ? statusCode : (errored ? 2 : 0);
   const span = {
     traceId,
     spanId,
@@ -148,7 +151,6 @@ const buildRetryStormStripeSpans = ({ traceId, paymentSpanId, stripeStartMs, suc
     buildSpan({
       traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
       name: 'POST /v1/charges', startMs: t3Start, durationMs: attempt3,
-      statusCode: 1,
       attributes: [{ key: 'retry.attempt', value: { intValue: 3 } }],
     }),
   ];
