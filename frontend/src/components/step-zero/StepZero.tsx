@@ -18,6 +18,8 @@ export const StepZero: React.FC = () => {
 
         <Layer2Synthetic />
 
+        <Layer3Instrument />
+
         {/* Pointer to the upstream OTel Demo. Static content; no backend wiring. */}
         <section className="rounded-lg border border-gray-800 bg-gray-1000 p-6">
           <div className="flex items-start gap-4">
@@ -47,8 +49,6 @@ export const StepZero: React.FC = () => {
             </div>
           </div>
         </section>
-
-        <Layer3Instrument />
 
         <footer className="pt-4 border-t border-gray-800">
           <a
