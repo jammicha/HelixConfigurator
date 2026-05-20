@@ -449,7 +449,7 @@ export const DashboardMockup: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-1000 text-gray-100">
-      <main className="max-w-5xl mx-auto p-6 space-y-5">
+      <main className="max-w-7xl mx-auto p-6 space-y-5 w-full">
         {/* Mockup banner */}
         <div className="rounded border border-blue-900 bg-blue-950/30 px-4 py-2 text-sm text-blue-200 flex items-center gap-3">
           <span className="font-semibold">MOCKUP</span>
