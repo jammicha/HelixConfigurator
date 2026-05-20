@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2, Compass } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2, Compass } from 'lucide-react';
 
 type AuthShape = { required: boolean; authenticated: boolean } | null;
 
@@ -202,20 +202,36 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
               <div className="text-tiny text-gray-500 mt-0.5">Local Helix OTel Configurator</div>
             </div>
             <div className="px-4 py-3 border-b border-gray-800">
-              <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-2">UI Access</div>
+              <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-2">UI access</div>
               {authRequired ? (
                 <span className="text-success inline-flex items-center gap-1.5 text-sm">
                   <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                  Password required
+                  Password required to sign in
                 </span>
               ) : (
-                <>
-                  <div className="text-warning text-sm">Open (no password)</div>
-                  <div className="text-tiny text-gray-500 mt-1.5 leading-relaxed">
-                    Set <span className="font-mono text-gray-300">UI_AUTH_PASSWORD</span> in{' '}
-                    <span className="font-mono text-gray-300">.env</span> and restart to require sign-in.
+                // No password set. Often deliberate (demos / dev) — frame
+                // it as a state, not a TODO. Docs link for users who do
+                // want to lock it down; no "edit this file" instruction
+                // since the user may not own the host where the
+                // configurator runs.
+                <div className="space-y-1.5">
+                  <div className="text-warning inline-flex items-center gap-1.5 text-sm">
+                    <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
+                    No password required
                   </div>
-                </>
+                  <div className="text-tiny text-gray-400 leading-relaxed">
+                    Anyone with network access to this URL can use the UI.
+                  </div>
+                  <a
+                    href="https://docs.helixops.ai/bin/IT-Operations-Management/"
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setOpenMenu(null)}
+                    className="inline-flex items-center gap-1 text-tiny text-primary hover:underline"
+                  >
+                    How to enable sign-in <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
               )}
             </div>
             {authRequired && authenticated && (
