@@ -20,6 +20,8 @@ import { parseHelixKeyBundle } from './utils/helixKey';
 import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
 import { PipelineStatusBanner } from './components/dashboard/PipelineStatusBanner';
 import { QuickActions } from './components/dashboard/QuickActions';
+import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConnectionSettingsDrawer';
+import { NavAvatar } from './components/NavAvatar';
 
 const App = () => {
   const monaco = useMonaco();
@@ -1596,89 +1598,104 @@ ${logsData.logs || '(no logs available)'}
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto transition-all duration-300">
         {/* Header */}
-        <header className="bg-helixNav flex items-center px-4 py-3 font-helix w-full justify-between flex-shrink-0 sticky top-0 z-40 border-b border-[#0f1620]">
-          <div className="flex items-center">
-            <img src="/bmc-logo.svg" alt="BMC" className="h-8 w-auto" />
-            <div className="h-8 w-px bg-helixDivider mx-4"></div>
-            <h1 className="text-white font-semibold text-[1.3125rem] m-0 ml-[15px] tracking-wide">Helix OTel Configurator</h1>
-            <div className="h-8 w-px bg-helixDivider mx-5"></div>
-            <nav className="flex items-center space-x-5 text-sm text-[#cfd3da]">
-              <button
-                onClick={() => {
-                  const goBack = () => {
-                    // Tear down any active diagnostic session before returning to onboarding
-                    if (showDiagnostics) {
-                      if (eventSourceRef.current) eventSourceRef.current.close();
-                      if ((eventSourceRef as any).currentApp) (eventSourceRef as any).currentApp.close();
-                      if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
-                      fetch('/api/diagnostics/toggle-debug', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ enable: false })
-                      }).catch(() => {});
-                    }
-                    setShowDiagnostics(false);
-                    setTraceInjectionStatus('');
-                    setLogs([]);
-                    setLiveMetrics({ received: 0, sent: 0, failed: 0 });
-                    setDiagAlert(false);
-                    setTelemetryStatus('idle');
-                    setIsSetupComplete(false);
-                    setSetupStep(1);
-                  };
-                  if (isSetupComplete) {
-                    setConfirmDialog({
-                      title: 'Return to onboarding wizard?',
-                      message: 'Your saved settings stay intact, but the dashboard will close. You can re-launch from Step 2 once you re-initialize.',
-                      confirmLabel: 'Return to Onboarding',
-                      onConfirm: goBack,
-                    });
-                  } else {
-                    goBack();
-                  }
-                }}
-                className={!isSetupComplete
-                  ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
-                  : 'hover:text-white transition-colors'}
-              >
-                Onboarding
-              </button>
-              <a
-                href="/"
-                onClick={(e) => {
-                  // Already on / — short-circuit the navigation. If we're on
-                  // the wizard but already onboarded, just flip to dashboard
-                  // view without a full reload.
-                  e.preventDefault();
-                  const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
-                  if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {
-                    setIsSetupComplete(true);
-                  }
-                }}
-                className={isSetupComplete
-                  ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
-                  : 'hover:text-white transition-colors'}
-              >
-                Gateway Dashboard
-              </a>
-              <a
-                href="/otel-data"
-                className="hover:text-white transition-colors"
-              >
-                View OTel Data
-              </a>
-            </nav>
+        <header className="bg-helixNav flex items-center px-5 h-14 font-helix w-full flex-shrink-0 sticky top-0 z-40 border-b border-[#0f1620]">
+          <div className="flex items-center gap-4">
+            <img src="/bmc-logo.svg" alt="BMC" className="h-7 w-auto" />
+            <h1 className="text-white font-normal text-[1.1875rem] m-0 tracking-normal">Helix OTel Configurator</h1>
           </div>
-          <nav className="flex items-center space-x-5 text-sm text-[#cfd3da]">
-            {authStatus.required && (
+          <nav className="flex items-center gap-7 text-sm text-[#cfd3da] ml-10">
+            <button
+              onClick={() => {
+                const goBack = () => {
+                  // Tear down any active diagnostic session before returning to onboarding
+                  if (showDiagnostics) {
+                    if (eventSourceRef.current) eventSourceRef.current.close();
+                    if ((eventSourceRef as any).currentApp) (eventSourceRef as any).currentApp.close();
+                    if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
+                    fetch('/api/diagnostics/toggle-debug', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ enable: false })
+                    }).catch(() => {});
+                  }
+                  setShowDiagnostics(false);
+                  setTraceInjectionStatus('');
+                  setLogs([]);
+                  setLiveMetrics({ received: 0, sent: 0, failed: 0 });
+                  setDiagAlert(false);
+                  setTelemetryStatus('idle');
+                  setIsSetupComplete(false);
+                  setSetupStep(1);
+                };
+                if (isSetupComplete) {
+                  setConfirmDialog({
+                    title: 'Return to onboarding wizard?',
+                    message: 'Your saved settings stay intact, but the dashboard will close. You can re-launch from Step 2 once you re-initialize.',
+                    confirmLabel: 'Return to Onboarding',
+                    onConfirm: goBack,
+                  });
+                } else {
+                  goBack();
+                }
+              }}
+              className={!isSetupComplete
+                ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
+                : 'hover:text-white transition-colors'}
+            >
+              Onboarding
+            </button>
+            <a
+              href="/"
+              onClick={(e) => {
+                // Already on / — short-circuit the navigation. If we're on
+                // the wizard but already onboarded, just flip to dashboard
+                // view without a full reload.
+                e.preventDefault();
+                const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
+                if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {
+                  setIsSetupComplete(true);
+                }
+              }}
+              className={isSetupComplete
+                ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
+                : 'hover:text-white transition-colors'}
+            >
+              Gateway Dashboard
+            </a>
+            <a
+              href="/otel-data"
+              className="hover:text-white transition-colors"
+            >
+              View OTel Data
+            </a>
+          </nav>
+          <div className="ml-auto flex items-center gap-2">
+            {isSetupComplete && (
+              // Top-nav entry point for Helix Connection Settings. The form
+              // used to be an inline collapsible card mid-dashboard, which
+              // felt awkwardly placed for a piece of config that's rarely
+              // touched after setup. Moved into a right-side drawer that
+              // opens from this gear.
               <button
-                onClick={handleLogout}
-                className="hover:text-white transition-colors"
+                onClick={() => setIsSettingsOpen(true)}
+                className="p-2 rounded text-[#cfd3da] hover:text-white hover:bg-white/5 transition-colors"
+                title="Helix Connection Settings"
+                aria-label="Open Helix Connection Settings"
               >
-                Logout
+                <Settings className="w-5 h-5" />
               </button>
             )}
-          </nav>
+            <NavAvatar
+              authStatus={authStatus}
+              onLogout={handleLogout}
+              onJumpToDashboard={() => {
+                const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
+                if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {
+                  setIsSetupComplete(true);
+                }
+              }}
+            />
+          </div>
         </header>
 
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
@@ -1901,112 +1918,10 @@ ${logsData.logs || '(no logs available)'}
                 </div>
               )}
 
-              {/* Helix Connection Settings */}
-              <div className="adapt-card">
-                <button
-                  onClick={() => setIsSettingsOpen(o => !o)}
-                  className="flex items-center gap-2 w-full text-left group"
-                >
-                  <Settings className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                  <h2 className="text-base font-semibold text-gray-200 flex-1">Helix Connection Settings</h2>
-                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${isSettingsOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {isSettingsOpen && (
-                  <div className="mt-5">
-                    <div className="grid grid-cols-2 gap-6 mb-6">
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Ingest Endpoint</label>
-                        <input
-                          type="text"
-                          value={envVars.HELIX_ENDPOINT}
-                          onChange={(e) => setEnvVars({ ...envVars, HELIX_ENDPOINT: e.target.value })}
-                          className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm"
-                          placeholder="https://otel-itom.onbmc.com"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">X-Api-Key (TenantID::AccessKey::SecretKey)</label>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            name="helix-x-api-key"
-                            autoComplete="off"
-                            spellCheck={false}
-                            data-1p-ignore
-                            data-lpignore="true"
-                            style={!showApiKey ? { WebkitTextSecurity: 'disc', textSecurity: 'disc' } as React.CSSProperties : undefined}
-                            value={envVars.HELIX_API_KEY}
-                            onChange={(e) => {
-                              const parsed = parseHelixKeyBundle(e.target.value);
-                              setEnvVars({ ...envVars, HELIX_API_KEY: parsed ?? e.target.value });
-                            }}
-                            className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
-                            placeholder="123456789::ABCDE12345::FGHIJ67890..."
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowApiKey(s => !s)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-tiny text-gray-400 hover:text-gray-200 uppercase tracking-wider font-semibold px-1"
-                          >
-                            {showApiKey ? 'Hide' : 'Show'}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">X-Source (Business Service)</label>
-                        <input
-                          type="text"
-                          value={envVars.X_SOURCE}
-                          onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
-                          className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm"
-                          placeholder="Source Name"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">App URL (optional)</label>
-                        <input
-                          type="text"
-                          value={envVars.APP_URL}
-                          onChange={(e) => setEnvVars({ ...envVars, APP_URL: e.target.value })}
-                          className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm"
-                          placeholder="http://localhost:8080"
-                        />
-                      </div>
-                      <div className="space-y-1 col-span-2">
-                        <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AIOps Business Service Key (optional)</label>
-                        <input
-                          type="text"
-                          value={envVars.BUSINESS_SERVICE_KEY}
-                          onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
-                          className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
-                          placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        onClick={handleUpdateEnvSettings}
-                        disabled={isUpdatingSettings}
-                        className="bg-primary hover:bg-[#3006c2] disabled:opacity-60 disabled:cursor-not-allowed text-white px-8 py-2 rounded font-semibold transition-all shadow-1 text-sm flex items-center gap-2"
-                      >
-                        {isUpdatingSettings && <Loader2 className="w-4 h-4 animate-spin" />}
-                        {isUpdatingSettings ? 'Updating...' : 'Update Settings'}
-                      </button>
-                    </div>
-                    <div className="mt-5 pt-4 border-t border-gray-800 flex items-center gap-2 text-tiny">
-                      <span className="font-semibold text-gray-400 uppercase tracking-wider">Access:</span>
-                      {authStatus?.required ? (
-                        <span className="text-success inline-flex items-center gap-1.5">Password required <Check className="w-3.5 h-3.5" aria-hidden="true" /></span>
-                      ) : (
-                        <>
-                          <span className="text-warning">Open (no password)</span>
-                          <span className="text-gray-500">Set <span className="font-mono text-gray-300">UI_AUTH_PASSWORD</span> in <span className="font-mono text-gray-300">.env</span> and restart to require sign-in.</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* Helix Connection Settings is now a right-side drawer
+                  triggered by the gear icon in the top nav. The drawer
+                  itself is mounted near the root of the App component so
+                  it floats above everything. */}
 
               {showDiagnostics && (
                 <>
@@ -2335,6 +2250,19 @@ ${logsData.logs || '(no logs available)'}
       </div>
 
       <ConfirmDialog request={confirmDialog} onCancel={() => setConfirmDialog(null)} />
+
+      <HelixConnectionSettingsDrawer
+        open={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        envVars={envVars}
+        setEnvVars={setEnvVars}
+        showApiKey={showApiKey}
+        setShowApiKey={setShowApiKey}
+        isUpdatingSettings={isUpdatingSettings}
+        onUpdate={handleUpdateEnvSettings}
+        parseHelixKeyBundle={parseHelixKeyBundle}
+        extractServiceKey={extractServiceKey}
+      />
 
       <TemplatesModal
         isOpen={isTemplatesOpen}

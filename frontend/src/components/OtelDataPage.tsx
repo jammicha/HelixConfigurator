@@ -32,27 +32,25 @@ import { TracesTab } from './otel-data/TracesTab';
 import { OperationsTab } from './otel-data/OperationsTab';
 import { LogsAndErrorsTab } from './otel-data/LogsAndErrorsTab';
 import { TraceDetailDrawer } from './otel-data/trace-detail/TraceDetailDrawer';
+import { NavAvatar } from './NavAvatar';
 
 
-const LogoutLink: React.FC = () => {
-  const [authRequired, setAuthRequired] = useState(false);
+const HeaderUserMenu: React.FC = () => {
+  const [authStatus, setAuthStatus] = useState<{ required: boolean; authenticated: boolean } | null>(null);
   useEffect(() => {
     fetch('/api/auth/status')
       .then(r => r.json())
-      .then(d => setAuthRequired(!!d.required))
-      .catch(() => { /* non-fatal — leave hidden */ });
+      .then(d => setAuthStatus({ required: !!d.required, authenticated: !!d.authenticated }))
+      .catch(() => setAuthStatus({ required: false, authenticated: true }));
   }, []);
-  if (!authRequired) return null;
   return (
-    <button
-      onClick={async () => {
+    <NavAvatar
+      authStatus={authStatus}
+      onLogout={async () => {
         try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
         window.location.href = '/';
       }}
-      className="hover:text-white transition-colors"
-    >
-      Logout
-    </button>
+    />
   );
 };
 
@@ -633,31 +631,29 @@ export const OtelDataPage: React.FC = () => {
   return (
     <SlowThresholdProvider value={slowThresholdMs}>
     <div className="flex h-screen w-full overflow-hidden bg-gray-1000 font-sans text-gray-100 flex-col">
-      <header className="bg-helixNav flex items-center px-4 py-3 font-helix w-full justify-between flex-shrink-0 sticky top-0 z-40 border-b border-[#0f1620]">
-        <div className="flex items-center">
+      <header className="bg-helixNav flex items-center px-5 h-14 font-helix w-full flex-shrink-0 sticky top-0 z-40 border-b border-[#0f1620]">
+        <div className="flex items-center gap-4">
           <a href="/" className="flex items-center" aria-label="Helix OTel Configurator home">
-            <img src="/bmc-logo.svg" alt="BMC" className="h-8 w-auto" />
+            <img src="/bmc-logo.svg" alt="BMC" className="h-7 w-auto" />
           </a>
-          <div className="h-8 w-px bg-helixDivider mx-4"></div>
-          <h1 className="text-white font-semibold text-[1.3125rem] m-0 ml-[15px] tracking-wide">
+          <h1 className="text-white font-normal text-[1.375rem] m-0 tracking-normal">
             Helix OTel Configurator
           </h1>
-          <div className="h-8 w-px bg-helixDivider mx-5"></div>
-          <nav className="flex items-center space-x-5 text-sm text-[#cfd3da]">
-            <a href="/?view=onboarding" className="hover:text-white transition-colors">
-              Onboarding
-            </a>
-            <a href="/" className="hover:text-white transition-colors">
-              Gateway Dashboard
-            </a>
-            <span className="text-white font-semibold border-b-2 border-primary pb-0.5">
-              View OTel Data
-            </span>
-          </nav>
         </div>
-        <nav className="flex items-center space-x-5 text-sm text-[#cfd3da]">
-          <LogoutLink />
+        <nav className="flex items-center gap-7 text-sm text-[#cfd3da] ml-10">
+          <a href="/?view=onboarding" className="hover:text-white transition-colors">
+            Onboarding
+          </a>
+          <a href="/" className="hover:text-white transition-colors">
+            Gateway Dashboard
+          </a>
+          <span className="text-white font-semibold border-b-2 border-primary pb-0.5">
+            View OTel Data
+          </span>
         </nav>
+        <div className="ml-auto">
+          <HeaderUserMenu />
+        </div>
       </header>
 
       <main className="flex-1 overflow-hidden flex flex-col max-w-[120rem] w-full mx-auto px-6 pt-6 pb-2">
