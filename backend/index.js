@@ -52,6 +52,11 @@ app.get(/^\/step-zero(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
 });
 
+// SPA fallback for the dashboard layout mockup (design review only).
+app.get(/^\/dashboard-mockup(\/.*)?$/, (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
+});
+
 // Auth endpoints (must register BEFORE the requireAuth middleware so the
 // login / logout / status routes themselves are reachable when auth is on).
 registerAuthRoutes(app);
