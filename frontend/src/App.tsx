@@ -234,6 +234,44 @@ const App = () => {
     setAuthStatus({ required: true, authenticated: false });
   };
 
+  // Shared between the top-nav Onboarding tab and the app-switcher
+  // dropdown. Tears down any active diagnostic session, resets dashboard
+  // state, and flips back to the wizard view. When the user is currently
+  // on the dashboard, gates behind a confirm dialog so they don't lose
+  // an active diagnostic by accident.
+  const handleJumpToOnboarding = () => {
+    const goBack = () => {
+      if (showDiagnostics) {
+        if (eventSourceRef.current) eventSourceRef.current.close();
+        if ((eventSourceRef as any).currentApp) (eventSourceRef as any).currentApp.close();
+        if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
+        fetch('/api/diagnostics/toggle-debug', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enable: false }),
+        }).catch(() => {});
+      }
+      setShowDiagnostics(false);
+      setTraceInjectionStatus('');
+      setLogs([]);
+      setLiveMetrics({ received: 0, sent: 0, failed: 0 });
+      setDiagAlert(false);
+      setTelemetryStatus('idle');
+      setIsSetupComplete(false);
+      setSetupStep(1);
+    };
+    if (isSetupComplete) {
+      setConfirmDialog({
+        title: 'Return to onboarding wizard?',
+        message: 'Your saved settings stay intact, but the dashboard will close. You can re-launch from Step 2 once you re-initialize.',
+        confirmLabel: 'Return to Onboarding',
+        onConfirm: goBack,
+      });
+    } else {
+      goBack();
+    }
+  };
+
   useEffect(() => {
     // Tail-style follow: only auto-scroll if the user is already pinned to the
     // bottom. Setting scrollTop on the container directly — using
@@ -1605,39 +1643,7 @@ ${logsData.logs || '(no logs available)'}
           </div>
           <nav className="flex items-center gap-7 text-sm text-[#cfd3da] ml-10">
             <button
-              onClick={() => {
-                const goBack = () => {
-                  // Tear down any active diagnostic session before returning to onboarding
-                  if (showDiagnostics) {
-                    if (eventSourceRef.current) eventSourceRef.current.close();
-                    if ((eventSourceRef as any).currentApp) (eventSourceRef as any).currentApp.close();
-                    if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
-                    fetch('/api/diagnostics/toggle-debug', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ enable: false })
-                    }).catch(() => {});
-                  }
-                  setShowDiagnostics(false);
-                  setTraceInjectionStatus('');
-                  setLogs([]);
-                  setLiveMetrics({ received: 0, sent: 0, failed: 0 });
-                  setDiagAlert(false);
-                  setTelemetryStatus('idle');
-                  setIsSetupComplete(false);
-                  setSetupStep(1);
-                };
-                if (isSetupComplete) {
-                  setConfirmDialog({
-                    title: 'Return to onboarding wizard?',
-                    message: 'Your saved settings stay intact, but the dashboard will close. You can re-launch from Step 2 once you re-initialize.',
-                    confirmLabel: 'Return to Onboarding',
-                    onConfirm: goBack,
-                  });
-                } else {
-                  goBack();
-                }
-              }}
+              onClick={handleJumpToOnboarding}
               className={!isSetupComplete
                 ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
                 : 'hover:text-white transition-colors'}
@@ -1688,6 +1694,8 @@ ${logsData.logs || '(no logs available)'}
             <NavAvatar
               authStatus={authStatus}
               onLogout={handleLogout}
+              currentPage={isSetupComplete ? 'dashboard' : 'onboarding'}
+              onJumpToOnboarding={handleJumpToOnboarding}
               onJumpToDashboard={() => {
                 const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
                 if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {

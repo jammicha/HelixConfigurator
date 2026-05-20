@@ -1,11 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2 } from 'lucide-react';
+import { Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2, Compass } from 'lucide-react';
 
 type AuthShape = { required: boolean; authenticated: boolean } | null;
+
+// Which configurator-internal page the user is currently on. Drives the
+// active-item highlight in the app-switcher dropdown. Pages that don't
+// render this component (e.g. /aiops, /step-zero) pass null.
+export type CurrentPage = 'onboarding' | 'dashboard' | 'otel-data' | null;
 
 interface NavAvatarProps {
   authStatus: AuthShape;
   onLogout: () => void;
+  // Current page for active-state highlighting in the dropdown.
+  currentPage?: CurrentPage;
+  // Callback so the App page can intercept "Onboarding" navigation from
+  // the dropdown — gates behind a confirm dialog when the user is mid-
+  // dashboard so they don't lose an active diagnostic.
+  onJumpToOnboarding?: () => void;
   // Optional callback so the App page can intercept "Gateway Dashboard"
   // navigation when the user is already mid-onboarding.
   onJumpToDashboard?: () => void;
@@ -24,9 +35,18 @@ interface NavAvatarProps {
 // mirror the BMC Service Monitoring shell. Avatar opens a dropdown that
 // surfaces UI auth status + sign-out — the only place this app exposes auth
 // chrome now that the standalone Logout link is gone.
-export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, onJumpToDashboard, externalApps }) => {
+export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, currentPage, onJumpToOnboarding, onJumpToDashboard, externalApps }) => {
   const ext = externalApps || {};
   const hasExternalLinks = !!(ext.otelDashboardUrl || ext.aiopsServiceUrl || ext.applicationUrl);
+
+  // Active-state styling for the page the user is currently on. Layered
+  // on top of the base item classes via concat so it overrides hover/text
+  // colors. Border-left accent picks up the brand primary; bg-primary/10
+  // adds a subtle tinted backdrop without being garish.
+  const itemBase = 'flex items-center gap-2 px-3 py-2 text-sm transition-colors';
+  const itemIdle = 'text-gray-200 hover:bg-gray-900 hover:text-white';
+  const itemActive = 'bg-primary/15 text-white font-semibold border-l-2 border-primary -ml-px pl-[10px]';
+  const cx = (active: boolean) => `${itemBase} ${active ? itemActive : itemIdle}`;
   const [openMenu, setOpenMenu] = useState<null | 'apps' | 'help' | 'user'>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -66,6 +86,17 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, onJu
         {openMenu === 'apps' && (
           <div className="absolute right-0 top-full mt-2 w-56 bg-gray-1000 border border-gray-800 rounded shadow-3 py-1 z-50">
             <div className="px-3 py-2 text-tiny font-semibold text-gray-500 uppercase tracking-wider">Helix apps</div>
+            <button
+              type="button"
+              onClick={() => {
+                if (onJumpToOnboarding) onJumpToOnboarding();
+                setOpenMenu(null);
+              }}
+              className={cx(currentPage === 'onboarding') + ' w-full text-left'}
+            >
+              <Compass className={`w-4 h-4 ${currentPage === 'onboarding' ? 'text-primary' : 'text-gray-400'}`} />
+              Onboarding
+            </button>
             <a
               href="/"
               onClick={(e) => {
@@ -75,16 +106,16 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, onJu
                   setOpenMenu(null);
                 }
               }}
-              className="flex items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-gray-900 hover:text-white transition-colors"
+              className={cx(currentPage === 'dashboard')}
             >
-              <LayoutDashboard className="w-4 h-4 text-gray-400" />
+              <LayoutDashboard className={`w-4 h-4 ${currentPage === 'dashboard' ? 'text-primary' : 'text-gray-400'}`} />
               Gateway Dashboard
             </a>
             <a
               href="/otel-data"
-              className="flex items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-gray-900 hover:text-white transition-colors"
+              className={cx(currentPage === 'otel-data')}
             >
-              <BarChart2 className="w-4 h-4 text-gray-400" />
+              <BarChart2 className={`w-4 h-4 ${currentPage === 'otel-data' ? 'text-primary' : 'text-gray-400'}`} />
               View OTel Data
             </a>
 
