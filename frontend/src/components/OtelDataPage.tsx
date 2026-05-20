@@ -631,12 +631,12 @@ export const OtelDataPage: React.FC = () => {
   return (
     <SlowThresholdProvider value={slowThresholdMs}>
     <div className="flex h-screen w-full overflow-hidden bg-gray-1000 font-sans text-gray-100 flex-col">
-      <header className="bg-helixNav flex items-center px-5 h-14 font-helix w-full flex-shrink-0 sticky top-0 z-40 border-b border-[#0f1620]">
+      <header className="bg-helixNav flex items-center px-5 h-14 font-helix w-full flex-shrink-0 sticky top-0 z-40 border-b border-[#3a3f4a]">
         <div className="flex items-center gap-4">
           <a href="/" className="flex items-center" aria-label="Helix OTel Configurator home">
             <img src="/bmc-logo.svg" alt="BMC" className="h-7 w-auto" />
           </a>
-          <h1 className="text-white font-normal text-[1.375rem] m-0 tracking-normal">
+          <h1 className="text-white font-normal text-[1.1875rem] m-0 tracking-normal">
             Helix OTel Configurator
           </h1>
         </div>

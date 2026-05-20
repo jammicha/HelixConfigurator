@@ -1598,7 +1598,7 @@ ${logsData.logs || '(no logs available)'}
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto transition-all duration-300">
         {/* Header */}
-        <header className="bg-helixNav flex items-center px-5 h-14 font-helix w-full flex-shrink-0 sticky top-0 z-40 border-b border-[#0f1620]">
+        <header className="bg-helixNav flex items-center px-5 h-14 font-helix w-full flex-shrink-0 sticky top-0 z-40 border-b border-[#3a3f4a]">
           <div className="flex items-center gap-4">
             <img src="/bmc-logo.svg" alt="BMC" className="h-7 w-auto" />
             <h1 className="text-white font-normal text-[1.1875rem] m-0 tracking-normal">Helix OTel Configurator</h1>
