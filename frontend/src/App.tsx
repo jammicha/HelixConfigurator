@@ -21,6 +21,7 @@ import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
 import { PipelineStatusBanner } from './components/dashboard/PipelineStatusBanner';
 import { QuickActions } from './components/dashboard/QuickActions';
 import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConnectionSettingsDrawer';
+import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/SetPasswordModal';
 import { NavAvatar } from './components/NavAvatar';
 
 const App = () => {
@@ -92,6 +93,7 @@ const App = () => {
   const [loadingContainers, setLoadingContainers] = useState<Set<string>>(new Set());
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [setPasswordModal, setSetPasswordModal] = useState<{ open: boolean; mode: SetPasswordMode }>({ open: false, mode: 'set' });
   const [isYamlOpen, setIsYamlOpen] = useState(true);
   const [showApiKey, setShowApiKey] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmRequest | null>(null);
@@ -1696,6 +1698,8 @@ ${logsData.logs || '(no logs available)'}
               onLogout={handleLogout}
               currentPage={isSetupComplete ? 'dashboard' : 'onboarding'}
               onJumpToOnboarding={handleJumpToOnboarding}
+              onOpenSetPassword={() => setSetPasswordModal({ open: true, mode: 'set' })}
+              onRemovePassword={() => setSetPasswordModal({ open: true, mode: 'remove' })}
               onJumpToDashboard={() => {
                 const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
                 if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {
@@ -2241,6 +2245,13 @@ ${logsData.logs || '(no logs available)'}
         onUpdate={handleUpdateEnvSettings}
         parseHelixKeyBundle={parseHelixKeyBundle}
         extractServiceKey={extractServiceKey}
+      />
+
+      <SetPasswordModal
+        open={setPasswordModal.open}
+        mode={setPasswordModal.mode}
+        hasExistingPassword={!!authStatus?.required}
+        onClose={() => setSetPasswordModal({ open: false, mode: 'set' })}
       />
 
       <TemplatesModal

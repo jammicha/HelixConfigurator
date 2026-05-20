@@ -20,6 +20,13 @@ interface NavAvatarProps {
   // Optional callback so the App page can intercept "Gateway Dashboard"
   // navigation when the user is already mid-onboarding.
   onJumpToDashboard?: () => void;
+  // Opens the SetPasswordModal (mounted at the App root) for setting or
+  // changing the UI auth password. The dropdown closes first.
+  onOpenSetPassword?: () => void;
+  // Triggered when the user wants to remove the existing password and
+  // reopen the UI to all visitors. The parent handles the confirmation
+  // dialog + API call + restart UX.
+  onRemovePassword?: () => void;
   // Optional external Helix app links. When provided, they render in a
   // second section of the app-switcher dropdown below the configurator's
   // own pages. Each is gated on the URL being set so users in a partially-
@@ -35,7 +42,7 @@ interface NavAvatarProps {
 // mirror the BMC Service Monitoring shell. Avatar opens a dropdown that
 // surfaces UI auth status + sign-out — the only place this app exposes auth
 // chrome now that the standalone Logout link is gone.
-export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, currentPage, onJumpToOnboarding, onJumpToDashboard, externalApps }) => {
+export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, currentPage, onJumpToOnboarding, onJumpToDashboard, onOpenSetPassword, onRemovePassword, externalApps }) => {
   const ext = externalApps || {};
   const hasExternalLinks = !!(ext.otelDashboardUrl || ext.aiopsServiceUrl || ext.applicationUrl);
 
@@ -204,17 +211,38 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
             <div className="px-4 py-3 border-b border-gray-800">
               <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-2">UI access</div>
               {authRequired ? (
-                <span className="text-success inline-flex items-center gap-1.5 text-sm">
-                  <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                  Password required to sign in
-                </span>
+                <div className="space-y-2">
+                  <div className="text-success inline-flex items-center gap-1.5 text-sm">
+                    <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                    Password required to sign in
+                  </div>
+                  <div className="flex items-center gap-3 text-tiny">
+                    <button
+                      type="button"
+                      onClick={() => { setOpenMenu(null); onOpenSetPassword?.(); }}
+                      disabled={!onOpenSetPassword}
+                      className="text-primary hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
+                    >
+                      Change password
+                    </button>
+                    <span className="text-gray-700">·</span>
+                    <button
+                      type="button"
+                      onClick={() => { setOpenMenu(null); onRemovePassword?.(); }}
+                      disabled={!onRemovePassword}
+                      className="text-danger hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
+                    >
+                      Remove password
+                    </button>
+                  </div>
+                </div>
               ) : (
                 // No password set. Often deliberate (demos / dev) — frame
-                // it as a state, not a TODO. Docs link for users who do
-                // want to lock it down; no "edit this file" instruction
-                // since the user may not own the host where the
-                // configurator runs.
-                <div className="space-y-1.5">
+                // it as a state, not a TODO. Set-password button lets the
+                // user lock it down in-product. The dropdown closes and
+                // SetPasswordModal handles the password capture +
+                // configurator self-restart.
+                <div className="space-y-2">
                   <div className="text-warning inline-flex items-center gap-1.5 text-sm">
                     <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
                     No password required
@@ -222,15 +250,14 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
                   <div className="text-tiny text-gray-400 leading-relaxed">
                     Anyone with network access to this URL can use the UI.
                   </div>
-                  <a
-                    href="https://docs.helixops.ai/bin/IT-Operations-Management/"
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setOpenMenu(null)}
-                    className="inline-flex items-center gap-1 text-tiny text-primary hover:underline"
+                  <button
+                    type="button"
+                    onClick={() => { setOpenMenu(null); onOpenSetPassword?.(); }}
+                    disabled={!onOpenSetPassword}
+                    className="text-tiny text-primary hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
                   >
-                    How to enable sign-in <ExternalLink className="w-3 h-3" />
-                  </a>
+                    Set a password →
+                  </button>
                 </div>
               )}
             </div>
