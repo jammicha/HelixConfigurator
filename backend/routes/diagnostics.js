@@ -295,9 +295,8 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
       gatewayStatus = 'error';
     }
     const throughput = otelStore.recentThroughput();
-    const storeUsage = otelStore.storeUsage();
     const recentErrors = errorLog.recent(10);
-    res.json({ gatewayStatus, gatewayExitCode, throughput, storeUsage, recentErrors });
+    res.json({ gatewayStatus, gatewayExitCode, throughput, recentErrors });
   });
 
   // POST deep verification of the Step 3 bridge. Step 3 today shows green

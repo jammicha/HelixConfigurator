@@ -201,22 +201,3 @@ describe('recentThroughput', () => {
   });
 });
 
-describe('storeUsage', () => {
-  let store;
-  beforeEach(() => { vi.useFakeTimers(); store = new OtelStore({ dbPath: ':memory:' }); });
-  afterEach(() => { store.stopMaintenance(); store.db.close(); vi.useRealTimers(); });
-
-  it('returns zero percentages on an empty store', () => {
-    const r = store.storeUsage();
-    expect(r.tracesUsedPct).toBe(0);
-    expect(r.logsUsedPct).toBe(0);
-    expect(r.errorsUsedPct).toBe(0);
-  });
-
-  it('reports non-zero tracesUsedPct after ingest', () => {
-    for (let i = 0; i < 5; i++) store.ingestSpans(buildSpans(1, `t-${i}`));
-    const r = store.storeUsage();
-    // 5 / TRACE_CAP(500) = 1% rounded.
-    expect(r.tracesUsedPct).toBe(1);
-  });
-});

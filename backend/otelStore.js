@@ -565,17 +565,6 @@ class OtelStore {
     return { totalSpans, spansPerSec, windowMs };
   }
 
-  storeUsage() {
-    const traceCount = this.db.prepare('SELECT COUNT(*) AS n FROM traces').get().n;
-    const logCount = this.db.prepare('SELECT COUNT(*) AS n FROM log_records').get().n;
-    const errorCount = this.db.prepare('SELECT COUNT(*) AS n FROM span_errors').get().n;
-    return {
-      tracesUsedPct: Math.round((traceCount / TRACE_CAP) * 100),
-      logsUsedPct: Math.round((logCount / LOG_CAP) * 100),
-      errorsUsedPct: Math.round((errorCount / ERROR_CAP) * 100),
-    };
-  }
-
   _evictIfNeeded() {
     const { n } = this.countTraces.get();
     if (n <= TRACE_CAP) return;

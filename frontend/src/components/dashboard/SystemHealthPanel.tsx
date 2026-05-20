@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { Activity, Database, AlertTriangle, Server } from 'lucide-react';
+import { Activity, AlertTriangle, Server } from 'lucide-react';
 
 type SystemHealth = {
   gatewayStatus: 'running' | 'restarting' | 'exited' | 'unknown' | 'error';
   gatewayExitCode?: number;
   throughput: { totalSpans: number; spansPerSec: number; windowMs: number };
-  storeUsage: { tracesUsedPct: number; logsUsedPct: number; errorsUsedPct: number };
   recentErrors: Array<{ ts: number; tag: string; message: string }>;
 };
 
@@ -34,12 +33,11 @@ export const SystemHealthPanel: React.FC<Props> = ({ health }) => {
       </div>
     );
   }
-  const maxStorePct = Math.max(health.storeUsage.tracesUsedPct, health.storeUsage.logsUsedPct, health.storeUsage.errorsUsedPct);
   const lastErr = health.recentErrors[0];
   return (
     <div className="adapt-card">
       <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">System health</div>
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="bg-gray-1000 border border-gray-800 rounded p-3">
           <div className="text-tiny text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Server className="w-3 h-3" /> Gateway</div>
           <div className={`text-sm font-semibold ${health.gatewayStatus === 'running' ? 'text-success' : 'text-warning'}`}>
@@ -49,11 +47,6 @@ export const SystemHealthPanel: React.FC<Props> = ({ health }) => {
         <div className="bg-gray-1000 border border-gray-800 rounded p-3">
           <div className="text-tiny text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Activity className="w-3 h-3" /> Throughput (1h)</div>
           <div className="text-sm font-semibold text-gray-200 tabular-nums">{fmtRate(health.throughput.spansPerSec)}</div>
-        </div>
-        <div className="bg-gray-1000 border border-gray-800 rounded p-3">
-          <div className="text-tiny text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Database className="w-3 h-3" /> Store size</div>
-          <div className={`text-sm font-semibold tabular-nums ${maxStorePct > 85 ? 'text-danger' : 'text-gray-200'}`}>{maxStorePct}%</div>
-          <div className="text-tiny text-gray-500 mt-0.5">Clear store (coming soon)</div>
         </div>
         <div className="bg-gray-1000 border border-gray-800 rounded p-3">
           <div className="text-tiny text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" /> Last error</div>
