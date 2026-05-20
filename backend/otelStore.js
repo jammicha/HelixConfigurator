@@ -551,6 +551,31 @@ class OtelStore {
     }).sort((a, b) => b.trace_count - a.trace_count);
   }
 
+  recentThroughput(windowMs = 3_600_000) {
+    const sinceMs = Date.now() - windowMs;
+    // spans has no received_at column — count via traces.received_at and
+    // sum the span_count rollup that ingestion already maintains. Lets us
+    // measure "spans received in the last hour" without joining the spans
+    // table on every call.
+    const row = this.db.prepare(
+      'SELECT COALESCE(SUM(span_count), 0) AS total FROM traces WHERE received_at >= ?'
+    ).get(sinceMs);
+    const totalSpans = row?.total || 0;
+    const spansPerSec = totalSpans / (windowMs / 1000);
+    return { totalSpans, spansPerSec, windowMs };
+  }
+
+  storeUsage() {
+    const traceCount = this.db.prepare('SELECT COUNT(*) AS n FROM traces').get().n;
+    const logCount = this.db.prepare('SELECT COUNT(*) AS n FROM log_records').get().n;
+    const errorCount = this.db.prepare('SELECT COUNT(*) AS n FROM span_errors').get().n;
+    return {
+      tracesUsedPct: Math.round((traceCount / TRACE_CAP) * 100),
+      logsUsedPct: Math.round((logCount / LOG_CAP) * 100),
+      errorsUsedPct: Math.round((errorCount / ERROR_CAP) * 100),
+    };
+  }
+
   _evictIfNeeded() {
     const { n } = this.countTraces.get();
     if (n <= TRACE_CAP) return;

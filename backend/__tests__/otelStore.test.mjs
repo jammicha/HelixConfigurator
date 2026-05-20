@@ -167,3 +167,56 @@ describe('OtelStore', () => {
   });
 
 });
+
+const buildSpans = (n, traceId) => Array.from({ length: n }, (_, i) => makeSpan({
+  traceId, spanId: `${traceId}-${i}`,
+}));
+
+describe('recentThroughput', () => {
+  let store;
+  beforeEach(() => { vi.useFakeTimers(); store = new OtelStore({ dbPath: ':memory:' }); });
+  afterEach(() => { store.stopMaintenance(); store.db.close(); vi.useRealTimers(); });
+
+  it('returns zero rate on an empty store', () => {
+    const r = store.recentThroughput();
+    expect(r.totalSpans).toBe(0);
+    expect(r.spansPerSec).toBe(0);
+    expect(r.windowMs).toBe(3_600_000);
+  });
+
+  it('counts spans whose trace was received in the window', () => {
+    store.ingestSpans(buildSpans(3, 't-recent'));
+    const r = store.recentThroughput(60 * 60 * 1000);
+    expect(r.totalSpans).toBe(3);
+    expect(r.spansPerSec).toBeCloseTo(3 / 3600, 5);
+  });
+
+  it('excludes traces received outside the window', () => {
+    vi.setSystemTime(Date.now() - 2 * 60 * 60 * 1000);
+    store.ingestSpans(buildSpans(5, 't-old'));
+    vi.setSystemTime(new Date(Date.now() + 2 * 60 * 60 * 1000));
+    store.ingestSpans(buildSpans(2, 't-new'));
+    const r = store.recentThroughput(60 * 60 * 1000);
+    expect(r.totalSpans).toBe(2);
+  });
+});
+
+describe('storeUsage', () => {
+  let store;
+  beforeEach(() => { vi.useFakeTimers(); store = new OtelStore({ dbPath: ':memory:' }); });
+  afterEach(() => { store.stopMaintenance(); store.db.close(); vi.useRealTimers(); });
+
+  it('returns zero percentages on an empty store', () => {
+    const r = store.storeUsage();
+    expect(r.tracesUsedPct).toBe(0);
+    expect(r.logsUsedPct).toBe(0);
+    expect(r.errorsUsedPct).toBe(0);
+  });
+
+  it('reports non-zero tracesUsedPct after ingest', () => {
+    for (let i = 0; i < 5; i++) store.ingestSpans(buildSpans(1, `t-${i}`));
+    const r = store.storeUsage();
+    // 5 / TRACE_CAP(500) = 1% rounded.
+    expect(r.tracesUsedPct).toBe(1);
+  });
+});

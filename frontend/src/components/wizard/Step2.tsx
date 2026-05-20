@@ -220,6 +220,14 @@ export const Step2: React.FC<Props> = ({
       exporters: [..., otlphttp/helix_sidecar]`} />
         <p className="text-tiny text-gray-500 -mt-4 mb-6">Wire into whichever pipelines your collector uses. Restart your collector after saving.</p>
 
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Restart your collector</span>
+        </div>
+        <SnippetBlock text={`docker restart ${smartAddProposal?.name || '<your-collector>'}`} />
+        <p className="text-tiny text-gray-500 -mt-4 mb-6">
+          Runs from your terminal. After the collector finishes restarting, head to Step 3 to wire the network.
+        </p>
+
         <div className="mb-3 flex items-start gap-2.5 p-3 rounded border border-warning/40 bg-warning/10 text-tiny text-gray-300">
           <span className="text-warning font-bold flex-shrink-0 leading-tight" aria-hidden="true">!</span>
           <span>After saving, restart your collector container so the new exporter takes effect.</span>

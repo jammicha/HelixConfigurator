@@ -17,6 +17,7 @@ import type { DetectedCollector } from './components/wizard/Step3';
 import { Step4 } from './components/wizard/Step4';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle } from './utils/helixKey';
+import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
 
 const App = () => {
   const monaco = useMonaco();
@@ -144,6 +145,33 @@ const App = () => {
     BUSINESS_SERVICE_KEY: ''
   });
 
+  const [testConnectionResult, setTestConnectionResult] = useState<{ status: string; message: string; remediation?: string; httpStatus?: number; latencyMs?: number } | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const handleTestConnection = async () => {
+    if (testingConnection) return;
+    setTestingConnection(true);
+    setTestConnectionResult(null);
+    try {
+      const res = await fetch('/api/diagnostics/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: envVars.HELIX_ENDPOINT, apiKey: envVars.HELIX_API_KEY }),
+      });
+      const data = await res.json();
+      setTestConnectionResult({
+        status: data.status || (res.ok ? 'unknown' : 'error'),
+        message: data.message || data.error || 'Test finished',
+        remediation: data.remediation,
+        httpStatus: data.httpStatus,
+        latencyMs: data.latencyMs,
+      });
+    } catch (e: any) {
+      setTestConnectionResult({ status: 'error', message: e?.message || 'Request failed' });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
   const eventSourceRef = useRef<EventSource | null>(null);
   const metricsIntervalRef = useRef<any>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
@@ -156,6 +184,7 @@ const App = () => {
   const [authStatus, setAuthStatus] = useState<{ required: boolean; authenticated: boolean } | null>(null);
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
   const [isTogglingDiag, setIsTogglingDiag] = useState(false);
+  const [systemHealth, setSystemHealth] = useState<any>(null);
   const handleUpdateConfigRef = useRef<() => void>(() => {});
   const telemetryTimerRef = useRef<any>(null);
 
@@ -361,6 +390,13 @@ const App = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [envVars]);
 
+  // Clear stale test-connection result when the endpoint or key changes so
+  // a previous verdict doesn't mislead after the user edits either field.
+  useEffect(() => {
+    setTestConnectionResult(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [envVars.HELIX_ENDPOINT, envVars.HELIX_API_KEY]);
+
   // Poll for API Key Diagnostics
   useEffect(() => {
     const controller = new AbortController();
@@ -502,6 +538,19 @@ const App = () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVis);
     };
+  }, [isSetupComplete]);
+
+  useEffect(() => {
+    if (!isSetupComplete) return;
+    const fetchHealth = async () => {
+      try {
+        const r = await fetch('/api/diagnostics/system-health');
+        if (r.ok) setSystemHealth(await r.json());
+      } catch { /* keep last known good */ }
+    };
+    fetchHealth();
+    const id = setInterval(fetchHealth, 30_000);
+    return () => clearInterval(id);
   }, [isSetupComplete]);
 
   // Stream logs for whichever target is active: the attached app if any, else the gateway.
@@ -1670,6 +1719,9 @@ ${logsData.logs || '(no logs available)'}
                   setupError={setupError}
                   isVerifying={isVerifying}
                   onInitialize={handleInitialize}
+                  onTestConnection={handleTestConnection}
+                  testConnectionResult={testConnectionResult}
+                  testingConnection={testingConnection}
                 />
               )}
 
@@ -1762,6 +1814,7 @@ ${logsData.logs || '(no logs available)'}
             </div>
           ) : (
             <>
+              <SystemHealthPanel health={systemHealth} />
               {/* Row 1 */}
               <div className="grid grid-cols-2 gap-6">
                 {/* Helix Gateway Status */}
