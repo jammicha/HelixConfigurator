@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2 } from 'lucide-react';
+import { Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2 } from 'lucide-react';
 
 type AuthShape = { required: boolean; authenticated: boolean } | null;
 
@@ -9,13 +9,24 @@ interface NavAvatarProps {
   // Optional callback so the App page can intercept "Gateway Dashboard"
   // navigation when the user is already mid-onboarding.
   onJumpToDashboard?: () => void;
+  // Optional external Helix app links. When provided, they render in a
+  // second section of the app-switcher dropdown below the configurator's
+  // own pages. Each is gated on the URL being set so users in a partially-
+  // configured state don't see broken shortcuts.
+  externalApps?: {
+    otelDashboardUrl?: string | null;
+    aiopsServiceUrl?: string | null;
+    applicationUrl?: string | null;
+  };
 }
 
 // The three header icons on the right of the nav (app switcher, help, avatar)
 // mirror the BMC Service Monitoring shell. Avatar opens a dropdown that
 // surfaces UI auth status + sign-out — the only place this app exposes auth
 // chrome now that the standalone Logout link is gone.
-export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, onJumpToDashboard }) => {
+export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, onJumpToDashboard, externalApps }) => {
+  const ext = externalApps || {};
+  const hasExternalLinks = !!(ext.otelDashboardUrl || ext.aiopsServiceUrl || ext.applicationUrl);
   const [openMenu, setOpenMenu] = useState<null | 'apps' | 'help' | 'user'>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -76,6 +87,50 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, onJu
               <BarChart2 className="w-4 h-4 text-gray-400" />
               View OTel Data
             </a>
+
+            {hasExternalLinks && (
+              <>
+                <div className="border-t border-gray-800 mt-1 pt-1">
+                  <div className="px-3 py-2 text-tiny font-semibold text-gray-500 uppercase tracking-wider">Open in Helix</div>
+                </div>
+                {ext.otelDashboardUrl && (
+                  <a
+                    href={ext.otelDashboardUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setOpenMenu(null)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-gray-900 hover:text-white transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4 text-gray-400" />
+                    OTel dashboard
+                  </a>
+                )}
+                {ext.aiopsServiceUrl && (
+                  <a
+                    href={ext.aiopsServiceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setOpenMenu(null)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-gray-900 hover:text-white transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4 text-gray-400" />
+                    AIOps Business Service
+                  </a>
+                )}
+                {ext.applicationUrl && (
+                  <a
+                    href={ext.applicationUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setOpenMenu(null)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-gray-900 hover:text-white transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4 text-gray-400" />
+                    Application UI
+                  </a>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

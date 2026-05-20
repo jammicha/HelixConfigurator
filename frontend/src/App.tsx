@@ -1694,6 +1694,15 @@ ${logsData.logs || '(no logs available)'}
                   setIsSetupComplete(true);
                 }
               }}
+              externalApps={{
+                otelDashboardUrl: hasRealHelixEndpoint
+                  ? `${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`
+                  : null,
+                aiopsServiceUrl: hasRealHelixEndpoint && helixConfig.businessServiceKey
+                  ? `${helixConfig.baseUrl}/aiops/#/entities/service/${extractServiceKey(helixConfig.businessServiceKey)}?type=key`
+                  : null,
+                applicationUrl: envVars.APP_URL || null,
+              }}
             />
           </div>
         </header>
@@ -1873,50 +1882,12 @@ ${logsData.logs || '(no logs available)'}
                 <div className="text-xs text-danger">Trace Injection Failed</div>
               )}
 
-              {/* Open in Helix: external-link shortcuts. Demoted from the
-                  old Operation Shortcuts card (where they competed with
-                  primary actions) to a small inline row. */}
-              {(hasRealHelixEndpoint || envVars.APP_URL) && (
-                <div className="flex items-center gap-2 flex-wrap text-sm">
-                  <span className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Open in Helix:</span>
-                  {hasRealHelixEndpoint && (
-                    <a
-                      href={`${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 text-primary hover:underline"
-                    >
-                      OTel dashboard <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  )}
-                  {hasRealHelixEndpoint && helixConfig.businessServiceKey && (
-                    <>
-                      <span className="text-gray-700">·</span>
-                      <a
-                        href={`${helixConfig.baseUrl}/aiops/#/entities/service/${extractServiceKey(helixConfig.businessServiceKey)}?type=key`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-primary hover:underline"
-                      >
-                        AIOps service <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </>
-                  )}
-                  {envVars.APP_URL && (
-                    <>
-                      <span className="text-gray-700">·</span>
-                      <a
-                        href={envVars.APP_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-primary hover:underline"
-                      >
-                        Application UI <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </>
-                  )}
-                </div>
-              )}
+              {/* External Helix-app shortcuts (OTel dashboard, AIOps service,
+                  Application UI) live in the app-switcher menu in the top
+                  nav now. They previously sat here as an inline "Open in
+                  Helix" row but kept reappearing in the operational flow;
+                  consolidating in the apps menu keeps them one click away
+                  without competing for primary-action space. */}
 
               {/* Helix Connection Settings is now a right-side drawer
                   triggered by the gear icon in the top nav. The drawer
