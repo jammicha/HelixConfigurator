@@ -47,7 +47,7 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
   const itemIdle = 'text-gray-200 hover:bg-gray-900 hover:text-white';
   const itemActive = 'bg-primary/15 text-white font-semibold border-l-2 border-primary -ml-px pl-[10px]';
   const cx = (active: boolean) => `${itemBase} ${active ? itemActive : itemIdle}`;
-  const [openMenu, setOpenMenu] = useState<null | 'apps' | 'help' | 'user'>(null);
+  const [openMenu, setOpenMenu] = useState<null | 'apps' | 'user'>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -166,29 +166,20 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
         )}
       </div>
 
-      {/* Help */}
-      <div className="relative">
-        <button
-          type="button"
-          aria-label="Help"
-          aria-expanded={openMenu === 'help'}
-          onClick={() => setOpenMenu(openMenu === 'help' ? null : 'help')}
-          className={iconBtn}
-        >
-          <HelpCircle className="w-[18px] h-[18px]" />
-        </button>
-        {openMenu === 'help' && (
-          <div className="absolute right-0 top-full mt-2 w-72 bg-gray-1000 border border-gray-800 rounded shadow-3 py-3 z-50">
-            <div className="px-4 pb-2">
-              <div className="text-sm font-semibold text-gray-100">Helix OTel Configurator</div>
-              <div className="text-tiny text-gray-500 mt-0.5">Onboarding wizard + OTel gateway for BMC Helix</div>
-            </div>
-            <div className="border-t border-gray-800 mt-1 pt-2 px-4 text-tiny text-gray-400 leading-relaxed">
-              Stuck? Re-run onboarding from the nav at any time, or use the diagnostics panel on the Gateway Dashboard.
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Help — direct link to Helix Ops docs in a new tab. Previously this
+          was a dropdown with self-description text; routing to the actual
+          docs site is more useful (and removes a popup we'd have to keep
+          in sync with the product). */}
+      <a
+        href="https://docs.helixops.ai/bin/IT-Operations-Management/"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Help (Helix Ops docs)"
+        title="Open Helix Ops documentation"
+        className={iconBtn}
+      >
+        <HelpCircle className="w-[18px] h-[18px]" />
+      </a>
 
       {/* Avatar */}
       <div className="relative ml-1">
