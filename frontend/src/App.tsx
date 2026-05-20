@@ -18,6 +18,8 @@ import { Step4 } from './components/wizard/Step4';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle } from './utils/helixKey';
 import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
+import { PipelineStatusBanner } from './components/dashboard/PipelineStatusBanner';
+import { QuickActions } from './components/dashboard/QuickActions';
 
 const App = () => {
   const monaco = useMonaco();
@@ -1814,127 +1816,90 @@ ${logsData.logs || '(no logs available)'}
             </div>
           ) : (
             <>
-              <SystemHealthPanel health={systemHealth} />
-              {/* Row 1 */}
-              <div className="grid grid-cols-2 gap-6">
-                {/* Helix Gateway Status */}
-                <div className="adapt-card">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div
-                      className={`w-3 h-3 rounded-full ${getStatusColor()} ${gatewayStatus === 'running' ? 'animate-pulse' : ''}`}
-                      aria-hidden="true"
-                    ></div>
-                    <h2 className="text-lg font-semibold text-gray-200">Helix Gateway Status</h2>
-                    <span
-                      className="text-tiny text-gray-400 uppercase tracking-wider font-semibold ml-auto"
-                      role="status"
-                      aria-live="polite"
+              {/* Pipeline status banner — "is this thing working?" at the top */}
+              <PipelineStatusBanner health={systemHealth} />
+
+              {/* System Health: 3-cell summary with inline gateway controls */}
+              <SystemHealthPanel
+                health={systemHealth}
+                gatewayStatus={gatewayStatus}
+                actionLoading={actionLoading}
+                onStart={handleStart}
+                onStop={handleStop}
+                onRestart={handleRestart}
+              />
+
+              {/* Quick actions: 4 in-app actions only (Re-verify, Diagnostic,
+                  Bundle, Services). External links live in the Open in Helix
+                  row below so they don't compete with primary-action space. */}
+              <QuickActions
+                onReverifyTelemetry={handleQuickVerifyTelemetry}
+                onToggleDiagnostics={handleToggleDiagnostics}
+                onCopySupportBundle={handleCopySupportBundle}
+                onOpenServices={handleOpenServices}
+                showDiagnostics={showDiagnostics}
+                isTogglingDiag={isTogglingDiag}
+                isDiagnosticEnabled={isDiagnosticEnabled}
+                isServicesOpen={isServicesOpen}
+              />
+
+              {/* Trace injection status surface (preserved from the old
+                  Operation Shortcuts card; surfaces synthetic-trace state
+                  from the Launch / Re-verify paths). */}
+              {traceInjectionStatus === 'injecting' && (
+                <div className="text-xs text-gray-400 animate-pulse">Injecting synthetic diagnostic trace…</div>
+              )}
+              {traceInjectionStatus === 'success' && (
+                <div className="text-xs text-success">Synthetic Trace Injected Successfully</div>
+              )}
+              {traceInjectionStatus === 'error' && (
+                <div className="text-xs text-danger">Trace Injection Failed</div>
+              )}
+
+              {/* Open in Helix: external-link shortcuts. Demoted from the
+                  old Operation Shortcuts card (where they competed with
+                  primary actions) to a small inline row. */}
+              {(hasRealHelixEndpoint || envVars.APP_URL) && (
+                <div className="flex items-center gap-2 flex-wrap text-sm">
+                  <span className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Open in Helix:</span>
+                  {hasRealHelixEndpoint && (
+                    <a
+                      href={`${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-primary hover:underline"
                     >
-                      {gatewayStatus === 'unknown' ? 'Checking…' : gatewayStatus}
-                    </span>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleStart}
-                      disabled={gatewayStatus === 'running' || actionLoading !== null}
-                      className="flex-1 bg-success text-white py-2 rounded font-semibold hover:bg-[#006640] transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
-                    >
-                      {actionLoading === 'start' && <Loader2 className="w-4 h-4 animate-spin" />}
-                      Start
-                    </button>
-                    <button
-                      onClick={handleStop}
-                      disabled={gatewayStatus === 'exited' || actionLoading !== null}
-                      className="flex-1 border border-danger text-danger bg-danger/5 hover:bg-danger/10 py-2 rounded font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
-                    >
-                      {actionLoading === 'stop' && <Loader2 className="w-4 h-4 animate-spin" />}
-                      Stop
-                    </button>
-                    <button
-                      onClick={handleRestart}
-                      disabled={actionLoading !== null}
-                      className="flex-1 bg-warning text-gray-900 py-2 rounded font-semibold hover:bg-[#d9ae00] transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
-                    >
-                      {actionLoading === 'restart' && <Loader2 className="w-4 h-4 animate-spin" />}
-                      Restart
-                    </button>
-                  </div>
-                </div>
-                {/* Operation Shortcuts */}
-                <div className="adapt-card">
-                  <h2 className="text-lg font-semibold mb-4 text-gray-200">Operation shortcuts</h2>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={handleToggleDiagnostics}
-                      disabled={(!isDiagnosticEnabled && !showDiagnostics) || isTogglingDiag}
-                      className={`border border-gray-700 py-2 rounded font-medium transition-all text-sm disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${showDiagnostics ? 'bg-danger text-white hover:bg-[#890008]' : isDiagnosticEnabled ? 'bg-primary text-white hover:bg-[#3006c2]' : 'bg-gray-800 text-gray-200 hover:bg-gray-700'}`}
-                      title={!isDiagnosticEnabled && !showDiagnostics ? "Connect to the Helix Gateway to enable diagnostics" : ""}
-                    >
-                      {isTogglingDiag && <Loader2 className="w-4 h-4 animate-spin" />}
-                      {isTogglingDiag
-                        ? (showDiagnostics ? 'Closing...' : 'Starting...')
-                        : (showDiagnostics ? 'Close Diagnostics' : 'Run Diagnostic Health Check')}
-                    </button>
-                    <button
-                      onClick={handleOpenServices}
-                      className={`bg-gray-800 hover:bg-gray-700 border border-gray-700 py-2 rounded font-medium transition-colors text-sm ${isServicesOpen ? 'text-slate-100 bg-gray-700' : 'text-gray-200'}`}
-                    >
-                      Discovered Services
-                    </button>
-                    <button
-                      onClick={handleQuickVerifyTelemetry}
-                      className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 py-2 rounded font-medium transition-colors text-sm"
-                    >
-                      Re-verify Telemetry Flow
-                    </button>
-                    <button
-                      onClick={handleCopySupportBundle}
-                      className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 py-2 rounded font-medium transition-colors text-sm"
-                    >
-                      Copy Support Bundle
-                    </button>
-                    {hasRealHelixEndpoint && (
-                      <a
-                        href={`${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 py-2 rounded font-medium transition-colors text-center block w-full text-sm"
-                      >
-                        Helix OTel Dashboard
-                      </a>
-                    )}
-                    {hasRealHelixEndpoint && helixConfig.businessServiceKey && (
+                      OTel dashboard <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                  {hasRealHelixEndpoint && helixConfig.businessServiceKey && (
+                    <>
+                      <span className="text-gray-700">·</span>
                       <a
                         href={`${helixConfig.baseUrl}/aiops/#/entities/service/${extractServiceKey(helixConfig.businessServiceKey)}?type=key`}
                         target="_blank"
                         rel="noreferrer"
-                        className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 py-2 rounded font-medium transition-colors text-center block w-full text-sm"
+                        className="inline-flex items-center gap-1.5 text-primary hover:underline"
                       >
-                        AIOps Business Service
+                        AIOps service <ExternalLink className="w-3.5 h-3.5" />
                       </a>
-                    )}
-                    {envVars.APP_URL && (
+                    </>
+                  )}
+                  {envVars.APP_URL && (
+                    <>
+                      <span className="text-gray-700">·</span>
                       <a
                         href={envVars.APP_URL}
                         target="_blank"
                         rel="noreferrer"
-                        className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 py-2 rounded font-medium transition-colors text-center block w-full text-sm"
+                        className="inline-flex items-center gap-1.5 text-primary hover:underline"
                       >
-                        Application UI
+                        Application UI <ExternalLink className="w-3.5 h-3.5" />
                       </a>
-                    )}
-                  </div>
-                  {traceInjectionStatus === 'injecting' && (
-                    <div className="mt-3 text-xs text-gray-400 animate-pulse text-center">Injecting synthetic diagnostic trace...</div>
-                  )}
-                  {traceInjectionStatus === 'success' && (
-                    <div className="mt-3 text-xs text-success text-center">Synthetic Trace Injected Successfully</div>
-                  )}
-                  {traceInjectionStatus === 'error' && (
-                    <div className="mt-3 text-xs text-danger text-center">Trace Injection Failed</div>
+                    </>
                   )}
                 </div>
-              </div>
+              )}
 
               {/* Helix Connection Settings */}
               <div className="adapt-card">

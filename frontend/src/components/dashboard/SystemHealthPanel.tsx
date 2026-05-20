@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Activity, AlertTriangle, Server } from 'lucide-react';
+import { Activity, AlertTriangle, Server, Play, Pause, RotateCw, Loader2 } from 'lucide-react';
 
 type SystemHealth = {
   gatewayStatus: 'running' | 'restarting' | 'exited' | 'unknown' | 'error';
@@ -8,7 +8,18 @@ type SystemHealth = {
   recentErrors: Array<{ ts: number; tag: string; message: string }>;
 };
 
-type Props = { health: SystemHealth | null };
+type ActionLoading = 'start' | 'stop' | 'restart' | null;
+
+type Props = {
+  health: SystemHealth | null;
+  // Live gateway state polled in App.tsx — drives the inline action button
+  // enablement so users can't double-Start while the daemon is mid-action.
+  gatewayStatus: string;
+  actionLoading: ActionLoading;
+  onStart: () => void;
+  onStop: () => void;
+  onRestart: () => void;
+};
 
 const fmtRate = (rate: number): string => {
   if (rate === 0) return '0 spans/s';
@@ -23,7 +34,7 @@ const fmtAgo = (ts: number): string => {
   return `${Math.floor(ms / 3_600_000)}h ago`;
 };
 
-export const SystemHealthPanel: React.FC<Props> = ({ health }) => {
+export const SystemHealthPanel: React.FC<Props> = ({ health, gatewayStatus, actionLoading, onStart, onStop, onRestart }) => {
   const [showErrors, setShowErrors] = useState(false);
   if (!health) {
     return (
@@ -34,14 +45,32 @@ export const SystemHealthPanel: React.FC<Props> = ({ health }) => {
     );
   }
   const lastErr = health.recentErrors[0];
+  const iconBtn = (loadingKey: ActionLoading, disabled: boolean, onClick: () => void, label: string, Icon: React.ComponentType<{ className?: string }>) => (
+    <button
+      onClick={onClick}
+      disabled={disabled || actionLoading !== null}
+      title={label}
+      aria-label={label}
+      className="p-1 text-gray-500 hover:text-gray-200 disabled:opacity-50 disabled:hover:text-gray-500 disabled:cursor-not-allowed"
+    >
+      {actionLoading === loadingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Icon className="w-3.5 h-3.5" />}
+    </button>
+  );
   return (
     <div className="adapt-card">
       <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">System health</div>
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-gray-1000 border border-gray-800 rounded p-3">
           <div className="text-tiny text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Server className="w-3 h-3" /> Gateway</div>
-          <div className={`text-sm font-semibold ${health.gatewayStatus === 'running' ? 'text-success' : 'text-warning'}`}>
-            {health.gatewayStatus}{health.gatewayExitCode != null ? ` (${health.gatewayExitCode})` : ''}
+          <div className="flex items-center justify-between gap-2">
+            <div className={`text-sm font-semibold ${health.gatewayStatus === 'running' ? 'text-success' : 'text-warning'}`}>
+              {health.gatewayStatus}{health.gatewayExitCode != null ? ` (${health.gatewayExitCode})` : ''}
+            </div>
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              {iconBtn('start', gatewayStatus === 'running', onStart, 'Start', Play)}
+              {iconBtn('stop', gatewayStatus === 'exited', onStop, 'Stop', Pause)}
+              {iconBtn('restart', false, onRestart, 'Restart', RotateCw)}
+            </div>
           </div>
         </div>
         <div className="bg-gray-1000 border border-gray-800 rounded p-3">
