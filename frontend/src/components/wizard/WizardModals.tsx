@@ -103,7 +103,7 @@ export const SmartAddPreviewModal: React.FC<SmartAddPreviewModalProps> = ({
         <header className="flex items-start justify-between gap-3 px-5 py-3 border-b border-gray-800 bg-gray-900">
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Smart-add preview</div>
-            <div className="text-sm text-gray-200">{proposal.name} — <code className="font-mono text-gray-300">{proposal.configPath}</code></div>
+            <div className="text-sm text-gray-200">{proposal.name} · <code className="font-mono text-gray-300">{proposal.configPath}</code></div>
             {proposal.hostConfigPath ? (
               <div className="mt-1.5 flex items-center gap-2 text-tiny text-gray-400">
                 <span className="text-gray-500">Open locally:</span>
@@ -118,7 +118,7 @@ export const SmartAddPreviewModal: React.FC<SmartAddPreviewModalProps> = ({
               </div>
             ) : (
               <div className="mt-1.5 text-tiny text-gray-500">
-                Config isn't bind-mounted from the host — it's baked into the image. No local path to open.
+                Config isn't bind-mounted from the host; it's baked into the image. No local path to open.
               </div>
             )}
           </div>

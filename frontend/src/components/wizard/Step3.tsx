@@ -120,13 +120,24 @@ export const Step3: React.FC<Props> = ({
     return () => { cancelled = true; };
   }, [bridgedCollector?.name]);
 
+  // No external collector detected and the user hasn't manually attached
+  // anything: this step has nothing to do. helix-gateway is itself an OTel
+  // collector and will receive OTLP directly from instrumented apps.
+  const noCollectorsAvailable = detectedCollectors.length === 0 && !someoneAttached;
+
   return (
     <div className="adapt-card">
-      <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 3: Connect helix-gateway and your collector to a shared Docker network</h2>
+      <h2 className="text-lg font-semibold mb-2 text-gray-200">
+        {noCollectorsAvailable
+          ? 'Step 3: No external collector to bridge'
+          : 'Step 3: Connect helix-gateway and your collector to a shared Docker network'}
+      </h2>
       <p className="text-sm text-gray-400 mb-4">
-        {singleCollector
-          ? <>We'll bridge <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-gateway</code> to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">{singleCollector.name}</code>'s network so their OTLP traffic can flow over loopback.</>
-          : 'helix-gateway and your collector need to share a Docker network so their OTLP traffic can flow over loopback.'}
+        {noCollectorsAvailable
+          ? <>This step bridges <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-gateway</code> with an existing OTel collector. You can skip this step.</>
+          : singleCollector
+            ? <>We'll bridge <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-gateway</code> to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">{singleCollector.name}</code>'s network so their OTLP traffic can flow over loopback.</>
+            : 'helix-gateway and your collector need to share a Docker network so their OTLP traffic can flow over loopback.'}
       </p>
 
       {bridgeStatus?.kind === 'error' && (
@@ -189,12 +200,13 @@ export const Step3: React.FC<Props> = ({
             </div>
           )}
           {k8sApplyResult === 'failed' && (
-            <div className="mb-3 text-tiny text-danger inline-flex items-center gap-1.5"><X className="w-3.5 h-3.5" aria-hidden="true" /> Could not apply template — retry or apply it from the YAML editor on the dashboard.</div>
+            <div className="mb-3 text-tiny text-danger inline-flex items-center gap-1.5"><X className="w-3.5 h-3.5" aria-hidden="true" /> Could not apply template. Retry, or apply it from the YAML editor on the dashboard.</div>
           )}
 
           {detectedCollectors.length === 0 ? (
-            <div className="p-4 text-center text-tiny text-gray-500 border border-gray-800 rounded bg-gray-1000">
-              No OTel collector containers detected on this host yet. Switch to the <button onClick={() => setTab('manual')} className="text-active hover:underline font-semibold">Manual</button> tab to attach by network name.
+            <div className="p-4 text-tiny text-gray-400 border border-gray-800 rounded bg-gray-1000 space-y-2 leading-relaxed">
+              <p>No external OTel collector detected on this host.</p>
+              <p className="text-gray-500">Have a collector running somewhere we couldn't see (Kubernetes, bare-metal, a remote host)? Switch to the <button onClick={() => setTab('manual')} className="text-active hover:underline font-semibold">Manual</button> tab to attach it. Otherwise, skip this step.</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -308,16 +320,16 @@ export const Step3: React.FC<Props> = ({
       {!someoneAttached && tab === 'manual' && (
         <div className="mt-2 space-y-4">
           <div>
-            <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option A — attach helix-gateway to your app's network</p>
+            <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option A: attach helix-gateway to your app's network</p>
             <SnippetBlock text="docker network connect <your-network> helix-gateway" />
             <p className="text-tiny text-gray-500 -mt-4">
               Replace <code className="font-mono">&lt;your-network&gt;</code> with your compose network name.
             </p>
           </div>
           <div>
-            <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option B — alternative: attach your container to helix-bridge</p>
+            <p className="text-tiny text-gray-400 mb-2 font-semibold uppercase tracking-wider">Option B: attach your container to helix-bridge instead</p>
             <SnippetBlock text="docker network connect helix-bridge <your-container>" />
-            <p className="text-tiny text-gray-500 -mt-4">Use this when your collector can't accept a new network at runtime — joining ours instead works the same way.</p>
+            <p className="text-tiny text-gray-500 -mt-4">Use this when your collector can't accept a new network at runtime. Joining ours instead works the same way.</p>
           </div>
           <p className="text-tiny text-gray-500">Then restart your container.</p>
         </div>
@@ -374,7 +386,13 @@ export const Step3: React.FC<Props> = ({
           className={`flex-1 px-6 py-3 rounded font-semibold transition-all text-sm text-white ${
             someoneAttached ? 'bg-success hover:bg-success-hover' : 'bg-primary hover:bg-primary-hover'
           }`}
-        >{someoneAttached ? 'Continue to Verify →' : 'Next: Verify →'}</button>
+        >
+          {someoneAttached
+            ? 'Continue to Verify →'
+            : noCollectorsAvailable
+              ? 'Skip this step →'
+              : 'Next: Verify →'}
+        </button>
       </div>
     </div>
   );

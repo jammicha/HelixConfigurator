@@ -245,7 +245,7 @@ export const TracesTab: React.FC<{
                           return (
                             <span
                               className="adapt-badge-warning flex-shrink-0 inline-flex items-center gap-1"
-                              title={`Outlier — ${formatDuration(t.duration_ms)} is ${(t.duration_ms / p95).toFixed(1)}× this operation's p95 (${formatDuration(p95)})`}
+                              title={`Outlier: ${formatDuration(t.duration_ms)} is ${(t.duration_ms / p95).toFixed(1)}× this operation's p95 (${formatDuration(p95)})`}
                             >
                               <AlertTriangle className="w-2.5 h-2.5" />Outlier
                             </span>

@@ -303,7 +303,7 @@ export const AiopsPage: React.FC = () => {
             </span>
           </div>
 
-          <div className="max-w-4xl">
+          <div className="max-w-5xl">
             {/* Step 1 — Name */}
             <div className="flex gap-4">
               {stepDot(1)}
@@ -448,13 +448,13 @@ export const AiopsPage: React.FC = () => {
                       <ol className="text-[13px] text-gray-700 space-y-1.5 list-decimal pl-5 mb-4">
                         <li>Open {terminalApp} on the host where your application runs.</li>
                         <li>Make sure Docker Desktop / Docker Engine is installed and running.</li>
-                        <li>Paste and run the command below — it downloads, builds, and starts the sidecar:</li>
+                        <li>Paste and run the command below. It downloads, builds, and starts the sidecar:</li>
                       </ol>
                       <div className="max-w-3xl">{codeBlock('install', installCmd)}</div>
                       <div className="text-[11px] text-gray-500 mt-1.5">
                         {platform === 'windows'
-                          ? 'No download dialog or SmartScreen prompts — the script is piped straight into PowerShell.'
-                          : 'No download dialog or Gatekeeper prompts — the script is piped straight into bash.'}
+                          ? 'No download dialog or SmartScreen prompts. The script is piped straight into PowerShell.'
+                          : 'No download dialog or Gatekeeper prompts. The script is piped straight into bash.'}
                       </div>
                     </div>
 

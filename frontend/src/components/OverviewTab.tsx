@@ -188,7 +188,7 @@ export const OverviewTab: React.FC<Props> = ({
               {testTraceStatus === 'sending'
                 ? (<><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>)
                 : testTraceStatus === 'sent'
-                ? (<><CheckCircle2 className="w-4 h-4" /> Sent — refreshing shortly</>)
+                ? (<><CheckCircle2 className="w-4 h-4" /> Sent. Refreshing shortly</>)
                 : (<><Send className="w-4 h-4" /> Send a test trace</>)}
             </button>
             <a
@@ -317,7 +317,7 @@ export const OverviewTab: React.FC<Props> = ({
       {tracesHistogram && tracesHistogram.buckets.length > 0 && (
         <div className="adapt-card !p-3 mb-4">
           <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-            Latency <span className="normal-case tracking-normal text-gray-500 font-normal">— p50/p95/p99 · click or drag to zoom</span>
+            Latency <span className="normal-case tracking-normal text-gray-500 font-normal">· p50/p95/p99 · click or drag to zoom</span>
           </div>
           <TimelineChart
             mode="latency"
@@ -366,7 +366,7 @@ export const OverviewTab: React.FC<Props> = ({
         <div className="adapt-card !p-3 mb-4">
           <div className="flex items-center justify-between gap-3 mb-1.5">
             <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider min-w-0 truncate">
-              Service map <span className="normal-case tracking-normal text-gray-500 font-normal">— inter-service calls from spans · click a node to filter traces</span>
+              Service map <span className="normal-case tracking-normal text-gray-500 font-normal">· inter-service calls from spans · click a node to filter traces</span>
             </div>
             {(() => {
               const url = buildHelixBusinessServiceUrl(helixEnv);
@@ -392,7 +392,7 @@ export const OverviewTab: React.FC<Props> = ({
       {heatmap && heatmap.cells.length > 0 && (
         <div className="adapt-card !p-3">
           <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-            Latency distribution <span className="normal-case tracking-normal text-gray-500 font-normal">— click a cell to drill into traces in that band</span>
+            Latency distribution <span className="normal-case tracking-normal text-gray-500 font-normal">· click a cell to drill into traces in that band</span>
           </div>
           <Heatmap
             data={heatmap}

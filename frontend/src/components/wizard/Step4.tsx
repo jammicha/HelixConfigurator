@@ -73,22 +73,6 @@ export const Step4: React.FC<Props> = ({
   onVerifyTelemetry,
   onLaunchDashboard,
 }) => {
-  const [testTraceStatus, setTestTraceStatus] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
-
-  const sendTestTrace = async () => {
-    if (testTraceStatus === 'sending') return;
-    setTestTraceStatus('sending');
-    try {
-      const res = await fetch('/api/diagnostics/inject-trace', { method: 'POST' });
-      if (!res.ok) throw new Error('Inject failed');
-      setTestTraceStatus('sent');
-      setTimeout(() => setTestTraceStatus('idle'), 3000);
-    } catch {
-      setTestTraceStatus('error');
-      setTimeout(() => setTestTraceStatus('idle'), 5000);
-    }
-  };
-
   const dSpans = delta(receiverNow?.acceptedSpans, receiverBaseline?.acceptedSpans);
   const dMetrics = delta(receiverNow?.acceptedMetricPoints, receiverBaseline?.acceptedMetricPoints);
   const dLogs = delta(receiverNow?.acceptedLogRecords, receiverBaseline?.acceptedLogRecords);
@@ -194,10 +178,12 @@ export const Step4: React.FC<Props> = ({
       <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
       <p className="text-sm text-gray-400 mb-5">Restart your app or collector first if you just changed config.</p>
 
-      {!someoneAttached && (
-        // Step 3 hasn't wired the gateway to any detected collector's
-        // network yet. Live counters will stay at zero on this page until
-        // they do. Auto-bridge no longer exists — Step 3 is the only path.
+      {!someoneAttached && detectedCollectors.length > 0 && (
+        // Collectors were detected on this host but none of them are bridged
+        // to helix-gateway yet. Live counters will stay at zero until the
+        // user attaches one via Step 3. Suppressed when no collectors were
+        // detected at all — that case is "helix-gateway IS the collector,"
+        // already covered by Step 3's skip path.
         <div className="mb-4 flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
           <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
           <span className="text-gray-200">
@@ -226,7 +212,7 @@ export const Step4: React.FC<Props> = ({
             <div className="text-gray-200">
               <span className="font-semibold">Helix gateway is not running</span>
               {gatewayStatus === 'restarting'
-                ? <> — restarting…</>
+                ? <> (restarting…)</>
                 : <> (<code className="font-mono text-gray-300">{gatewayStatus}</code>). Telemetry from your collector won't reach Helix until it's back up.</>}
             </div>
           </div>
@@ -271,7 +257,7 @@ export const Step4: React.FC<Props> = ({
       {k8sDetected && (
         <div className="mb-5 flex items-start gap-3 p-2.5 rounded border border-primary/40 bg-primary/10 text-tiny text-gray-300">
           <Hexagon className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
-          <span>Kubernetes detected — <code className="font-mono">k8s.namespace.name</code> and <code className="font-mono">k8s.cluster.name</code> are being enriched automatically via the K8s Attribute Enrichment template.</span>
+          <span>Kubernetes detected. <code className="font-mono">k8s.namespace.name</code> and <code className="font-mono">k8s.cluster.name</code> are being enriched automatically via the K8s Attribute Enrichment template.</span>
         </div>
       )}
 
@@ -289,7 +275,7 @@ export const Step4: React.FC<Props> = ({
               {envVars.HELIX_API_KEY && envVars.HELIX_API_KEY.startsWith('FAKE-') && (
                 <div className="mt-2 text-tiny text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1.5 flex items-start gap-2">
                   <span className="flex-1">
-                    <span className="font-semibold">Heads up:</span> your <code className="font-mono">HELIX_API_KEY</code> is a placeholder — Helix returns 200 for any request. Replace it with a real tenant key.
+                    <span className="font-semibold">Heads up:</span> your <code className="font-mono">HELIX_API_KEY</code> is a placeholder, so Helix returns 200 for any request. Replace it with a real tenant key.
                   </span>
                   <button
                     onClick={() => onJumpToStep(1)}
@@ -305,9 +291,9 @@ export const Step4: React.FC<Props> = ({
           // Customer collector is queueing or failing — gateway is unreachable
           // from its side. Remediation lives in Step 3, so suppress the API
           // key probe (it'd be misleading here).
-          renderTraceBanner('warning', 'Trace stuck at your collector — helix-gateway not reachable from it.', traceVerifyResult.message, traceVerifyResult.remediation, false)
+          renderTraceBanner('warning', 'Trace stuck at your collector. helix-gateway is not reachable from it.', traceVerifyResult.message, traceVerifyResult.remediation, false)
         ) : traceVerifyResult && traceVerifyResult.status === 'queued_gateway' ? (
-          renderTraceBanner('warning', "Trace queued at the gateway — Helix hasn't acknowledged.", traceVerifyResult.message, traceVerifyResult.remediation, true)
+          renderTraceBanner('warning', "Trace queued at the gateway. Helix hasn't acknowledged.", traceVerifyResult.message, traceVerifyResult.remediation, true)
         ) : traceVerifyResult && traceVerifyResult.status === 'pending' ? (
           renderTraceBanner('warning', 'Trace queued but not yet exported.', traceVerifyResult.message, traceVerifyResult.remediation, true)
         ) : traceVerifyResult && traceVerifyResult.status === 'error' ? (
@@ -329,20 +315,10 @@ export const Step4: React.FC<Props> = ({
           onClick={onVerifyTelemetry}
           disabled={verifyingTrace}
           className="flex-1 bg-warning hover:bg-warning-hover text-gray-900 px-6 py-3 rounded font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
-          title="Inject a synthetic trace and confirm it reaches Helix — independent of your app"
+          title="Inject a synthetic trace and confirm it reaches Helix, independent of your app"
         >
           {verifyingTrace && <Loader2 className="w-4 h-4 animate-spin" />}
           {verifyingTrace ? 'Verifying…' : 'Verify gateway → Helix'}
-        </button>
-        <button
-          type="button"
-          onClick={sendTestTrace}
-          disabled={testTraceStatus === 'sending'}
-          className="px-4 py-3 rounded font-semibold text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60 inline-flex items-center justify-center gap-2"
-          title="Inject one synthetic trace, fire-and-forget. Different from Verify — no polling, no verdict."
-        >
-          {testTraceStatus === 'sending' && <Loader2 className="w-4 h-4 animate-spin" />}
-          {testTraceStatus === 'sending' ? 'Sending…' : testTraceStatus === 'sent' ? 'Sent ✓' : testTraceStatus === 'error' ? 'Failed — retry' : 'Send test trace'}
         </button>
         <button
           // Disabled until Verify has run at least once. The user could

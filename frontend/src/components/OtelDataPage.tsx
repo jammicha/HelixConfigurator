@@ -713,7 +713,7 @@ export const OtelDataPage: React.FC = () => {
                       setRange(v as TimeRange);
                     }
                   }}
-                  title={customRange ? 'Custom window active — pick a preset to clear, or re-select Custom… to edit' : 'Time range — persists across tabs'}
+                  title={customRange ? 'Custom window active. Pick a preset to clear, or re-select Custom… to edit.' : 'Time range. Persists across tabs.'}
                   className={`bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${customRange ? 'text-active' : 'text-gray-200'}`}
                 >
                   {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -770,7 +770,7 @@ export const OtelDataPage: React.FC = () => {
                 sseConnected ? (
                   <span
                     className="inline-block w-1.5 h-1.5 rounded-full bg-[#5eead4] animate-pulse"
-                    title="SSE connected — live updates flowing"
+                    title="SSE connected. Live updates flowing."
                     aria-label="Live stream connected"
                     role="status"
                   />
@@ -780,7 +780,7 @@ export const OtelDataPage: React.FC = () => {
                   // the eventSource.onerror handler that flips sseConnected.
                   <span
                     className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-tiny font-semibold bg-warning/15 text-warning border border-warning/30 normal-case tracking-normal"
-                    title="SSE disconnected — reconnecting"
+                    title="SSE disconnected. Reconnecting."
                     role="status"
                     aria-live="polite"
                   >
@@ -815,7 +815,7 @@ export const OtelDataPage: React.FC = () => {
             <div ref={diagRef} className="relative">
               <button
                 onClick={() => setDiagOpen(o => !o)}
-                title="Diagnostics — restart upstream OTel collectors when the stream stalls"
+                title="Diagnostics: restart upstream OTel collectors when the stream stalls"
                 className={`inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold transition-colors ${diagOpen ? 'text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
               >
                 <Wrench className="w-3.5 h-3.5" />
@@ -860,7 +860,7 @@ export const OtelDataPage: React.FC = () => {
                     </div>
                   )}
                   <div className="px-3 py-2 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">
-                    Use when traces stop arriving despite the Stream pill showing Live — common when the OTel demo collector's <code className="font-mono text-gray-400">memory_limiter</code> trips after long runs.
+                    Use when traces stop arriving despite the Stream pill showing Live. Common when the OTel demo collector's <code className="font-mono text-gray-400">memory_limiter</code> trips after long runs.
                   </div>
                 </div>
               )}

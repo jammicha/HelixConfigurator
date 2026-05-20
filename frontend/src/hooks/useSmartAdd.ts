@@ -105,7 +105,7 @@ export function useSmartAdd({
         return;
       }
       if (data.alreadyConfigured) {
-        setResult({ ok: true, message: `Already configured — ${data.existingExporterName} already points at helix-gateway:4318. No changes needed.` });
+        setResult({ ok: true, message: `Already configured. ${data.existingExporterName} already points at helix-gateway:4318. No changes needed.` });
       } else if (data.restartDeferred && data.containerName) {
         // Backend skipped the restart because the gateway isn't on this
         // collector's network yet. Stash the container name so the wizard

@@ -16,7 +16,7 @@ const filterRelevant = (text: string): string =>
   text
     .split('\n')
     .filter(line => RAW_METRICS_RELEVANT_PREFIXES.some(p => line.startsWith(p)))
-    .join('\n') || '(no relevant metric lines found — try All Metrics)';
+    .join('\n') || '(no relevant metric lines found. Try All Metrics.)';
 
 type Props = {
   isOpen: boolean;

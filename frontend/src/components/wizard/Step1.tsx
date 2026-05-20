@@ -25,7 +25,7 @@ type Props = {
 const validateEndpoint = (value: string): string | null => {
   if (!value) return 'Required';
   if (!/^https?:\/\//i.test(value)) return 'Must start with https://';
-  if (/\/otlp(\/|$)/.test(value)) return 'Remove /otlp/... — the gateway adds the path itself';
+  if (/\/otlp(\/|$)/.test(value)) return 'Remove /otlp/... The gateway adds the path itself.';
   try { new URL(value); } catch { return 'Not a valid URL'; }
   return null;
 };
@@ -134,7 +134,7 @@ export const Step1: React.FC<Props> = ({
               {showApiKey ? 'Hide' : 'Show'}
             </button>
           </div>
-          <p className="text-tiny text-gray-500">Paste the full key — the format is parsed automatically.</p>
+          <p className="text-tiny text-gray-500">Paste the full key. The format is parsed automatically.</p>
           {envVars.HELIX_API_KEY && errors.HELIX_API_KEY && (
             <p id="helix-api-key-error" className="text-tiny text-danger">{errors.HELIX_API_KEY}</p>
           )}
@@ -145,7 +145,7 @@ export const Step1: React.FC<Props> = ({
               X-Source
               {!errors.X_SOURCE && envVars.X_SOURCE && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
             </span>
-            <span className="normal-case tracking-normal text-gray-500 font-normal">— Business Service name in Helix topology &amp; AIOps</span>
+            <span className="normal-case tracking-normal text-gray-500 font-normal">· Business Service name in Helix topology &amp; AIOps</span>
           </label>
           <input
             type="text"
@@ -169,7 +169,7 @@ export const Step1: React.FC<Props> = ({
         <div className="space-y-1">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
             <span>App URL</span>
-            <span className="normal-case tracking-normal text-gray-500 font-normal">— optional</span>
+            <span className="normal-case tracking-normal text-gray-500 font-normal">· optional</span>
           </label>
           <input
             type="url"
@@ -186,7 +186,7 @@ export const Step1: React.FC<Props> = ({
             placeholder="https://example.com or http://localhost:8080"
           />
           <p className="text-tiny text-gray-500">
-            Used for the "Open application" deep-link on the dashboard. <code className="font-mono">localhost</code>, an IP, or a public URL — anything that opens your app's UI from a browser is fine. Network wiring between helix-gateway and your collector happens on Step 3.
+            Used for the "Open application" deep-link on the dashboard. <code className="font-mono">localhost</code>, an IP, or a public URL: anything that opens your app's UI from a browser is fine. Network wiring between helix-gateway and your collector happens on Step 3.
           </p>
           {envVars.APP_URL && errors.APP_URL && (
             <p id="helix-app-url-error" className="text-tiny text-danger">{errors.APP_URL}</p>
@@ -195,7 +195,7 @@ export const Step1: React.FC<Props> = ({
         <div className="space-y-1">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
             <span>AIOps Business Service Key</span>
-            <span className="normal-case tracking-normal text-gray-500 font-normal">— optional</span>
+            <span className="normal-case tracking-normal text-gray-500 font-normal">· optional</span>
           </label>
           <input
             type="text"
@@ -211,10 +211,10 @@ export const Step1: React.FC<Props> = ({
             // copy round trip when they grab the URL from their browser bar.
             onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
             className="w-full bg-gray-1000 border border-gray-800 focus:border-active rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
-            placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS — or paste the full AIOps service URL"
+            placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
           />
           <p className="text-tiny text-gray-500">
-            Enables the "Open in AIOps" deep-link on the dashboard and the per-trace "Send to AIOps" pin on the trace viewer. Find it at <code className="font-mono">https://&lt;tenant&gt;/aiops/#/entities/service/&lt;KEY&gt;?type=key</code> — paste either the key or the full URL.
+            Enables the "Open in AIOps" deep-link on the dashboard and the per-trace "Send to AIOps" pin on the trace viewer. Find it at <code className="font-mono">https://&lt;tenant&gt;/aiops/#/entities/service/&lt;KEY&gt;?type=key</code>. Paste either the key or the full URL.
           </p>
         </div>
       </div>

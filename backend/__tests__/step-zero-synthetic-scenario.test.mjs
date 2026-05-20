@@ -218,9 +218,14 @@ describe('generateTrace', () => {
     }
   });
 
-  it('cold-start spike fires on ~2% of traces (sample of 2000)', () => {
+  it('cold-start spike fires on ~2% of traces (sample of 5000)', () => {
+    // Larger sample shrinks variance so the bounds stay tight (within ~50%
+    // of expected) without being statistically flaky. At n=2000 with
+    // p=0.02, σ ≈ 6.3 and the previous `> 25` lower bound sat at ~2.4σ
+    // below mean — about a 1.6% false-positive rate per run, which made
+    // the test flake when run repeatedly in CI.
     let cold = 0;
-    for (let i = 0; i < 2000; i++) {
+    for (let i = 0; i < 5000; i++) {
       const t = generateTrace();
       let found = false;
       for (const rs of t.traces.resourceSpans) {
@@ -236,9 +241,12 @@ describe('generateTrace', () => {
       }
       if (found) cold++;
     }
-    // 2% over 2000 ~ 40. ±2σ where σ ≈ √(2000·0.02·0.98) ≈ 6.3.
-    expect(cold).toBeGreaterThan(25);
-    expect(cold).toBeLessThan(70);
+    // 2% over 5000 ~ 100. σ ≈ √(5000·0.02·0.98) ≈ 9.9.
+    // Bounds at -4σ / +5σ catch a regression of >40% in either direction
+    // (i.e. rate dropping below 1.2% or climbing above 3%), while pushing
+    // false-positive rate well below one-in-a-million.
+    expect(cold).toBeGreaterThan(60);
+    expect(cold).toBeLessThan(150);
   });
 
   it('cold-start spike makes the root span well above the outlier threshold', () => {

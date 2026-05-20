@@ -98,9 +98,9 @@ export const Layer2Synthetic: React.FC = () => {
         ) : isRunning ? (
           status?.destination === 'gateway'
             ? <>Streaming through Helix Gateway → your Helix tenant + <code>/otel-data</code></>
-            : <>Helix not configured yet — streaming to <code>/otel-data</code> only. Complete Step 1 to also reach your tenant.</>
+            : <>Helix not configured yet. Streaming to <code>/otel-data</code> only. Complete Step 1 to also reach your tenant.</>
         ) : (
-          <>60-second burst of realistic e-commerce traffic across 5 services. Eight diagnostic patterns are woven in — slow downstreams, cache misses, DB pool waits, cascading errors, N+1 queries, retry storms, cold starts, and a slow email renderer — so you can see how OTel surfaces each one.</>
+          <>60-second burst of realistic e-commerce traffic across 5 services. Eight diagnostic patterns are woven in (slow downstreams, cache misses, DB pool waits, cascading errors, N+1 queries, retry storms, cold starts, and a slow email renderer) so you can see how OTel surfaces each one.</>
         )}
       </p>
 

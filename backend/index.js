@@ -101,6 +101,7 @@ require('./routes/discovery').register(app, { docker });
 require('./routes/containers').register(app, { docker });
 require('./routes/lifecycle').register(app, { docker });
 require('./routes/step-zero/synthetic').register(app, { docker });
+require('./routes/step-zero/instrument').register(app);
 require('./routes/env').register(app);
 
 const diagnostics = require('./routes/diagnostics');

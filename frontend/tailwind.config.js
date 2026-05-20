@@ -43,14 +43,14 @@ export default {
         helix: ["'Open Sans'", "-apple-system", "BlinkMacSystemFont", "'Segoe UI'", "Roboto", "'Helvetica Neue'", "'Arial'", "sans-serif"],
       },
       fontSize: {
-        tiny: '0.6875rem',   /* 11px  --fs-tiny  */
-        sm:   '0.75rem',     /* 12px  --fs-small */
-        base: '0.875rem',    /* 14px  --fs-body  */
-        lg:   '1rem',        /* 16px  --fs-h4    */
-        h3:   '1.25rem',     /* 20px  --fs-h3    */
-        h2:   '1.5rem',      /* 24px  --fs-h2    */
-        h1:   '2rem',        /* 32px  --fs-h1    */
-        display: '2.5rem',   /* 40px  --fs-display */
+        tiny: '0.75rem',     /* 12px  --fs-tiny  */
+        sm:   '0.875rem',    /* 14px  --fs-small */
+        base: '1rem',        /* 16px  --fs-body  — matches OTel docs body */
+        lg:   '1.125rem',    /* 18px  --fs-h4    */
+        h3:   '1.375rem',    /* 22px  --fs-h3    */
+        h2:   '1.625rem',    /* 26px  --fs-h2    */
+        h1:   '2.125rem',    /* 34px  --fs-h1    */
+        display: '2.625rem', /* 42px  --fs-display */
       },
       boxShadow: {
         '1': '0 1px 2px rgba(34,36,42,0.08), 0 1px 3px rgba(34,36,42,0.06)',

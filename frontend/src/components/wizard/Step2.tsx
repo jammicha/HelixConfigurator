@@ -57,9 +57,9 @@ export const Step2: React.FC<Props> = ({
   const verifyBadge = verifyStatus === 'verifying'
     ? (<span className="inline-flex items-center gap-1 text-tiny text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Verifying…</span>)
     : verifyStatus === 'configured'
-    ? (<span className="inline-flex items-center gap-1 text-tiny text-success"><CheckCircle2 className="w-3 h-3" /> Verified — helix-gateway is wired in</span>)
+    ? (<span className="inline-flex items-center gap-1 text-tiny text-success"><CheckCircle2 className="w-3 h-3" /> Verified. helix-gateway is wired in.</span>)
     : verifyStatus === 'not-configured'
-    ? (<span className="inline-flex items-center gap-1 text-tiny text-warning"><AlertTriangle className="w-3 h-3" /> Not detected — apply the snippet and restart the collector, then re-verify</span>)
+    ? (<span className="inline-flex items-center gap-1 text-tiny text-warning"><AlertTriangle className="w-3 h-3" /> Not detected. Apply the snippet, restart the collector, then re-verify.</span>)
     : null;
 
   // After a successful smart-add apply, collapse the page to just the
@@ -96,7 +96,7 @@ export const Step2: React.FC<Props> = ({
       <div className="mb-5 p-4 bg-gray-1000 border border-active/40 rounded">
         <div className="flex items-center gap-2 mb-2">
           <Container className="w-4 h-4 text-active" />
-          <span className="text-sm font-semibold text-gray-100">Smart-add — apply automatically</span>
+          <span className="text-sm font-semibold text-gray-100">Smart-add: apply automatically</span>
           <span className="ml-auto text-tiny text-gray-500">POC</span>
         </div>
         {smartAddProposal.error ? (
@@ -126,7 +126,7 @@ export const Step2: React.FC<Props> = ({
           <>
             <p className="text-tiny text-gray-300 mb-3">
               Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
-              <span className="text-success font-semibold">Already configured</span> — <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
+              <span className="text-success font-semibold">Already configured.</span> <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
             </p>
             {onVerifyExporter && (
               <div className="flex items-center gap-2 flex-wrap">
@@ -202,9 +202,9 @@ export const Step2: React.FC<Props> = ({
       num_consumers: 100
       queue_size: 10000`} />
         <p className="text-tiny text-gray-500 -mt-4 mb-6">
-          In your main collector config (e.g. <code className="font-mono">otelcol-config.yaml</code>). No API key needed here —{' '}
+          In your main collector config (e.g. <code className="font-mono">otelcol-config.yaml</code>). No API key needed here:{' '}
           <button onClick={onOpenGatewayConfig} className="text-active hover:underline font-semibold">view gateway config to see where it's set</button>.{' '}
-          The <code className="font-mono">sending_queue</code> matches what helix-gateway uses — 100 parallel HTTP workers, 10k batch queue — so bursts don't drop.
+          The <code className="font-mono">sending_queue</code> matches what helix-gateway uses (100 parallel HTTP workers, 10k batch queue) so bursts don't drop.
         </p>
 
         <div className="mb-2 flex items-baseline justify-between gap-3">

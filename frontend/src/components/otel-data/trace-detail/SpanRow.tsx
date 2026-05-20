@@ -108,7 +108,7 @@ export const SpanRow: React.FC<{
               {logs.length > 0 && (
                 <span
                   className={`${logBadgeClass} flex-shrink-0 inline-flex items-center gap-1`}
-                  title={`${logs.length} log record${logs.length === 1 ? '' : 's'} on this span — expand to view`}
+                  title={`${logs.length} log record${logs.length === 1 ? '' : 's'} on this span. Expand to view.`}
                 >
                   <FileText className="w-2.5 h-2.5" />{logs.length}
                 </span>
@@ -184,7 +184,7 @@ export const SpanRow: React.FC<{
               <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold mb-1">Query</div>
               <pre className="bg-gray-1000 border border-gray-800 rounded p-2 text-tiny text-gray-200 font-mono whitespace-pre-wrap break-all" style={{ fontFamily: "'Source Code Pro', monospace" }}>{dbStatement}</pre>
               {isSlowDb && (
-                <div className="mt-1 text-tiny text-warning">⚠ This DB span is slow (&gt; 1 s) — consider an index, batching, or caching.</div>
+                <div className="mt-1 text-tiny text-warning">⚠ This DB span is slow (&gt; 1 s). Consider an index, batching, or caching.</div>
               )}
             </div>
           ) : dbSystem && (
@@ -220,7 +220,7 @@ export const SpanRow: React.FC<{
                 No <code className="font-mono">db.statement</code> / <code className="font-mono">db.query.text</code> captured by this client. Common with Redis/Valkey, .NET, and Mongo SDKs that omit raw commands for performance or PII reasons. The full attribute set is below.
               </div>
               {isSlowDb && (
-                <div className="mt-1 text-tiny text-warning">⚠ This DB span is slow (&gt; 1 s) — consider an index, batching, or caching.</div>
+                <div className="mt-1 text-tiny text-warning">⚠ This DB span is slow (&gt; 1 s). Consider an index, batching, or caching.</div>
               )}
             </div>
           )}

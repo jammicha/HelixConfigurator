@@ -557,7 +557,7 @@ const App = () => {
         body: JSON.stringify({ containerName: connectedApp })
       }).catch(console.error);
     } else {
-      setLogs(prev => [...prev.slice(-100), 'No service attached — streaming gateway logs.']);
+      setLogs(prev => [...prev.slice(-100), 'No service attached. Streaming gateway logs.']);
       const source = new EventSource('/api/diagnostics/logs/stream');
       source.onmessage = onMsg;
       source.onopen = onOpen;
@@ -605,7 +605,7 @@ const App = () => {
       setConfig(data.content || '');
       clearEditorMarkers();
       setIsTemplatesOpen(false);
-      showToastMsg('Template loaded — review and click Save Config to apply');
+      showToastMsg('Template loaded. Review and click Save Config to apply.');
     } catch {
       showToastMsg('Failed to load template', 'error');
     } finally {
@@ -724,7 +724,7 @@ const App = () => {
         // Collector rejected the new YAML. Backend restored the previous version
         // and bounced the gateway back to a healthy state — surface the actual
         // error so the user can fix it without leaving a broken pipeline.
-        showToastMsg(`Config rejected — rolled back. ${data.details || ''}`, 'error');
+        showToastMsg(`Config rejected, rolled back. ${data.details || ''}`, 'error');
         pushTimelineEvent('error-spike', `Config rejected: ${data.details || data.error}`);
         // Reload the actual on-disk content (which is now the previous good version)
         // so the editor reflects what the gateway is running.
@@ -768,7 +768,7 @@ const App = () => {
       }
 
       // Bounce gateway so the new endpoint/key/source actually take effect
-      showToastMsg('Settings saved — restarting gateway...');
+      showToastMsg('Settings saved. Restarting gateway...');
       const restartRes = await fetch('/api/lifecycle/restart', { method: 'POST' });
       if (!restartRes.ok) {
         showToastMsg('Settings saved, but gateway restart failed', 'error');
@@ -1167,7 +1167,7 @@ const App = () => {
       const res = await fetch('/api/diagnostics/metrics/live');
       const data = await res.json();
       if (data.sent > 0) {
-        showToastMsg(`Telemetry flowing — ${data.sent} sent, ${data.received} received`);
+        showToastMsg(`Telemetry flowing: ${data.sent} sent, ${data.received} received`);
       } else {
         showToastMsg('No telemetry data flowing yet', 'error');
       }
@@ -1231,15 +1231,15 @@ BUSINESS_SERVICE_KEY: ${envVars.BUSINESS_SERVICE_KEY ? '(set)' : '(unset)'}
 Container: ${statusData.status || 'unknown'}
 
 [Diagnostic Checks]
-Collector Configuration: ${collectorDiag.status}${collectorDiag.error ? ' — ' + collectorDiag.error : ''}
-X-API Key Format: ${apiKeyDiag.status}${apiKeyDiag.error ? ' — ' + apiKeyDiag.error : ''}
+Collector Configuration: ${collectorDiag.status}${collectorDiag.error ? ' - ' + collectorDiag.error : ''}
+X-API Key Format: ${apiKeyDiag.status}${apiKeyDiag.error ? ' - ' + apiKeyDiag.error : ''}
 X-Source Format: ${envVars.X_SOURCE ? 'PASS' : 'FAIL'}
-Tenant URL Endpoint: ${networkDiag.status}${networkDiag.error ? ' — ' + networkDiag.error : ''}
+Tenant URL Endpoint: ${networkDiag.status}${networkDiag.error ? ' - ' + networkDiag.error : ''}
 
-[Live Metrics — current]
+[Live Metrics - current]
 Received: ${liveMetrics.received}, Sent: ${liveMetrics.sent}, Failed: ${liveMetrics.failed}
 
-[Rate History — last ${metricsHistory.length} samples (~3s each)]
+[Rate History - last ${metricsHistory.length} samples (~3s each)]
 ${renderRateHistory()}
 
 [Session Timeline]
@@ -1632,7 +1632,7 @@ ${logsData.logs || '(no logs available)'}
 
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
           {!isSetupComplete ? (
-            <div className="max-w-4xl mx-auto mt-12 space-y-6">
+            <div className="max-w-5xl mx-auto mt-12 space-y-6">
               <h1 className="text-2xl font-semibold text-center text-gray-100">Welcome to Helix Configurator</h1>
 
               <Stepper current={setupStep} onJump={setSetupStep} />
@@ -1961,7 +1961,7 @@ ${logsData.logs || '(no logs available)'}
                           value={envVars.BUSINESS_SERVICE_KEY}
                           onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
                           className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
-                          placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS — or paste the full AIOps service URL"
+                          placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
                         />
                       </div>
                     </div>
@@ -1982,7 +1982,7 @@ ${logsData.logs || '(no logs available)'}
                       ) : (
                         <>
                           <span className="text-warning">Open (no password)</span>
-                          <span className="text-gray-500">— set <span className="font-mono text-gray-300">UI_AUTH_PASSWORD</span> in <span className="font-mono text-gray-300">.env</span> and restart to require sign-in.</span>
+                          <span className="text-gray-500">Set <span className="font-mono text-gray-300">UI_AUTH_PASSWORD</span> in <span className="font-mono text-gray-300">.env</span> and restart to require sign-in.</span>
                         </>
                       )}
                     </div>
@@ -2099,7 +2099,7 @@ ${logsData.logs || '(no logs available)'}
                           <button
                             onClick={() => setSseAttempt(n => n + 1)}
                             className="flex items-center gap-1.5 bg-warning/15 border border-warning/40 text-warning px-2 py-0.5 rounded text-tiny font-semibold uppercase tracking-wider hover:bg-warning/25"
-                            title="Log stream disconnected — click to reconnect"
+                            title="Log stream disconnected. Click to reconnect."
                           >
                             <span className="w-1.5 h-1.5 rounded-full bg-warning"></span>
                             Reconnect
@@ -2110,7 +2110,7 @@ ${logsData.logs || '(no logs available)'}
                             className="flex items-center gap-2 bg-[#f5bcc6]/20 border border-danger/40 text-danger px-3 py-1 rounded text-tiny font-semibold uppercase tracking-wide"
                             title="Counted from log lines containing 'sending queue is full', 'exporting failed', 'connection refused', or 'deadline exceeded' in the streamed container."
                           >
-                            <span className="font-bold">!</span> Drop events in logs — check network or queue limits
+                            <span className="font-bold">!</span> Drop events in logs. Check network or queue limits.
                             {diagAlertCount > 1 && (
                               <span className="bg-danger text-white px-1.5 rounded-full text-[10px]">{diagAlertCount}</span>
                             )}

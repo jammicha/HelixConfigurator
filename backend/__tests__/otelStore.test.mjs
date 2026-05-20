@@ -165,4 +165,5 @@ describe('OtelStore', () => {
       expect(ops500[0].slow_count).toBe(2);
     });
   });
+
 });

@@ -44,7 +44,7 @@ export const InsightsPanel: React.FC<Props> = ({ findings, loading }) => {
       <div className="flex items-center gap-2 mb-2">
         <Sparkles className="w-3.5 h-3.5" style={{ color: '#f86e00' }} />
         <span className="text-tiny font-semibold text-gray-300 uppercase tracking-wider">Insights</span>
-        <span className="text-tiny text-gray-500 normal-case tracking-normal font-normal">— window-over-window anomaly findings</span>
+        <span className="text-tiny text-gray-500 normal-case tracking-normal font-normal">· window-over-window anomaly findings</span>
       </div>
       {loading && effectiveFindings.length === 0 ? (
         <div className="text-tiny text-gray-500">Analyzing recent traces…</div>

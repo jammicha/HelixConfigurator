@@ -48,7 +48,7 @@ export const TabButton: React.FC<{
               if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onErrorCountClick(); }
             }}
             className={`${pillClass('danger')} cursor-pointer hover:bg-danger/30`}
-            title="Errors — click to open Errors sub-tab"
+            title="Errors. Click to open the Errors sub-tab."
           >{errorCount}</span>
         ) : (
           <span className={pillClass('danger')} title="Errors">{errorCount}</span>

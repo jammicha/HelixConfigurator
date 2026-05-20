@@ -142,7 +142,7 @@ export const TraceDetailDrawer: React.FC<{
                   title={alreadySent
                     ? `Already sent at ${new Date(priorSend!.sentAt).toLocaleTimeString()} as ${priorSend!.severity}.`
                     : isAnomalous
-                      ? 'This trace is flagged as anomalous — sending it as an AIOps event will surface it for correlation.'
+                      ? 'This trace is flagged as anomalous. Sending it as an AIOps event will surface it for correlation.'
                       : 'Send this trace as an event to AIOps. Correlation policies on your tenant decide how it groups into a Situation.'}
                   className={`inline-flex items-center gap-2 px-3 py-1.5 rounded text-tiny font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
                     alreadySent
@@ -161,8 +161,8 @@ export const TraceDetailDrawer: React.FC<{
                     : <BmcChevron className="h-4 w-auto" />}
                   {sendState === 'sending' ? 'Sending…'
                     : sendState === 'sent' ? 'Sent to AIOps'
-                    : sendState === 'error' ? 'Send failed — retry'
-                    : alreadySent ? 'Sent — send again?'
+                    : sendState === 'error' ? 'Send failed (retry)'
+                    : alreadySent ? 'Sent. Send again?'
                     : isAnomalous ? 'Send anomaly to AIOps' : 'Send to AIOps as event'}
                 </button>
                 {(sendMsg || alreadySent || attempts.length > 0) && (
@@ -179,7 +179,7 @@ export const TraceDetailDrawer: React.FC<{
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-0.5 text-active hover:text-[#a5baff]"
-                            title="Open the AIOps console — find your event in the Situations list (precise event-detail URL refines once validated)"
+                            title="Open the AIOps console. Find your event in the Situations list (precise event-detail URL refines once validated)."
                           >
                             Open AIOps <ExternalLink className="w-3 h-3" />
                           </a>
@@ -195,7 +195,7 @@ export const TraceDetailDrawer: React.FC<{
                           {attempts.map((a, i) => (
                             <li key={i} className={a.ok ? 'text-gray-400' : 'text-danger'}>
                               <span className="text-gray-500">{formatRelative(a.at)}</span>
-                              {' — '}
+                              {' · '}
                               {a.ok ? `sent as ${a.severity || 'EVENT'}` : (a.error || 'failed')}
                             </li>
                           ))}
