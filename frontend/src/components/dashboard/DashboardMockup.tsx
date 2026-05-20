@@ -329,13 +329,15 @@ const Collapsible: React.FC<{ title: string; icon: React.ReactNode }> = ({ title
 };
 
 const OpenInHelix: React.FC = () => (
-  <div className="flex items-center gap-2 flex-wrap text-sm">
-    <span className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Open in Helix:</span>
-    <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">OTel dashboard <ExternalLink className="w-3.5 h-3.5" /></a>
-    <span className="text-gray-700">·</span>
-    <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">AIOps service <ExternalLink className="w-3.5 h-3.5" /></a>
-    <span className="text-gray-700">·</span>
-    <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">Application UI <ExternalLink className="w-3.5 h-3.5" /></a>
+  <div className="adapt-card">
+    <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-3">Open in Helix</div>
+    <div className="flex items-center gap-2 flex-wrap text-sm">
+      <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">OTel dashboard <ExternalLink className="w-3.5 h-3.5" /></a>
+      <span className="text-gray-700">·</span>
+      <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">AIOps service <ExternalLink className="w-3.5 h-3.5" /></a>
+      <span className="text-gray-700">·</span>
+      <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">Application UI <ExternalLink className="w-3.5 h-3.5" /></a>
+    </div>
   </div>
 );
 
@@ -472,11 +474,11 @@ export const DashboardMockup: React.FC = () => {
           <p className="text-base text-gray-400">Operational dashboard for the gateway and your telemetry pipeline.</p>
         </header>
 
-        {/* TOP — always-visible status */}
+        {/* Pipeline status banner — always-visible "is this thing working?" */}
         <PipelineBanner status={pipeline} detail={pipelineDetail} />
-        <SystemHealth />
 
-        {/* MIDDLE — common-use */}
+        {/* Health + day-to-day operations */}
+        <SystemHealth />
         <QuickActions
           feedback={feedback}
           onDismissFeedback={() => setFeedback(null)}
@@ -488,14 +490,15 @@ export const DashboardMockup: React.FC = () => {
           services={services}
           busy={busy}
         />
-        <RecentServices />
-        <LogsPanelStub />
+        <OpenInHelix />
 
-        {/* BOTTOM — power-use collapsibles */}
+        {/* Configuration (collapsed by default) */}
         <Collapsible title="Helix Connection Settings" icon={<Settings className="w-4 h-4 text-gray-500" />} />
         <Collapsible title="Gateway Config (YAML)" icon={<Settings className="w-4 h-4 text-gray-500" />} />
 
-        <OpenInHelix />
+        {/* Telemetry detail */}
+        <RecentServices />
+        <LogsPanelStub />
       </main>
     </div>
   );
