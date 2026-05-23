@@ -1,5 +1,6 @@
 import React from 'react';
 import { CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { SyntheticRunCompact } from '../step-zero/SyntheticRunCompact';
 
 type SystemHealth = {
   gatewayStatus: 'running' | 'restarting' | 'exited' | 'unknown' | 'error';
@@ -10,7 +11,18 @@ type SystemHealth = {
 
 type PipelineStatus = 'receiving' | 'degraded' | 'broken';
 
-const deriveStatus = (h: SystemHealth | null): { status: PipelineStatus; headline: string; detail: string } => {
+// `showSyntheticRun` flags the one state where the inline "Run demo
+// scenario" CTA makes sense — gateway is healthy, no traffic yet. In every
+// other state the user either has traffic (no need for demo data) or a
+// real problem to fix first (don't paper over it with synthetic data).
+type DerivedStatus = {
+  status: PipelineStatus;
+  headline: string;
+  detail: string;
+  showSyntheticRun?: boolean;
+};
+
+const deriveStatus = (h: SystemHealth | null): DerivedStatus => {
   if (!h) return { status: 'degraded', headline: 'Checking pipeline…', detail: 'Loading health data.' };
 
   if (h.gatewayStatus === 'exited' || h.gatewayStatus === 'error') {
@@ -38,7 +50,8 @@ const deriveStatus = (h: SystemHealth | null): { status: PipelineStatus; headlin
     return {
       status: 'receiving',
       headline: 'Ready to receive telemetry.',
-      detail: 'No traffic yet. Try the synthetic scenario on /step-zero, or instrument an app.',
+      detail: 'No traffic yet. Run the demo scenario to populate your dashboards with realistic data, or instrument an app.',
+      showSyntheticRun: true,
     };
   }
 
@@ -77,7 +90,7 @@ type Props = { health: SystemHealth | null };
 
 export const PipelineStatusBanner: React.FC<Props> = ({ health }) => {
   const loading = !health;
-  const { status, headline, detail } = deriveStatus(health);
+  const { status, headline, detail, showSyntheticRun } = deriveStatus(health);
   const style = STYLES[status];
   return (
     <div className={`rounded-lg border p-4 flex items-start gap-3 ${style.bg}`}>
@@ -85,6 +98,11 @@ export const PipelineStatusBanner: React.FC<Props> = ({ health }) => {
       <div className="flex-1 min-w-0">
         <div className="text-lg font-semibold text-gray-100">{headline}</div>
         <div className="text-base text-gray-300 mt-0.5">{detail}</div>
+        {showSyntheticRun && (
+          <div className="mt-3">
+            <SyntheticRunCompact />
+          </div>
+        )}
       </div>
     </div>
   );

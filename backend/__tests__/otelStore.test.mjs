@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 // otelStore.js is CommonJS (module.exports). createRequire bridges to it
 // from this .mjs test file so we don't have to rewrite the source.
 const require = createRequire(import.meta.url);
-const { OtelStore } = require('../otelStore');
+const { OtelStore, extractSpans } = require('../otelStore');
 
 const makeSpan = (overrides = {}) => {
   const start = overrides.startTimeNs ?? 1_000_000_000;
@@ -198,6 +198,128 @@ describe('recentThroughput', () => {
     store.ingestSpans(buildSpans(2, 't-new'));
     const r = store.recentThroughput(60 * 60 * 1000);
     expect(r.totalSpans).toBe(2);
+  });
+});
+
+// Minimal OTLP TracesData fixture builder. Just enough structure to exercise
+// the resource-attr extraction path; we don't need full attribute parity with
+// real exporter output for these assertions.
+const makeOtlpBody = ({ traceId = 't1', spanId = 's1', resourceAttrs = {} } = {}) => ({
+  resourceSpans: [{
+    resource: {
+      attributes: Object.entries(resourceAttrs).map(([key, value]) => ({
+        key,
+        value: { stringValue: String(value) },
+      })),
+    },
+    scopeSpans: [{
+      spans: [{
+        traceId,
+        spanId,
+        name: 'op',
+        kind: 1,
+        startTimeUnixNano: 1_000_000_000,
+        endTimeUnixNano: 1_100_000_000,
+        status: { code: 1 },
+      }],
+    }],
+  }],
+});
+
+describe('resource-attr ingest extraction', () => {
+  it('lifts service.namespace and container.name off resource attrs', () => {
+    const [span] = extractSpans(makeOtlpBody({
+      resourceAttrs: {
+        'service.name': 'cart-api',
+        'service.namespace': 'ecommerce-prod',
+        'container.name': 'cart-api-7d4f',
+      },
+    }));
+    expect(span.serviceName).toBe('cart-api');
+    expect(span.serviceNamespace).toBe('ecommerce-prod');
+    expect(span.containerName).toBe('cart-api-7d4f');
+  });
+
+  it('falls back to k8s.container.name when container.name is absent', () => {
+    const [span] = extractSpans(makeOtlpBody({
+      resourceAttrs: {
+        'service.name': 'cart-api',
+        'k8s.container.name': 'cart-api-pod',
+      },
+    }));
+    expect(span.containerName).toBe('cart-api-pod');
+  });
+
+  it('leaves namespace/container as null when not present', () => {
+    const [span] = extractSpans(makeOtlpBody({
+      resourceAttrs: { 'service.name': 'cart-api' },
+    }));
+    expect(span.serviceNamespace).toBeNull();
+    expect(span.containerName).toBeNull();
+  });
+});
+
+describe('namespace/container filtering', () => {
+  let store;
+  beforeEach(() => { vi.useFakeTimers(); store = new OtelStore({ dbPath: ':memory:' }); });
+  afterEach(() => { store.stopMaintenance(); store.db.close(); vi.useRealTimers(); });
+
+  const ingestWithAttrs = ({ traceId, serviceName, namespace, container }) => {
+    store.ingestSpans([{
+      traceId,
+      spanId: `${traceId}-root`,
+      parentSpanId: '',
+      serviceName,
+      serviceNamespace: namespace ?? null,
+      containerName: container ?? null,
+      name: 'op',
+      kind: 1,
+      startTimeNs: 1_000_000_000,
+      endTimeNs: 1_100_000_000,
+      durationMs: 100,
+      statusCode: 0,
+      statusMessage: '',
+      attributes: {},
+      events: [],
+    }]);
+  };
+
+  it('listTraces filters by namespace', () => {
+    ingestWithAttrs({ traceId: 'ta', serviceName: 'cart-api', namespace: 'prod' });
+    ingestWithAttrs({ traceId: 'tb', serviceName: 'cart-api', namespace: 'staging' });
+    ingestWithAttrs({ traceId: 'tc', serviceName: 'cart-api' });
+
+    const prod = store.listTraces({ namespace: 'prod' }).map(t => t.trace_id);
+    expect(prod).toEqual(['ta']);
+
+    // Unfiltered returns all three.
+    expect(store.listTraces({}).map(t => t.trace_id).sort()).toEqual(['ta', 'tb', 'tc']);
+  });
+
+  it('listTraces filters by container', () => {
+    ingestWithAttrs({ traceId: 'ta', serviceName: 'cart-api', container: 'cart-a' });
+    ingestWithAttrs({ traceId: 'tb', serviceName: 'cart-api', container: 'cart-b' });
+
+    const filtered = store.listTraces({ container: 'cart-b' }).map(t => t.trace_id);
+    expect(filtered).toEqual(['tb']);
+  });
+
+  it('listTraces composes service + namespace as AND', () => {
+    ingestWithAttrs({ traceId: 'ta', serviceName: 'cart-api', namespace: 'prod' });
+    ingestWithAttrs({ traceId: 'tb', serviceName: 'inventory', namespace: 'prod' });
+
+    const filtered = store.listTraces({ service: 'cart-api', namespace: 'prod' }).map(t => t.trace_id);
+    expect(filtered).toEqual(['ta']);
+  });
+
+  it('listFilterValues returns distinct non-null values', () => {
+    ingestWithAttrs({ traceId: 'ta', serviceName: 'cart-api', namespace: 'prod', container: 'cart-a' });
+    ingestWithAttrs({ traceId: 'tb', serviceName: 'inventory', namespace: 'prod', container: 'inv-a' });
+    ingestWithAttrs({ traceId: 'tc', serviceName: 'shipping' /* no namespace, no container */ });
+
+    const { namespaces, containers } = store.listFilterValues();
+    expect(namespaces).toEqual(['prod']);
+    expect(containers.sort()).toEqual(['cart-a', 'inv-a']);
   });
 });
 

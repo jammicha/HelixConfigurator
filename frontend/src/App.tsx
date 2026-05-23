@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Editor, { useMonaco } from '@monaco-editor/react';
 import { Check, Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
@@ -89,7 +89,6 @@ const App = () => {
   // Discovered Services State
   const [isServicesOpen, setIsServicesOpen] = useState(false);
   const [discoveredContainers, setDiscoveredContainers] = useState<any[]>([]);
-  const [helixConfig, setHelixConfig] = useState({ baseUrl: '', tenantId: '', source: '', businessServiceKey: '' });
   const [loadingContainers, setLoadingContainers] = useState<Set<string>>(new Set());
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -150,6 +149,17 @@ const App = () => {
     APP_URL: '',
     BUSINESS_SERVICE_KEY: ''
   });
+
+  // Derived from envVars so deep-link targets (View Service Dashboard, OTel
+  // namespace overview, AIOps service link) reflect the user's current tenant
+  // immediately after onboarding — without depending on a follow-up
+  // /api/services refresh that some code paths forget to trigger.
+  const helixConfig = useMemo(() => ({
+    baseUrl: (envVars.HELIX_ENDPOINT || '').replace(/\/$/, ''),
+    tenantId: (envVars.HELIX_API_KEY || '').split('::')[0] || '',
+    source: envVars.X_SOURCE || '',
+    businessServiceKey: envVars.BUSINESS_SERVICE_KEY || '',
+  }), [envVars.HELIX_ENDPOINT, envVars.HELIX_API_KEY, envVars.X_SOURCE, envVars.BUSINESS_SERVICE_KEY]);
 
   const [testConnectionResult, setTestConnectionResult] = useState<{ status: string; message: string; remediation?: string; httpStatus?: number; latencyMs?: number } | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -949,8 +959,6 @@ const App = () => {
     setSetupError('');
     setTraceVerifyResult(null);
     setTelemetryStatus('idle');
-    // Clear tokens before re-initialization to prevent stale link generation
-    setHelixConfig({ baseUrl: '', tenantId: '', source: '', businessServiceKey: '' });
 
     try {
       // Save keys
@@ -1027,6 +1035,15 @@ const App = () => {
       const data = await res.json().catch(() => ({}));
       setAttachResult({ network, ok: res.ok, message: data.message || data.error || 'Done' });
       if (res.ok) {
+        // Optimistically flip the row's "bridged" flag so the success toast
+        // and the row badge agree immediately. Without this, refreshDetectedCollectors
+        // is fire-and-forget — React paints one frame where the toast says
+        // "Attached…" while the row still shows NOT BRIDGED + the ATTACH button,
+        // which reads as a contradiction. The backend refresh overwrites this
+        // with authoritative state a moment later.
+        setDetectedCollectors(prev => prev.map(c =>
+          c.networks.includes(network) ? { ...c, sharesNetworkWithSidecar: true } : c
+        ));
         refreshDetectedCollectors();
         // If smart-add deferred a customer-collector restart (because the
         // gateway wasn't yet on a network this collector could reach), the
@@ -1455,10 +1472,6 @@ ${logsData.logs || '(no logs available)'}
   };
 
   const fetchDiscoveredData = () => {
-    fetch('/api/services')
-      .then(res => res.json())
-      .then(data => { if (!data.error) setHelixConfig(data); })
-      .catch(console.error);
     fetch('/api/containers/full')
       .then(res => res.json())
       .then(data => { if (Array.isArray(data)) setDiscoveredContainers(data); })
@@ -1920,7 +1933,7 @@ ${logsData.logs || '(no logs available)'}
 
                         if (title === 'Collector Configuration') {
                           isPass = collectorDiag.status === 'PASS';
-                          isChecking = collectorDiag.status === 'unknown';
+                          isChecking = collectorDiag.status === 'unknown' || collectorDiag.status === 'CHECKING';
                           subDetail = collectorDiag.error || '';
                           remediation = collectorDiag.remediation || '';
                         }
@@ -1951,10 +1964,17 @@ ${logsData.logs || '(no logs available)'}
                                   Pass
                                 </span>
                               ) : isChecking ? (
-                                <span className="flex items-center gap-2 px-3 py-1 uppercase tracking-wider text-xs font-semibold text-gray-400 bg-gray-800 border border-gray-700 rounded">
-                                  <Loader2 className="w-3 h-3 animate-spin" />
-                                  Checking
-                                </span>
+                                <div className="flex flex-col items-center gap-2">
+                                  <span className="flex items-center gap-2 px-3 py-1 uppercase tracking-wider text-xs font-semibold text-gray-400 bg-gray-800 border border-gray-700 rounded">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Checking
+                                  </span>
+                                  {subDetail && (
+                                    <span className="text-[10px] text-gray-400 font-medium text-center leading-tight">
+                                      {subDetail}
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <div className="flex flex-col items-center gap-2">
                                   <span className="adapt-badge-danger px-3 py-1 uppercase tracking-wider">

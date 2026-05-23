@@ -5,9 +5,18 @@
 // service-map graph construction, insight rules) lives there.
 
 function register(app, { otelStore, docker }) {
+  // Pull the three resource-level filters off the query string in one place
+  // so every endpoint that supports them stays in sync. typeof checks tolerate
+  // express's variadic query parser (a duplicated key becomes string[]).
+  const readResourceFilters = (q) => ({
+    service: typeof q.service === 'string' && q.service ? q.service : undefined,
+    namespace: typeof q.namespace === 'string' && q.namespace ? q.namespace : undefined,
+    container: typeof q.container === 'string' && q.container ? q.container : undefined,
+  });
+
   app.get('/api/traces', (req, res) => {
-    const { service, sinceMs, untilMs, limit, q } = req.query;
-    const svc = typeof service === 'string' && service ? service : undefined;
+    const { sinceMs, untilMs, limit, q } = req.query;
+    const { service: svc, namespace, container } = readResourceFilters(req.query);
     const since = sinceMs ? Number(sinceMs) : undefined;
     const until = untilMs ? Number(untilMs) : undefined;
     const query = typeof q === 'string' && q ? q : undefined;
@@ -19,6 +28,8 @@ function register(app, { otelStore, docker }) {
     const clampedLimit = Math.min(500, Math.max(1, Number.isFinite(requested) ? requested : 200));
     const traces = otelStore.listTraces({
       service: svc,
+      namespace,
+      container,
       sinceMs: since,
       untilMs: until,
       q: query,
@@ -31,9 +42,21 @@ function register(app, { otelStore, docker }) {
     res.json({ services: otelStore.listServices() });
   });
 
+  // Distinct values for the namespace/container filter dropdowns. Kept
+  // alongside /services so the page can fetch all three lists with one
+  // round-trip (we'll batch on the client). Lifetime values — see
+  // listFilterValues for why we don't window.
+  app.get('/api/traces/filter-values', (req, res) => {
+    res.json(otelStore.listFilterValues());
+  });
+
   app.get('/api/traces/errors', (req, res) => {
-    const { limit } = req.query;
-    res.json({ errors: otelStore.listErrors({ limit: limit ? Number(limit) : 200 }) });
+    const { limit, sinceMs, untilMs } = req.query;
+    res.json({ errors: otelStore.listErrors({
+      sinceMs: sinceMs ? Number(sinceMs) : undefined,
+      untilMs: untilMs ? Number(untilMs) : undefined,
+      limit: limit ? Number(limit) : 200,
+    }) });
   });
 
   // SSE event capture + fan-out. The ring buffer survives the brief gap
@@ -122,11 +145,14 @@ function register(app, { otelStore, docker }) {
   // Item 8: per-(service, root_operation) aggregates for the Operations tab.
   app.get('/api/operations', (req, res) => {
     const { sinceMs, untilMs, slowThresholdMs } = req.query;
+    const { namespace, container } = readResourceFilters(req.query);
     res.json({
       operations: otelStore.listOperations({
         sinceMs: sinceMs ? Number(sinceMs) : undefined,
         untilMs: untilMs ? Number(untilMs) : undefined,
         slowThresholdMs: slowThresholdMs ? Number(slowThresholdMs) : undefined,
+        namespace,
+        container,
       }),
     });
   });
@@ -153,11 +179,14 @@ function register(app, { otelStore, docker }) {
   // errors. Service filter narrows the trace pool consistently with the rest
   // of the Traces API.
   app.get('/api/overview', async (req, res) => {
-    const { sinceMs, untilMs, service } = req.query;
+    const { sinceMs, untilMs } = req.query;
+    const { service, namespace, container } = readResourceFilters(req.query);
     const payload = otelStore.overview({
       sinceMs: sinceMs ? Number(sinceMs) : undefined,
       untilMs: untilMs ? Number(untilMs) : undefined,
-      service: typeof service === 'string' && service ? service : undefined,
+      service,
+      namespace,
+      container,
     });
     payload.annotations = await buildGatewayRestartAnnotations(payload.windowMs);
     res.json(payload);
@@ -169,13 +198,14 @@ function register(app, { otelStore, docker }) {
   // and service map. Replaces six separate fetches the frontend was firing in
   // lockstep on every refresh tick.
   app.get('/api/overview-bundle', async (req, res) => {
-    const { sinceMs, untilMs, buckets, service, slowThresholdMs } = req.query;
+    const { sinceMs, untilMs, buckets, slowThresholdMs } = req.query;
+    const { service: svc, namespace, container } = readResourceFilters(req.query);
     const since = sinceMs ? Number(sinceMs) : undefined;
     const until = untilMs ? Number(untilMs) : undefined;
-    const svc = typeof service === 'string' && service ? service : undefined;
     const slow = slowThresholdMs ? Number(slowThresholdMs) : undefined;
     const bucketCount = buckets ? Number(buckets) : 60;
-    const tracesHist = otelStore.tracesHistogram({ sinceMs: since, untilMs: until, buckets: bucketCount, service: svc, slowThresholdMs: slow });
+    const filters = { service: svc, namespace, container };
+    const tracesHist = otelStore.tracesHistogram({ sinceMs: since, untilMs: until, buckets: bucketCount, ...filters, slowThresholdMs: slow });
     // Prior window = same-duration window immediately preceding the requested one.
     let priorTracesHist = null;
     if (since != null && until != null) {
@@ -184,18 +214,18 @@ function register(app, { otelStore, docker }) {
         sinceMs: since - span,
         untilMs: until - span,
         buckets: bucketCount,
-        service: svc,
+        ...filters,
         slowThresholdMs: slow,
       });
     }
-    const overview = otelStore.overview({ sinceMs: since, untilMs: until, service: svc });
+    const overview = otelStore.overview({ sinceMs: since, untilMs: until, ...filters });
     const logsHist = otelStore.logsHistogram({ sinceMs: since, untilMs: until, buckets: bucketCount });
     const heatmap = otelStore.latencyHeatmap({
       sinceMs: since, untilMs: until,
       timeBuckets: 48, durationBuckets: 12,
-      service: svc,
+      ...filters,
     });
-    const insights = otelStore.insights({ sinceMs: since, untilMs: until, service: svc });
+    const insights = otelStore.insights({ sinceMs: since, untilMs: until, ...filters });
     const serviceMap = otelStore.serviceMap({ sinceMs: since, untilMs: until });
 
     const annotations = await buildGatewayRestartAnnotations(overview.windowMs);
@@ -225,36 +255,45 @@ function register(app, { otelStore, docker }) {
   // short plain-English findings comparing current window vs prior. Backend
   // is intentionally simple (thresholded comparisons), not LLM-driven.
   app.get('/api/insights', (req, res) => {
-    const { sinceMs, untilMs, service } = req.query;
+    const { sinceMs, untilMs } = req.query;
+    const { service, namespace, container } = readResourceFilters(req.query);
     res.json(otelStore.insights({
       sinceMs: sinceMs ? Number(sinceMs) : undefined,
       untilMs: untilMs ? Number(untilMs) : undefined,
-      service: typeof service === 'string' && service ? service : undefined,
+      service,
+      namespace,
+      container,
     }));
   });
 
   // 2-D heatmap: traces binned by (time, duration). Duration axis log-scaled
   // to keep the slow tail readable next to the fast bulk.
   app.get('/api/traces/latency-heatmap', (req, res) => {
-    const { sinceMs, untilMs, timeBuckets, durationBuckets, service } = req.query;
+    const { sinceMs, untilMs, timeBuckets, durationBuckets } = req.query;
+    const { service, namespace, container } = readResourceFilters(req.query);
     res.json(otelStore.latencyHeatmap({
       sinceMs: sinceMs ? Number(sinceMs) : undefined,
       untilMs: untilMs ? Number(untilMs) : undefined,
       timeBuckets: timeBuckets ? Number(timeBuckets) : undefined,
       durationBuckets: durationBuckets ? Number(durationBuckets) : undefined,
-      service: typeof service === 'string' && service ? service : undefined,
+      service,
+      namespace,
+      container,
     }));
   });
 
   // Time-binned aggregates for the timeline chart on the Traces tab. Each bucket
   // reports total / ok / slow / error counts plus p50 + p95 duration in ms.
   app.get('/api/traces/histogram', (req, res) => {
-    const { sinceMs, untilMs, buckets, service, slowThresholdMs } = req.query;
+    const { sinceMs, untilMs, buckets, slowThresholdMs } = req.query;
+    const { service, namespace, container } = readResourceFilters(req.query);
     res.json(otelStore.tracesHistogram({
       sinceMs: sinceMs ? Number(sinceMs) : undefined,
       untilMs: untilMs ? Number(untilMs) : undefined,
       buckets: buckets ? Number(buckets) : undefined,
-      service: typeof service === 'string' && service ? service : undefined,
+      service,
+      namespace,
+      container,
       slowThresholdMs: slowThresholdMs ? Number(slowThresholdMs) : undefined,
     }));
   });
@@ -270,12 +309,13 @@ function register(app, { otelStore, docker }) {
   });
 
   app.get('/api/logs', (req, res) => {
-    const { severity, q, sinceMs, limit } = req.query;
+    const { severity, q, sinceMs, untilMs, limit } = req.query;
     res.json({
       logs: otelStore.listLogs({
         severity,
         q,
         sinceMs: sinceMs ? Number(sinceMs) : undefined,
+        untilMs: untilMs ? Number(untilMs) : undefined,
         limit: limit ? Number(limit) : undefined,
       }),
     });

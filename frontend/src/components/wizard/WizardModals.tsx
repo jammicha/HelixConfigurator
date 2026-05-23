@@ -132,6 +132,29 @@ export const SmartAddPreviewModal: React.FC<SmartAddPreviewModalProps> = ({
         </header>
         <div className="px-5 py-3 text-tiny text-gray-400 border-b border-gray-800 bg-gray-1000">
           Adding <code className="font-mono text-gray-200">{exporterName}</code> and wiring it into <strong className="text-gray-200">{(proposal.addedToPipelines || []).join(', ') || '(no pipelines)'}</strong>. Highlighted lines are what will change. The current file is backed up as <code className="font-mono">.helix-bak</code> in the container.
+          {(() => {
+            // Smart-add only extends pipelines that already exist (see
+            // proposeCollectorMerge in backend/routes/discovery.js). Without
+            // this hint, users wonder "why didn't it touch logs/metrics?" —
+            // the answer is upstream, not in us: the collector doesn't define
+            // those pipelines, and inventing one without the right receivers
+            // would either fail startup or ship nothing.
+            const standardSignals = ['traces', 'metrics', 'logs'] as const;
+            const existing = proposal.existingPipelines || [];
+            if (existing.length === 0) return null;
+            const missing = standardSignals.filter(s => !existing.includes(s));
+            if (missing.length === 0) return null;
+            return (
+              <div className="mt-1.5 text-tiny text-gray-500">
+                This collector doesn't define {missing.map((s, i) => (
+                  <React.Fragment key={s}>
+                    {i > 0 ? (i === missing.length - 1 ? ' or ' : ', ') : ''}
+                    <code className="font-mono text-gray-400">{s}</code>
+                  </React.Fragment>
+                ))} pipeline{missing.length === 1 ? '' : 's'} — smart-add only extends pipelines that already exist. Add the receivers/processors for those signals to your collector first if you need them.
+              </div>
+            );
+          })()}
         </div>
         <div className="flex-1 overflow-auto p-4 bg-gray-1000">
           <pre className="font-mono text-tiny text-gray-300 whitespace-pre" style={{ fontFamily: "'Source Code Pro', monospace" }}>

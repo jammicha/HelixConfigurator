@@ -6,6 +6,7 @@
 // Auth: all gated by the /api/* requireAuth middleware in index.js.
 
 const fs = require('fs');
+const fsp = require('fs').promises;
 const path = require('path');
 const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers } = require('../util');
 const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
@@ -30,9 +31,9 @@ const BRIDGED_NETWORKS_PATH = (() => {
   return path.join(__dirname, '..', 'data', 'bridged-networks.json');
 })();
 
-const loadBridgedNetworks = () => {
+const loadBridgedNetworks = async () => {
   try {
-    const raw = fs.readFileSync(BRIDGED_NETWORKS_PATH, 'utf8');
+    const raw = await fsp.readFile(BRIDGED_NETWORKS_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.networks)) return [];
     return parsed.networks.filter(n => typeof n === 'string' && /^[a-zA-Z0-9_.-]+$/.test(n));
@@ -42,14 +43,14 @@ const loadBridgedNetworks = () => {
   }
 };
 
-const saveBridgedNetworks = (networks) => {
+const saveBridgedNetworks = async (networks) => {
   try {
-    fs.mkdirSync(path.dirname(BRIDGED_NETWORKS_PATH), { recursive: true });
+    await fsp.mkdir(path.dirname(BRIDGED_NETWORKS_PATH), { recursive: true });
     const payload = {
       networks: Array.from(new Set(networks)).filter(Boolean).sort(),
       updatedAt: new Date().toISOString(),
     };
-    fs.writeFileSync(BRIDGED_NETWORKS_PATH, JSON.stringify(payload, null, 2));
+    await fsp.writeFile(BRIDGED_NETWORKS_PATH, JSON.stringify(payload, null, 2));
   } catch (e) {
     // Persistence is best-effort — a failure here means the auto-reattach
     // won't fire next boot, but the in-process bridge succeeded so we don't
@@ -58,17 +59,17 @@ const saveBridgedNetworks = (networks) => {
   }
 };
 
-const rememberBridgedNetwork = (network) => {
+const rememberBridgedNetwork = async (network) => {
   if (!network) return;
-  const current = loadBridgedNetworks();
+  const current = await loadBridgedNetworks();
   if (current.includes(network)) return;
-  saveBridgedNetworks([...current, network]);
+  await saveBridgedNetworks([...current, network]);
 };
 
-const forgetBridgedNetwork = (network) => {
-  const current = loadBridgedNetworks();
+const forgetBridgedNetwork = async (network) => {
+  const current = await loadBridgedNetworks();
   if (!current.includes(network)) return;
-  saveBridgedNetworks(current.filter(n => n !== network));
+  await saveBridgedNetworks(current.filter(n => n !== network));
 };
 
 // Run once at startup. For each persisted network, ensure helix-gateway is
@@ -79,7 +80,7 @@ const forgetBridgedNetwork = (network) => {
 // own 5s timeout and a user with N bridged networks shouldn't wait N×5s on
 // boot if Docker is slow. Each reconnect's outcome is independent.
 const reconcileBridgedNetworks = async (docker) => {
-  const wanted = loadBridgedNetworks();
+  const wanted = await loadBridgedNetworks();
   if (wanted.length === 0) return;
   const sidecar = TARGET_CONTAINER();
   let attached;
@@ -112,16 +113,17 @@ const reconcileBridgedNetworks = async (docker) => {
     }
   }));
   const dropped = results.filter(r => r.drop).map(r => r.net);
-  if (dropped.length) saveBridgedNetworks(wanted.filter(n => !dropped.includes(n)));
+  if (dropped.length) await saveBridgedNetworks(wanted.filter(n => !dropped.includes(n)));
 };
 
 // Read .env into a KEY=VALUE array suitable for createContainer's Env. Skips
 // blank lines and # comments. Tolerant of `KEY=value=with=equals` (splits on
 // the first =). Returns null on read failure so the caller can fall back to
 // the inspected container's existing Env rather than wiping it.
-const readEnvAsArray = () => {
+const readEnvAsArray = async () => {
   try {
-    return fs.readFileSync(ENV_PATH, 'utf8')
+    const contents = await fsp.readFile(ENV_PATH, 'utf8');
+    return contents
       .split('\n')
       .map(l => l.trim())
       .filter(l => l && !l.startsWith('#') && l.includes('='))
@@ -148,7 +150,7 @@ const recreateGateway = async (docker, name, { addNetwork } = {}) => {
   const old = docker.getContainer(name);
   const inspect = await old.inspect();
 
-  const freshEnv = readEnvAsArray();
+  const freshEnv = await readEnvAsArray();
   const envArray = freshEnv && freshEnv.length > 0 ? freshEnv : (inspect.Config?.Env || []);
   const allNetworks = new Set(Object.keys(inspect.NetworkSettings?.Networks || {}));
   if (addNetwork) allNetworks.add(addNetwork);
@@ -319,7 +321,7 @@ function register(app, { docker }) {
         network,
       });
     }
-    rememberBridgedNetwork(network);
+    await rememberBridgedNetwork(network);
     res.json({
       message: alreadyAttached
         ? `${sidecarName} already attached to ${network} (rebuilt to refresh listener)`
@@ -339,7 +341,13 @@ function register(app, { docker }) {
       return res.status(400).json({ error: 'Invalid container name' });
     }
     try {
-      const containers = await withDockerTimeout(docker.listContainers(), 'docker.listContainers');
+      // { all: true } so a container momentarily in the exited→running gap
+      // of a prior restart still passes the recognition check — keeps this
+      // route symmetric with the smart-add apply path. Image/ports detection
+      // signals don't depend on running state, and the subsequent
+      // container.restart() call cleanly errors with 404 if the container
+      // truly doesn't exist.
+      const containers = await withDockerTimeout(docker.listContainers({ all: true }), 'docker.listContainers');
       // Same detector the listing endpoint uses, so a container the UI shows
       // as a candidate is the same one this route will restart. Without the
       // shared helper this previously matched only on image regex and missed
@@ -380,14 +388,14 @@ function register(app, { docker }) {
     //    UI_AUTH_PASSWORD or TARGET_CONTAINER_NAME) so deployment config
     //    survives the reset.
     try {
-      const envContent = fs.readFileSync(ENV_PATH, 'utf8');
+      const envContent = await fsp.readFile(ENV_PATH, 'utf8');
       const lines = envContent.split('\n').map(line => {
         for (const key of WIZARD_KEYS) {
           if (line.startsWith(`${key}=`)) return `${key}=`;
         }
         return line;
       });
-      fs.writeFileSync(ENV_PATH, lines.join('\n'), 'utf8');
+      await fsp.writeFile(ENV_PATH, lines.join('\n'), 'utf8');
       for (const key of WIZARD_KEYS) {
         process.env[key] = '';
       }
@@ -397,7 +405,7 @@ function register(app, { docker }) {
 
     // 2. Drop persisted bridged-networks so the next boot's reconcile doesn't
     //    re-attach the gateway to whatever the user just walked away from.
-    saveBridgedNetworks([]);
+    await saveBridgedNetworks([]);
 
     // 3. Recreate the gateway with the cleared environment. Best-effort —
     //    even if the recreate fails, the env and persistence are cleared
@@ -448,13 +456,13 @@ function register(app, { docker }) {
       if (e.statusCode === 404) {
         // Network gone, or sidecar wasn't on it. Still purge from
         // persistence so future reconciles don't try to re-attach.
-        forgetBridgedNetwork(network);
+        await forgetBridgedNetwork(network);
         return res.status(404).json({ error: `Network "${network}" not found or sidecar wasn't attached` });
       }
       if (sendDockerTimeoutResponse(res, e)) return;
       return res.status(500).json({ error: 'Failed to detach network', details: e.message });
     }
-    forgetBridgedNetwork(network);
+    await forgetBridgedNetwork(network);
     // Recreate so the OTLP listener drops the interface cleanly. Without
     // this, the listener stays bound to the now-detached network on
     // sockets that opened at start time — confusing because the customer
@@ -474,24 +482,25 @@ function register(app, { docker }) {
   // GET the persisted list of networks the gateway is supposed to be bridged
   // to. Surfaced for the dashboard so the user can see what survives a
   // compose recreate, and to debug a stale entry.
-  app.get('/api/lifecycle/bridged-networks', (req, res) => {
-    res.json({ networks: loadBridgedNetworks() });
+  app.get('/api/lifecycle/bridged-networks', async (req, res) => {
+    res.json({ networks: await loadBridgedNetworks() });
   });
 
   // DELETE a stale entry. Doesn't disconnect the gateway from the network
   // now — just stops the next reconcile from re-attaching it. Useful when a
   // customer renames or removes a compose network and the configurator's
   // persisted memory of it is what's wrong.
-  app.delete('/api/lifecycle/bridged-networks/:network', (req, res) => {
+  app.delete('/api/lifecycle/bridged-networks/:network', async (req, res) => {
     const network = req.params.network;
     if (!network || !/^[a-zA-Z0-9_.-]+$/.test(network)) {
       return res.status(400).json({ error: 'Invalid network name' });
     }
-    if (!loadBridgedNetworks().includes(network)) {
+    const current = await loadBridgedNetworks();
+    if (!current.includes(network)) {
       return res.status(404).json({ error: `Network "${network}" was not in the persisted list` });
     }
-    forgetBridgedNetwork(network);
-    res.json({ removed: network, networks: loadBridgedNetworks() });
+    await forgetBridgedNetwork(network);
+    res.json({ removed: network, networks: await loadBridgedNetworks() });
   });
 
   // GET status of the collector container.

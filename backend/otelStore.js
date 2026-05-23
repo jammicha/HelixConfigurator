@@ -78,6 +78,16 @@ const extractSpans = (body) => {
   for (const rs of resourceSpans) {
     const resourceAttrs = flattenAttributes(rs.resource && rs.resource.attributes);
     const serviceName = resourceAttrs['service.name'] || 'unknown_service';
+    // Capture filter-grade resource attrs. service.namespace is the OTel
+    // grouping convention; container.name falls back to k8s.container.name
+    // (the k8sattributes processor's preferred key when running on K8s).
+    // Both are stored as columns rather than buried in attributes_json so
+    // filter queries don't need JSON1 extension or a full table scan.
+    const serviceNamespace = resourceAttrs['service.namespace'] || null;
+    const containerName =
+      resourceAttrs['container.name'] ||
+      resourceAttrs['k8s.container.name'] ||
+      null;
     const scopeSpans = rs.scopeSpans || rs.instrumentationLibrarySpans || [];
     for (const ss of scopeSpans) {
       const spans = ss.spans || [];
@@ -95,6 +105,8 @@ const extractSpans = (body) => {
           spanId: normalizeId(s.spanId),
           parentSpanId: normalizeId(s.parentSpanId),
           serviceName,
+          serviceNamespace,
+          containerName,
           name: s.name || '',
           kind: Number(s.kind || 0),
           startTimeNs: startNs,
@@ -252,6 +264,8 @@ class OtelStore {
         trace_id TEXT,
         parent_span_id TEXT,
         service_name TEXT,
+        service_namespace TEXT,
+        container_name TEXT,
         name TEXT,
         kind INTEGER,
         start_time_ns INTEGER,
@@ -264,6 +278,11 @@ class OtelStore {
         PRIMARY KEY (span_id, trace_id)
       );
       CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);
+      -- Indexes on service_namespace/container_name are created in the
+      -- backfill block below, AFTER the ALTER TABLE that adds those columns
+      -- on pre-existing databases. Creating them here would fail with
+      -- "no such column" because CREATE TABLE IF NOT EXISTS is a no-op
+      -- when the table already exists with its older shape.
 
       CREATE TABLE IF NOT EXISTS span_errors (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -293,19 +312,39 @@ class OtelStore {
       CREATE INDEX IF NOT EXISTS idx_logs_trace ON log_records(trace_id);
       CREATE INDEX IF NOT EXISTS idx_logs_received ON log_records(received_at);
     `);
+
+    // Backfill columns on databases created before service.namespace /
+    // container.name landed. SQLite doesn't have ADD COLUMN IF NOT EXISTS,
+    // so we attempt and swallow the "duplicate column" error. Pre-existing
+    // rows get NULL — fine, the filter UI treats NULL as "no filter" and
+    // upcoming ingests populate the new columns going forward.
+    const addColumn = (table, column, type) => {
+      try { this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`); }
+      catch (e) {
+        if (!/duplicate column name/i.test(e.message || '')) throw e;
+      }
+    };
+    addColumn('spans', 'service_namespace', 'TEXT');
+    addColumn('spans', 'container_name', 'TEXT');
+    try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_namespace ON spans(service_namespace)'); } catch {}
+    try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_container ON spans(container_name)'); } catch {}
   }
 
   _prepStatements() {
     this.upsertSpan = this.db.prepare(`
-      INSERT INTO spans (span_id, trace_id, parent_span_id, service_name, name, kind,
+      INSERT INTO spans (span_id, trace_id, parent_span_id, service_name,
+                          service_namespace, container_name, name, kind,
                           start_time_ns, end_time_ns, duration_ms, status_code, status_message,
                           attributes_json, events_json)
-      VALUES (@spanId, @traceId, @parentSpanId, @serviceName, @name, @kind,
+      VALUES (@spanId, @traceId, @parentSpanId, @serviceName,
+              @serviceNamespace, @containerName, @name, @kind,
               @startTimeNs, @endTimeNs, @durationMs, @statusCode, @statusMessage,
               @attributesJson, @eventsJson)
       ON CONFLICT(span_id, trace_id) DO UPDATE SET
         parent_span_id = excluded.parent_span_id,
         service_name = excluded.service_name,
+        service_namespace = excluded.service_namespace,
+        container_name = excluded.container_name,
         name = excluded.name,
         kind = excluded.kind,
         start_time_ns = excluded.start_time_ns,
@@ -386,6 +425,10 @@ class OtelStore {
           traceId: span.traceId,
           parentSpanId: span.parentSpanId || '',
           serviceName: span.serviceName,
+          // null-coalesce so spans extracted before this change (or upstream
+          // payloads with no resource attrs) bind cleanly to TEXT columns.
+          serviceNamespace: span.serviceNamespace ?? null,
+          containerName: span.containerName ?? null,
           name: span.name,
           kind: span.kind,
           startTimeNs: span.startTimeNs,
@@ -425,11 +468,31 @@ class OtelStore {
       `SELECT DISTINCT service_name FROM spans
          WHERE trace_id = ? AND service_name IS NOT NULL`,
     );
+    // Same idea for namespace + container so the frontend can client-side
+    // gate the SSE merge against an active namespace/container filter.
+    // Without these, turning on the namespace filter would freeze the live
+    // feed (or worse, leak in traces from the wrong namespace) until the
+    // 30s polling fallback caught up.
+    const getParticipantNamespaces = this.db.prepare(
+      `SELECT DISTINCT service_namespace FROM spans
+         WHERE trace_id = ? AND service_namespace IS NOT NULL`,
+    );
+    const getParticipantContainers = this.db.prepare(
+      `SELECT DISTINCT container_name FROM spans
+         WHERE trace_id = ? AND container_name IS NOT NULL`,
+    );
     for (const summary of summaries) {
       if (!summary) continue;
       const participants = getParticipants.all(summary.trace_id).map(r => r.service_name);
       if (!participants.some(s => !INTERNAL_SERVICES.includes(s))) continue;
-      this.events.emit('trace', { ...summary, participating_services: participants });
+      const participating_namespaces = getParticipantNamespaces.all(summary.trace_id).map(r => r.service_namespace);
+      const participating_containers = getParticipantContainers.all(summary.trace_id).map(r => r.container_name);
+      this.events.emit('trace', {
+        ...summary,
+        participating_services: participants,
+        participating_namespaces,
+        participating_containers,
+      });
     }
     for (const err of errorEvents) {
       // Note: NOT 'error' — that's a reserved EventEmitter channel that
@@ -501,12 +564,23 @@ class OtelStore {
   // Computes p50/p95 from raw durations in JS — the trace cap (500) keeps
   // the result set small enough that a sort-and-index is faster than wiring
   // SQLite window functions.
-  listOperations({ sinceMs, untilMs, slowThresholdMs } = {}) {
+  listOperations({ sinceMs, untilMs, slowThresholdMs, namespace, container } = {}) {
     const SLOW_MS = Number.isFinite(slowThresholdMs) && slowThresholdMs > 0 ? slowThresholdMs : 1000;
     const params = [];
     const where = [];
     if (sinceMs) { where.push('received_at >= ?'); params.push(sinceMs); }
     if (untilMs) { where.push('received_at <= ?'); params.push(untilMs); }
+    // Namespace/container are span-level resource attrs; filter via
+    // participant subquery, same shape as the `service` filter on
+    // listTraces. A trace is included if ANY of its spans matches.
+    if (namespace) {
+      where.push('trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
+      params.push(namespace);
+    }
+    if (container) {
+      where.push('trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
+      params.push(container);
+    }
     const sql = `SELECT service_name, root_operation, duration_ms, has_error
                  FROM traces ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`;
     const rows = this.db.prepare(sql).all(...params);
@@ -606,7 +680,7 @@ class OtelStore {
     ).run(overflow);
   }
 
-  listTraces({ service, sinceMs, untilMs, q, limit = 200 }) {
+  listTraces({ service, namespace, container, sinceMs, untilMs, q, limit = 200 }) {
     const params = [];
     const where = [];
     // Filter by participant, not just by root service. Otherwise services
@@ -615,6 +689,18 @@ class OtelStore {
     if (service) {
       where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
       params.push(service);
+    }
+    // Same participant-subquery shape for namespace/container — both are
+    // resource-level attrs that ride on the span, not on the trace root.
+    // A trace matches if ANY of its spans carry the requested namespace
+    // or container, mirroring how the service filter behaves.
+    if (namespace) {
+      where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
+      params.push(namespace);
+    }
+    if (container) {
+      where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
+      params.push(container);
     }
     if (sinceMs) { where.push('t.received_at >= ?'); params.push(sinceMs); }
     if (untilMs) { where.push('t.received_at <= ?'); params.push(untilMs); }
@@ -685,6 +771,25 @@ class OtelStore {
     return { summary, spans };
   }
 
+  // Distinct values for the OtelData filter UI dropdowns. Returns just the
+  // set of values we've seen — the dropdowns treat empty/missing as "no
+  // filter applied" and don't render NULL as an option. Same lifetime
+  // semantics as listServices(): no time window, so the dropdown stays
+  // useful while the workload is paused or quiet.
+  listFilterValues() {
+    const namespaces = this.db.prepare(
+      `SELECT DISTINCT service_namespace AS v FROM spans
+       WHERE service_namespace IS NOT NULL AND service_namespace != ''
+       ORDER BY service_namespace ASC`
+    ).all().map(r => r.v);
+    const containers = this.db.prepare(
+      `SELECT DISTINCT container_name AS v FROM spans
+       WHERE container_name IS NOT NULL AND container_name != ''
+       ORDER BY container_name ASC`
+    ).all().map(r => r.v);
+    return { namespaces, containers };
+  }
+
   listServices() {
     // Lifetime counts — not windowed. Earlier attempt at windowing made the
     // dropdown empty whenever the user paused or their workload went quiet,
@@ -704,16 +809,21 @@ class OtelStore {
     return this.db.prepare(sql).all(...params);
   }
 
-  listErrors({ limit = 200 } = {}) {
-    return this.db.prepare(
-      `SELECT * FROM span_errors ORDER BY received_at DESC LIMIT ?`
-    ).all(Math.min(Math.max(1, limit | 0), 1000));
+  listErrors({ sinceMs, untilMs, limit = 200 } = {}) {
+    const params = [];
+    const where = [];
+    if (sinceMs) { where.push('received_at >= ?'); params.push(sinceMs); }
+    if (untilMs) { where.push('received_at <= ?'); params.push(untilMs); }
+    const sql = `SELECT * FROM span_errors ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+                 ORDER BY received_at DESC LIMIT ?`;
+    params.push(Math.min(Math.max(1, limit | 0), 1000));
+    return this.db.prepare(sql).all(...params);
   }
 
   // Cross-trace logs feed for the Logs & Errors tab. Severity is filtered
   // case-insensitively to absorb the OTel demo's variety
   // (Info/INFO/SeverityNumber-derived). q does a substring match on body.
-  listLogs({ severity, q, sinceMs, limit = 500 } = {}) {
+  listLogs({ severity, q, sinceMs, untilMs, limit = 500 } = {}) {
     const params = [];
     const where = [];
     if (severity) {
@@ -725,6 +835,7 @@ class OtelStore {
       params.push(`%${String(q).trim().toLowerCase()}%`);
     }
     if (sinceMs) { where.push('received_at >= ?'); params.push(sinceMs); }
+    if (untilMs) { where.push('received_at <= ?'); params.push(untilMs); }
     const sql = `SELECT * FROM log_records ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
                  ORDER BY received_at DESC LIMIT ?`;
     params.push(Math.min(Math.max(1, limit | 0), 2000));
@@ -781,7 +892,7 @@ const computePercentiles = (arr) => {
 // reports total/ok/slow/error counts plus p50/p95 of duration. Used by the
 // Traces timeline chart on /otel-data. Service filter matches the trace-list
 // behavior (any participant, not just root).
-OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, service, slowThresholdMs }) {
+OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, service, namespace, container, slowThresholdMs }) {
   const now = Date.now();
   const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : now - 60 * 60 * 1000;
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
@@ -795,6 +906,14 @@ OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, ser
   if (service) {
     where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
     params.push(service);
+  }
+  if (namespace) {
+    where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
+    params.push(namespace);
+  }
+  if (container) {
+    where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
+    params.push(container);
   }
   // Same "any non-internal participant" rule as listTraces — see the comment
   // there for why we don't filter on t.service_name (root) directly.
@@ -877,7 +996,7 @@ OtelStore.prototype.logsHistogram = function ({ sinceMs, untilMs, buckets }) {
 // stats (with per-sparkline arrays and delta-vs-previous-window), top services
 // and top errors. Window/duration handling matches tracesHistogram so the
 // sparklines stay aligned with the bigger timeline chart on Traces.
-OtelStore.prototype.overview = function ({ sinceMs, untilMs, service } = {}) {
+OtelStore.prototype.overview = function ({ sinceMs, untilMs, service, namespace, container } = {}) {
   const now = Date.now();
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
   const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : end - 60 * 60 * 1000;
@@ -891,15 +1010,28 @@ OtelStore.prototype.overview = function ({ sinceMs, untilMs, service } = {}) {
 
   // Pull trace rows once for both the current and previous windows.
   const params = [prevStart, end];
-  const serviceClause = service
-    ? 'AND t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)'
-    : '';
-  if (service) params.push(service);
+  // Each filter contributes one participant-subquery AND-clause. Keeping
+  // them as separate clauses (rather than combined OR'd in a single
+  // subquery) means an unused filter pays no SQL cost.
+  const filterClauses = [];
+  if (service) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
+    params.push(service);
+  }
+  if (namespace) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
+    params.push(namespace);
+  }
+  if (container) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
+    params.push(container);
+  }
+  const filterClause = filterClauses.length ? 'AND ' + filterClauses.join(' AND ') : '';
   const rows = this.db
     .prepare(
       `SELECT t.received_at AS ts, t.duration_ms AS dur, t.has_error AS err, t.service_name AS svc
        FROM traces t
-       WHERE t.received_at >= ? AND t.received_at <= ? ${serviceClause}
+       WHERE t.received_at >= ? AND t.received_at <= ? ${filterClause}
        ORDER BY t.received_at ASC`,
     )
     .all(...params);
@@ -1028,7 +1160,7 @@ OtelStore.prototype.overview = function ({ sinceMs, untilMs, service } = {}) {
 // 2-D heatmap: traces grouped into (time bucket, duration bucket) cells. The
 // duration axis is log-scaled so the slow tail is visible without dominating
 // the fast bulk — Stackify's perf heatmap does the same trick.
-OtelStore.prototype.latencyHeatmap = function ({ sinceMs, untilMs, timeBuckets, durationBuckets, service } = {}) {
+OtelStore.prototype.latencyHeatmap = function ({ sinceMs, untilMs, timeBuckets, durationBuckets, service, namespace, container } = {}) {
   const now = Date.now();
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
   const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : end - 60 * 60 * 1000;
@@ -1041,15 +1173,25 @@ OtelStore.prototype.latencyHeatmap = function ({ sinceMs, untilMs, timeBuckets, 
   // Fixed 1ms..10s used to be the only option; that's wrong for either
   // sub-ms RPC services or multi-minute background jobs.
   const params = [start, end];
-  const serviceClause = service
-    ? 'AND t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)'
-    : '';
-  if (service) params.push(service);
+  const filterClauses = [];
+  if (service) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
+    params.push(service);
+  }
+  if (namespace) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
+    params.push(namespace);
+  }
+  if (container) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
+    params.push(container);
+  }
+  const filterClause = filterClauses.length ? 'AND ' + filterClauses.join(' AND ') : '';
   const rows = this.db
     .prepare(
       `SELECT t.received_at AS ts, t.duration_ms AS dur
        FROM traces t
-       WHERE t.received_at >= ? AND t.received_at <= ? ${serviceClause}`,
+       WHERE t.received_at >= ? AND t.received_at <= ? ${filterClause}`,
     )
     .all(...params);
 
@@ -1168,8 +1310,8 @@ OtelStore.prototype.serviceMap = function ({ sinceMs, untilMs } = {}) {
 // thresholded comparisons that align with the kinds of anomalies a Davis
 // would call out, packaged as readable sentences so the surface feels
 // AI-flavored without claiming it is.
-OtelStore.prototype.insights = function ({ sinceMs, untilMs, service } = {}) {
-  const overview = this.overview({ sinceMs, untilMs, service });
+OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace, container } = {}) {
+  const overview = this.overview({ sinceMs, untilMs, service, namespace, container });
   const findings = [];
   const fmtPct = (x) => `${(x * 100).toFixed(0)}%`;
   const fmtMult = (x) => `${x.toFixed(1)}×`;

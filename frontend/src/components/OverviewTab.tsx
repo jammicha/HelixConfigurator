@@ -11,6 +11,7 @@ import { ServiceMap } from './ServiceMap';
 import type { ServiceMapData } from './ServiceMap';
 import { HelixCtaBanner } from './otel-data/HelixCtaBanner';
 import type { HelixEnv } from './otel-data/types';
+import { SyntheticRunCompact } from './step-zero/SyntheticRunCompact';
 
 // Shapes returned by /api/overview and /api/traces/latency-heatmap. Re-exported
 // from OtelDataPage so the parent doesn't need to redefine.
@@ -176,14 +177,23 @@ export const OverviewTab: React.FC<Props> = ({
         <div className="max-w-md text-center space-y-4">
           <h3 className="text-base font-semibold text-gray-200">No traces in this window</h3>
           <p className="text-sm text-gray-400">
-            The gateway isn't receiving traces for the selected time range. Send a synthetic trace to verify
-            the pipeline end-to-end, or check the gateway's health on the dashboard.
+            The gateway isn't receiving traces for the selected time range. Send a single test trace to verify
+            the pipeline, or run the demo scenario to populate the dashboards with 60s of realistic traffic.
           </p>
           <div className="flex items-center justify-center gap-3 flex-wrap">
+            {/*
+              Two distinct calls-to-action here:
+                - "Send a test trace" — single synthetic span, verifies plumbing only.
+                - "Run demo scenario"  — 60s of multi-service traffic with eight
+                                          diagnostic patterns woven in, so the empty
+                                          charts above actually have something to show.
+              The compact button is the same one the dashboard banner uses, so both
+              entry points share lifecycle state via useSyntheticRun.
+            */}
             <button
               onClick={sendTestTrace}
               disabled={testTraceStatus === 'sending'}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm bg-primary hover:bg-primary-hover text-white disabled:opacity-60"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
             >
               {testTraceStatus === 'sending'
                 ? (<><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>)
@@ -191,6 +201,7 @@ export const OverviewTab: React.FC<Props> = ({
                 ? (<><CheckCircle2 className="w-4 h-4" /> Sent. Refreshing shortly</>)
                 : (<><Send className="w-4 h-4" /> Send a test trace</>)}
             </button>
+            <SyntheticRunCompact hideViewLink />
             <a
               href="/"
               className="inline-flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"

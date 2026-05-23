@@ -1,84 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Play, Square, ExternalLink, Loader2 } from 'lucide-react';
-
-type SyntheticStatus = {
-  running: boolean;
-  run_id?: string;
-  sent_traces: number;
-  sent_with_errors: number;
-  elapsed_s?: number;
-  eta_s?: number | null;
-  destination?: 'gateway' | 'local';
-  continuous?: boolean;
-  helix_deep_link?: string | null;
-  local_deep_link?: string;
-};
+import { useSyntheticRun } from '../../hooks/useSyntheticRun';
 
 // Layer2Synthetic takes no props. The component intentionally does NOT
 // gate behavior on `envReady` (passed elsewhere in StepZero) — the
 // local-fallback destination works without HELIX_ENDPOINT and is part of
 // the "Step 0 truly works from zero" promise. The destination decision
 // happens server-side at /start.
+//
+// Lifecycle (status polling, start/stop, error handling) lives in
+// useSyntheticRun so the OverviewTab empty state and the dashboard
+// PipelineStatusBanner can share it via SyntheticRunCompact without
+// duplicating the polling logic.
 export const Layer2Synthetic: React.FC = () => {
-  const [status, setStatus] = useState<SyntheticStatus | null>(null);
+  const { status, starting, startError, haveRun, start, stop } = useSyntheticRun();
+  // Continuous-mode toggle is part of the full /step-zero card only;
+  // the compact variant always runs a fixed-duration scenario.
   const [continuous, setContinuous] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
-  // Track whether the user has run at least once this session — controls
-  // showing the post-run summary vs the pre-run pitch.
-  const [haveRun, setHaveRun] = useState(false);
-
-  const fetchStatus = useCallback(async () => {
-    try {
-      const r = await fetch('/api/step-zero/synthetic/status', { credentials: 'include' });
-      if (!r.ok) return;
-      const data = (await r.json()) as SyntheticStatus;
-      setStatus(data);
-      if (data.running || (data.sent_traces ?? 0) > 0) setHaveRun(true);
-    } catch { /* transient; next poll retries */ }
-  }, []);
-
-  // Poll every 1s while running, every 5s when idle (just to catch state
-  // changes from outside this session).
-  useEffect(() => {
-    fetchStatus();
-    const id = setInterval(fetchStatus, status?.running ? 1000 : 5000);
-    return () => clearInterval(id);
-  }, [fetchStatus, status?.running]);
-
-  const start = async () => {
-    setStartError(null);
-    setStarting(true);
-    try {
-      const r = await fetch('/api/step-zero/synthetic/start', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ continuous }),
-      });
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${r.status}`);
-      }
-      await fetchStatus();
-    } catch (e) {
-      setStartError((e as Error).message);
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  const stop = async () => {
-    try {
-      await fetch('/api/step-zero/synthetic/stop', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ run_id: status?.run_id }),
-      });
-      await fetchStatus();
-    } catch { /* the next poll will reconcile */ }
-  };
 
   const isRunning = !!status?.running;
   const isContinuous = !!status?.continuous;
@@ -163,7 +101,7 @@ export const Layer2Synthetic: React.FC = () => {
             View in /otel-data <ExternalLink className="w-3.5 h-3.5" />
           </a>
           <button
-            onClick={start}
+            onClick={() => start({ continuous })}
             disabled={starting}
             className="w-full inline-flex items-center justify-center gap-2 rounded border border-gray-700 px-4 py-2 text-tiny font-semibold text-gray-100 hover:bg-gray-900 disabled:opacity-60"
           >
@@ -189,7 +127,7 @@ export const Layer2Synthetic: React.FC = () => {
             happens server-side at /start.
           */}
           <button
-            onClick={start}
+            onClick={() => start({ continuous })}
             disabled={starting}
             className="w-full inline-flex items-center justify-center gap-2 rounded bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
           >

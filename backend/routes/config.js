@@ -2,7 +2,7 @@
 // POST /api/config is atomic: syntax-check → snapshot → write → restart →
 // watch the collector → roll back on rejection. So the user is never left
 // with a broken pipeline because of a saved-but-rejected YAML.
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const yaml = require('js-yaml');
 const { validateConfig } = require('../validate');
@@ -57,9 +57,9 @@ const extractCollectorError = (logs) => {
 
 function register(app, { docker, containerLogs, configPath, templatesDir }) {
   // GET current config
-  app.get('/api/config', (req, res) => {
+  app.get('/api/config', async (req, res) => {
     try {
-      const fileContents = fs.readFileSync(configPath, 'utf8');
+      const fileContents = await fs.readFile(configPath, 'utf8');
       res.json({ yaml: fileContents });
     } catch (e) {
       res.status(500).json({ error: 'Failed to read config file' });
@@ -88,9 +88,9 @@ function register(app, { docker, containerLogs, configPath, templatesDir }) {
 
     // 2. Snapshot existing content for rollback, then write the new one.
     let previous = '';
-    try { previous = fs.readFileSync(configPath, 'utf8'); } catch { /* first save */ }
+    try { previous = await fs.readFile(configPath, 'utf8'); } catch { /* first save */ }
     try {
-      fs.writeFileSync(configPath, content, 'utf8');
+      await fs.writeFile(configPath, content, 'utf8');
     } catch (e) {
       return res.status(500).json({ error: 'Failed to write config', details: e.message });
     }
@@ -113,7 +113,7 @@ function register(app, { docker, containerLogs, configPath, templatesDir }) {
     if (!settled.running) {
       // Roll back.
       try {
-        fs.writeFileSync(configPath, previous, 'utf8');
+        await fs.writeFile(configPath, previous, 'utf8');
         await docker.getContainer(targetContainer).restart().catch(() => {});
       } catch { /* best effort */ }
       return res.status(400).json({
@@ -128,22 +128,23 @@ function register(app, { docker, containerLogs, configPath, templatesDir }) {
   });
 
   // GET list of available config templates
-  app.get('/api/templates', (req, res) => {
+  app.get('/api/templates', async (req, res) => {
     try {
       const indexPath = path.join(templatesDir, 'index.json');
-      const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+      const index = JSON.parse(await fs.readFile(indexPath, 'utf8'));
       // Enrich each entry with the raw template content (no env substitution
       // — the picker's "Selected" detection compares against the editor,
       // which holds raw ${env:...} references too). Best-effort: missing
       // files just omit content so the picker still lists them.
-      const enriched = (Array.isArray(index) ? index : []).map(entry => {
+      const entries = Array.isArray(index) ? index : [];
+      const enriched = await Promise.all(entries.map(async entry => {
         try {
           const yamlPath = path.join(templatesDir, `${entry.id}.yaml`);
-          return { ...entry, content: fs.readFileSync(yamlPath, 'utf8') };
+          return { ...entry, content: await fs.readFile(yamlPath, 'utf8') };
         } catch {
           return { ...entry };
         }
-      });
+      }));
       res.json(enriched);
     } catch (e) {
       res.status(500).json({ error: 'Failed to load templates', details: e.message });
@@ -151,14 +152,14 @@ function register(app, { docker, containerLogs, configPath, templatesDir }) {
   });
 
   // GET single template content with env placeholders substituted
-  app.get('/api/templates/:id', (req, res) => {
+  app.get('/api/templates/:id', async (req, res) => {
     const { id } = req.params;
     if (!/^[a-z0-9-]+$/i.test(id)) {
       return res.status(400).json({ error: 'Invalid template id' });
     }
     try {
       const yamlPath = path.join(templatesDir, `${id}.yaml`);
-      let content = fs.readFileSync(yamlPath, 'utf8');
+      let content = await fs.readFile(yamlPath, 'utf8');
       content = content
         .replace(/\$\{HELIX_ENDPOINT\}/g, process.env.HELIX_ENDPOINT || '')
         .replace(/\$\{HELIX_API_KEY\}/g, process.env.HELIX_API_KEY || '')

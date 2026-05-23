@@ -425,9 +425,19 @@ function register(app, { docker }) {
   // the detector recognizes. Goes through the same image+ports signal as the
   // listing endpoint so a smart-add target that shows up in the UI also
   // passes the apply check, no matter which signal originally surfaced it.
+  //
+  // Uses { all: true } so the recognition check survives a container in the
+  // brief exited→running gap of a restart cycle. Without this, smart-add's
+  // post-apply re-fetch of the proposal (which fires when the just-applied
+  // collector container is still restarting) returns a spurious 403 "not a
+  // recognized OTel collector" — looks like the user typed a bad name, when
+  // really we just hit the restart window. The image/ports signals don't
+  // depend on running state, so widening the listing is safe; downstream
+  // container.inspect / resolveCollectorConfig still fail cleanly if the
+  // container truly doesn't exist.
   const isRecognizedCollectorContainer = async (name) => {
     const sidecarName = process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
-    const containers = await withDockerTimeout(docker.listContainers(), 'docker.listContainers');
+    const containers = await withDockerTimeout(docker.listContainers({ all: true }), 'docker.listContainers');
     return detectCollectorContainers(containers, { sidecarName }).some(d => d.name === name);
   };
 

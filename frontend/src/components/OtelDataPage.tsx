@@ -56,7 +56,7 @@ const HeaderUserMenu: React.FC = () => {
 
 
 const readUrlState = () => {
-  if (typeof window === 'undefined') return { service: '', status: '' as '' | TraceStatus, range: '1h' as TimeRange, q: '', minMs: 0, selected: null as string | null };
+  if (typeof window === 'undefined') return { service: '', namespace: '', container: '', status: '' as '' | TraceStatus, range: '1h' as TimeRange, q: '', minMs: 0, selected: null as string | null };
   const p = new URLSearchParams(window.location.search);
   const range = (p.get('range') as TimeRange) || '1h';
   const validRange = TIME_RANGES.some(r => r.value === range) ? range : '1h';
@@ -65,6 +65,10 @@ const readUrlState = () => {
   const minMsRaw = parseInt(p.get('minMs') || '0', 10);
   return {
     service: p.get('service') || '',
+    // Resource-level filters added alongside service. Empty string means
+    // "no filter applied" — same convention as service.
+    namespace: p.get('namespace') || '',
+    container: p.get('container') || '',
     status: validStatus,
     range: validRange,
     q: p.get('q') || '',
@@ -93,9 +97,16 @@ export const OtelDataPage: React.FC = () => {
   const [operationsLoading, setOperationsLoading] = useState<boolean>(false);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [services, setServices] = useState<{ name: string; traceCount: number }[]>([]);
+  // Distinct namespace/container values for filter dropdowns. Fetched
+  // alongside services from /api/traces/filter-values — see the populate
+  // effect below.
+  const [namespaces, setNamespaces] = useState<string[]>([]);
+  const [containers, setContainers] = useState<string[]>([]);
   const [errors, setErrors] = useState<ErrorRecord[]>([]);
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [serviceFilter, setServiceFilter] = useState<string>(initial.service);
+  const [namespaceFilter, setNamespaceFilter] = useState<string>(initial.namespace);
+  const [containerFilter, setContainerFilter] = useState<string>(initial.container);
   const [statusFilter, setStatusFilter] = useState<'' | TraceStatus>(initial.status);
   const [range, setRange] = useState<TimeRange>(initial.range);
   const [searchQuery, setSearchQuery] = useState<string>(initial.q);
@@ -260,19 +271,28 @@ export const OtelDataPage: React.FC = () => {
   // Logs/Errors we apply it client-side here — the stores aren't huge (200
   // rows each) so a JS filter on every change is fine, and a server-side
   // query would lag SSE-pushed entries between polls.
+  // SSE merges live records into state regardless of the active window. For
+  // relative ranges that's fine — new records have received_at ≈ now and fall
+  // inside "last X". A customRange in the past, though, would otherwise let
+  // those fresh records leak into the list. Enforce the window client-side so
+  // the next render drops them.
   const visibleErrors = useMemo(
-    () => errors.filter(e =>
-      !INTERNAL_SERVICES.has(e.service_name)
-      && (!serviceFilter || e.service_name === serviceFilter),
-    ),
-    [errors, serviceFilter],
+    () => errors.filter(e => {
+      if (INTERNAL_SERVICES.has(e.service_name)) return false;
+      if (serviceFilter && e.service_name !== serviceFilter) return false;
+      if (customRange && (e.received_at < customRange.sinceMs || e.received_at > customRange.untilMs)) return false;
+      return true;
+    }),
+    [errors, serviceFilter, customRange],
   );
   const visibleLogs = useMemo(
-    () => logs.filter(l =>
-      !INTERNAL_SERVICES.has(l.serviceName)
-      && (!serviceFilter || l.serviceName === serviceFilter),
-    ),
-    [logs, serviceFilter],
+    () => logs.filter(l => {
+      if (INTERNAL_SERVICES.has(l.serviceName)) return false;
+      if (serviceFilter && l.serviceName !== serviceFilter) return false;
+      if (customRange && (l.receivedAt < customRange.sinceMs || l.receivedAt > customRange.untilMs)) return false;
+      return true;
+    }),
+    [logs, serviceFilter, customRange],
   );
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -286,6 +306,13 @@ export const OtelDataPage: React.FC = () => {
   // /api/traces query).
   const serviceFilterRef = useRef(serviceFilter);
   useEffect(() => { serviceFilterRef.current = serviceFilter; }, [serviceFilter]);
+  // Same pattern for namespace/container — SSE handler reads via ref so
+  // the live merge respects the active filters without re-subscribing
+  // every time the filter changes.
+  const namespaceFilterRef = useRef(namespaceFilter);
+  useEffect(() => { namespaceFilterRef.current = namespaceFilter; }, [namespaceFilter]);
+  const containerFilterRef = useRef(containerFilter);
+  useEffect(() => { containerFilterRef.current = containerFilter; }, [containerFilter]);
   useEffect(() => { tracesPausedRef.current = tracesPaused; }, [tracesPaused]);
   useEffect(() => { logsPausedRef.current = logsPaused; }, [logsPaused]);
 
@@ -295,6 +322,8 @@ export const OtelDataPage: React.FC = () => {
     if (typeof window === 'undefined') return;
     const p = new URLSearchParams();
     if (serviceFilter) p.set('service', serviceFilter);
+    if (namespaceFilter) p.set('namespace', namespaceFilter);
+    if (containerFilter) p.set('container', containerFilter);
     if (statusFilter) p.set('status', statusFilter);
     if (range !== '1h') p.set('range', range);
     if (searchQuery) p.set('q', searchQuery);
@@ -305,7 +334,7 @@ export const OtelDataPage: React.FC = () => {
     if (next !== `${window.location.pathname}${window.location.search}`) {
       window.history.replaceState(null, '', next);
     }
-  }, [serviceFilter, statusFilter, range, searchQuery, minMs, selectedTraceId]);
+  }, [serviceFilter, namespaceFilter, containerFilter, statusFilter, range, searchQuery, minMs, selectedTraceId]);
 
   // Resolve the active time window. customRange (set by clicking a bucket on
   // the timeline chart) takes precedence over the relative TIME_RANGES picker.
@@ -328,6 +357,8 @@ export const OtelDataPage: React.FC = () => {
   const refreshTraces = async () => {
     const params = new URLSearchParams();
     if (serviceFilter) params.set('service', serviceFilter);
+    if (namespaceFilter) params.set('namespace', namespaceFilter);
+    if (containerFilter) params.set('container', containerFilter);
     const w = resolveWindow();
     if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
     if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
@@ -365,19 +396,38 @@ export const OtelDataPage: React.FC = () => {
     sinceMs: overviewWindow.sinceMs,
     untilMs: overviewWindow.untilMs,
     service: serviceFilter || undefined,
+    namespace: namespaceFilter || undefined,
+    container: containerFilter || undefined,
     slowThresholdMs,
   });
 
   const refreshServices = async () => {
-    const res = await fetch('/api/traces/services');
-    if (res.ok) {
-      const j = await res.json();
+    // Two endpoints fetched in parallel: services for the existing dropdown
+    // and filter-values for the new namespace/container dropdowns. Both
+    // return lifetime distinct values; neither is expensive enough to
+    // warrant a single composite endpoint.
+    const [svcRes, fvRes] = await Promise.all([
+      fetch('/api/traces/services'),
+      fetch('/api/traces/filter-values'),
+    ]);
+    if (svcRes.ok) {
+      const j = await svcRes.json();
       setServices(j.services || []);
+    }
+    if (fvRes.ok) {
+      const j = await fvRes.json();
+      setNamespaces(Array.isArray(j.namespaces) ? j.namespaces : []);
+      setContainers(Array.isArray(j.containers) ? j.containers : []);
     }
   };
 
   const refreshErrors = async () => {
-    const res = await fetch('/api/traces/errors');
+    const params = new URLSearchParams();
+    const w = resolveWindow();
+    if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
+    if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+    const qs = params.toString();
+    const res = await fetch(`/api/traces/errors${qs ? `?${qs}` : ''}`);
     if (res.ok) {
       const j = await res.json();
       setErrors(j.errors || []);
@@ -388,6 +438,7 @@ export const OtelDataPage: React.FC = () => {
     const params = new URLSearchParams({ limit: '500' });
     const w = resolveWindow();
     if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
+    if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
     const res = await fetch(`/api/logs?${params}`);
     if (res.ok) {
       const j = await res.json();
@@ -405,6 +456,8 @@ export const OtelDataPage: React.FC = () => {
       const w = resolveWindow();
       if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
       if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+      if (namespaceFilter) params.set('namespace', namespaceFilter);
+      if (containerFilter) params.set('container', containerFilter);
       params.set('slowThresholdMs', String(slowThresholdMs));
       const res = await fetch(`/api/operations?${params}`);
       if (res.ok) {
@@ -414,7 +467,7 @@ export const OtelDataPage: React.FC = () => {
     } finally {
       setOperationsLoading(false);
     }
-  }, [range, customRange, slowThresholdMs]);
+  }, [range, customRange, slowThresholdMs, namespaceFilter, containerFilter]);
 
   // Fetch on initial mount + whenever underlying inputs change. Operations
   // data also feeds the Traces tab's outlier flagging (rows whose duration
@@ -446,7 +499,7 @@ export const OtelDataPage: React.FC = () => {
   useEffect(() => {
     setTracesLoading(true);
     refreshTraces();
-  }, [serviceFilter, range, customRange]);
+  }, [serviceFilter, namespaceFilter, containerFilter, range, customRange]);
 
   // Search runs server-side now, so it has to trigger a refetch. Debounced
   // so typing doesn't hammer the backend on every keystroke.
@@ -461,6 +514,10 @@ export const OtelDataPage: React.FC = () => {
   // Reload logs whenever the active time window changes (including click-zoom).
   useEffect(() => {
     refreshLogs();
+  }, [range, customRange]);
+
+  useEffect(() => {
+    refreshErrors();
   }, [range, customRange]);
 
   // Periodic re-fetch so the rollup counts (logs/errors/db calls) on
@@ -481,7 +538,7 @@ export const OtelDataPage: React.FC = () => {
       refreshTraces();
     }, 30_000);
     return () => clearInterval(id);
-  }, [serviceFilter, range, customRange]);
+  }, [serviceFilter, namespaceFilter, containerFilter, range, customRange]);
 
   // Page-wide refresh cadence. useOverview auto-fetches when its inputs
   // (serviceFilter, chart window) change; this hook drives the periodic
@@ -527,7 +584,11 @@ export const OtelDataPage: React.FC = () => {
       // call would be needed to backfill what was missed (we don't bother).
       if (tracesPausedRef.current) return;
       try {
-        const summary: TraceSummary & { participating_services?: string[] } = JSON.parse(evt.data);
+        const summary: TraceSummary & {
+          participating_services?: string[];
+          participating_namespaces?: string[];
+          participating_containers?: string[];
+        } = JSON.parse(evt.data);
         // Honor the active service filter on the live merge. /api/traces
         // filters by participant; SSE must too, or long-lived traces from
         // other services (e.g. flagd EventStreams) bypass the filter and
@@ -538,6 +599,21 @@ export const OtelDataPage: React.FC = () => {
           const participants = summary.participating_services;
           if (!participants || !participants.includes(activeFilter)) return;
         }
+        // Same participant-membership check for namespace/container.
+        // participating_namespaces/_containers may be empty arrays when
+        // the trace's spans carry no namespace/container — in that case
+        // any active filter rejects the trace (matches server behavior:
+        // a NULL row never matches `WHERE service_namespace = ?`).
+        const activeNs = namespaceFilterRef.current;
+        if (activeNs) {
+          const ns = summary.participating_namespaces;
+          if (!ns || !ns.includes(activeNs)) return;
+        }
+        const activeContainer = containerFilterRef.current;
+        if (activeContainer) {
+          const cs = summary.participating_containers;
+          if (!cs || !cs.includes(activeContainer)) return;
+        }
         setTraces(prev => {
           const filtered = prev.filter(t => t.trace_id !== summary.trace_id);
           // Keep newest first, cap at 200 to mirror server query.
@@ -547,6 +623,22 @@ export const OtelDataPage: React.FC = () => {
         setServices(prev => prev.some(s => s.name === summary.service_name)
           ? prev
           : [...prev, { name: summary.service_name, traceCount: 1 }].sort((a, b) => a.name.localeCompare(b.name)));
+        // New namespace/container? Add to the filter dropdowns so the user
+        // can pick them without waiting for the 30s services-refresh tick.
+        if (summary.participating_namespaces?.length) {
+          setNamespaces(prev => {
+            const merged = new Set(prev);
+            for (const n of summary.participating_namespaces!) merged.add(n);
+            return merged.size === prev.length ? prev : Array.from(merged).sort();
+          });
+        }
+        if (summary.participating_containers?.length) {
+          setContainers(prev => {
+            const merged = new Set(prev);
+            for (const c of summary.participating_containers!) merged.add(c);
+            return merged.size === prev.length ? prev : Array.from(merged).sort();
+          });
+        }
       } catch { /* malformed event — ignore */ }
     });
     es.addEventListener('error_record', (evt: MessageEvent) => {
@@ -808,6 +900,62 @@ export const OtelDataPage: React.FC = () => {
                 )}
               </select>
             </label>
+            {/*
+              Resource-level filters live in the top bar so Overview, Operations,
+              and Logs/Errors all see the same picker. The filter state itself is
+              page-level — applies to every tab — and was previously only visible
+              from Traces, which was confusing (active filter, no UI to clear it).
+              Conditionally rendered: only show a dropdown if we've actually seen
+              spans carrying that resource attr, so collectors that don't set
+              service.namespace / container.name don't get a useless picker.
+              Highlighted with the active color when a filter is engaged so the
+              non-Traces tabs (which have no other filter UI) make the active
+              filter visible at a glance.
+            */}
+            {namespaces.length > 0 && (
+              <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
+                <Server className="w-3.5 h-3.5" />
+                Namespace
+                <select
+                  value={namespaceFilter}
+                  onChange={(e) => setNamespaceFilter(e.target.value)}
+                  title="Filter by OTel resource attribute service.namespace. Applies to every tab."
+                  className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${
+                    namespaceFilter ? 'border-active text-active' : 'border-gray-800 text-gray-200'
+                  }`}
+                >
+                  <option value="">All</option>
+                  {namespaces.map(n => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                  {namespaceFilter && !namespaces.includes(namespaceFilter) && (
+                    <option value={namespaceFilter}>{namespaceFilter} (stale)</option>
+                  )}
+                </select>
+              </label>
+            )}
+            {containers.length > 0 && (
+              <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
+                <Server className="w-3.5 h-3.5" />
+                Container
+                <select
+                  value={containerFilter}
+                  onChange={(e) => setContainerFilter(e.target.value)}
+                  title="Filter by OTel resource attribute container.name (or k8s.container.name). Applies to every tab."
+                  className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${
+                    containerFilter ? 'border-active text-active' : 'border-gray-800 text-gray-200'
+                  }`}
+                >
+                  <option value="">All</option>
+                  {containers.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                  {containerFilter && !containers.includes(containerFilter) && (
+                    <option value={containerFilter}>{containerFilter} (stale)</option>
+                  )}
+                </select>
+              </label>
+            )}
             <div ref={diagRef} className="relative">
               <button
                 onClick={() => setDiagOpen(o => !o)}
@@ -899,6 +1047,8 @@ export const OtelDataPage: React.FC = () => {
             services={visibleServices}
             serviceFilter={serviceFilter}
             setServiceFilter={setServiceFilter}
+            namespaceFilter={namespaceFilter}
+            containerFilter={containerFilter}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             searchQuery={searchQuery}

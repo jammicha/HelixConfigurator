@@ -4,7 +4,7 @@
 //   - the /api/services base-tokens endpoint the frontend uses to compute
 //     Helix deep-link URLs (despite the legacy name, this route doesn't
 //     actually enumerate Docker services — it just returns env-derived tokens)
-const fs = require('fs');
+const fs = require('fs').promises;
 const { isValidContainerName } = require('../util');
 
 const VERSION = require('../package.json').version;
@@ -94,7 +94,7 @@ function register(app, { docker }) {
         if (m.Type !== 'bind' || !m.Source) continue;
         if (!/\.ya?ml$/i.test(m.Source)) continue;
         try {
-          const content = fs.readFileSync(m.Source, 'utf8');
+          const content = await fs.readFile(m.Source, 'utf8');
           if (/^receivers:/m.test(content) && /^service:/m.test(content)) {
             collectorConfigPath = m.Source;
             hasCollectorConfig = true;

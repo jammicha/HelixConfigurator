@@ -13,6 +13,12 @@ export const TracesTab: React.FC<{
   services: { name: string; traceCount: number }[];
   serviceFilter: string;
   setServiceFilter: (s: string) => void;
+  // Read-only — namespace/container dropdowns live in the page-level top
+  // bar (visible from every tab). These values flow through here only so
+  // the empty-state copy can accurately say "no traces match your filters"
+  // when one of those filters is engaged.
+  namespaceFilter: string;
+  containerFilter: string;
   statusFilter: '' | TraceStatus;
   setStatusFilter: (s: '' | TraceStatus) => void;
   searchQuery: string;
@@ -28,7 +34,9 @@ export const TracesTab: React.FC<{
   onBucketClick: (sinceMs: number, untilMs: number) => void;
   onClearCustomRange: () => void;
 }> = ({
-  traces, services, serviceFilter, setServiceFilter, statusFilter, setStatusFilter,
+  traces, services, serviceFilter, setServiceFilter,
+  namespaceFilter, containerFilter,
+  statusFilter, setStatusFilter,
   searchQuery, setSearchQuery, minMs, setMinMs,
   helixEnv, operationP95, tracesLoading, onSelect,
   histogram, customRange, onBucketClick, onClearCustomRange,
@@ -78,6 +86,13 @@ export const TracesTab: React.FC<{
             ))}
           </select>
         </div>
+        {/*
+          Namespace + Container filters were here originally but moved to the
+          page-level top bar so Overview, Operations, and Logs/Errors share
+          the same picker. The empty-state filtered flag below still checks
+          namespaceFilter/containerFilter so the "no traces match your
+          filters" copy stays accurate when one of those is engaged.
+        */}
         <div className="flex flex-col gap-1">
           <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Status</label>
           <select
@@ -172,7 +187,7 @@ export const TracesTab: React.FC<{
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading traces…
           </div>
         ) : traces.length === 0 ? (
-          <TracesEmptyState filtered={!!serviceFilter || !!statusFilter || !!searchQuery || minMs > 0} />
+          <TracesEmptyState filtered={!!serviceFilter || !!namespaceFilter || !!containerFilter || !!statusFilter || !!searchQuery || minMs > 0} />
         ) : (
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-gray-900 border-b border-gray-800 z-10">

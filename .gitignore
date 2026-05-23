@@ -4,7 +4,7 @@ frontend/dist/
 frontend/node_modules/
 backend/node_modules/
 frontend-dist/
-.env
+.env*
 .DS_Store
 **/.DS_Store
 helix auth
@@ -14,4 +14,3 @@ data/
 backend/data/
 docs/
 prompt.txt
-.env.predemo-bak

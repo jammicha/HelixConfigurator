@@ -152,6 +152,95 @@ const fetchCustomerCollectorCounters = async (collectorName, port = 8888) => {
 };
 
 // ---------------------------------------------------------------------------
+// Minimal hand-rolled OTLP TracesData protobuf encoder.
+//
+// Why hand-rolled: the gateway's otlphttp/bmchelix exporter ships protobuf
+// (the OTel SDK default), not JSON. BMC Helix accepts protobuf but rejects
+// JSON-encoded OTLP with HTTP 400 — so a JSON-bodied probe produced a false
+// "tenant rejected the request, check your URL" verdict for endpoints that
+// worked fine for the actual data path. Matching the gateway's wire format
+// here eliminates the false positive without pulling in
+// @opentelemetry/exporter-trace-otlp-proto and its ~7-package transitive
+// closure for a single probe payload.
+//
+// Schema reference (frozen since OTel 1.0): opentelemetry/proto/trace/v1/
+// trace.proto and common/v1/common.proto. Only the fields actually emitted
+// below are encoded; everything else uses proto3's "absent fields are
+// default-valued" rule, which the spec requires receivers to accept.
+// ---------------------------------------------------------------------------
+function pbVarint(n) {
+  let v = BigInt(n);
+  const out = [];
+  while (v >= 128n) {
+    out.push(Number((v & 127n) | 128n));
+    v >>= 7n;
+  }
+  out.push(Number(v & 127n));
+  return Buffer.from(out);
+}
+function pbTag(field, wireType) { return pbVarint((field << 3) | wireType); }
+function pbVarintField(field, n) { return Buffer.concat([pbTag(field, 0), pbVarint(n)]); }
+function pbI64Field(field, bigN) {
+  const b = Buffer.alloc(8);
+  b.writeBigUInt64LE(BigInt(bigN));
+  return Buffer.concat([pbTag(field, 1), b]);
+}
+function pbLenField(field, payload) {
+  return Buffer.concat([pbTag(field, 2), pbVarint(payload.length), payload]);
+}
+function pbStringField(field, s) { return pbLenField(field, Buffer.from(s, 'utf8')); }
+function pbBytesField(field, buf) { return pbLenField(field, buf); }
+
+function encodeOtlpProbeTracesPayload() {
+  // AnyValue { string_value (field 1) }
+  const anyValue = pbStringField(1, 'helix-configurator-probe');
+  // KeyValue { key (1), value (2) }
+  const kv = Buffer.concat([
+    pbStringField(1, 'service.name'),
+    pbLenField(2, anyValue),
+  ]);
+  // Resource body { attributes (1, repeated) }
+  const resourceBody = pbLenField(1, kv);
+  // ResourceSpans.resource (field 1)
+  const resourceField = pbLenField(1, resourceBody);
+
+  // Span body. Field numbers from trace.proto:
+  //   1=trace_id, 2=span_id, 5=name, 6=kind, 7=start_time_unix_nano,
+  //   8=end_time_unix_nano, 15=status.
+  const traceId = crypto.randomBytes(16);
+  const spanId = crypto.randomBytes(8);
+  const nowNs = BigInt(Date.now()) * 1_000_000n;
+  const statusBody = pbVarintField(3, 1); // Status.code = STATUS_CODE_OK
+  const spanBody = Buffer.concat([
+    pbBytesField(1, traceId),
+    pbBytesField(2, spanId),
+    pbStringField(5, 'apikey-probe'),
+    pbVarintField(6, 1), // SPAN_KIND_INTERNAL
+    pbI64Field(7, nowNs),
+    pbI64Field(8, nowNs + 1n),
+    pbLenField(15, statusBody),
+  ]);
+
+  // InstrumentationScope body { name (1) }. Some receivers require the
+  // scope field to be present, even with empty values.
+  const scopeBody = pbStringField(1, 'helix-configurator-probe');
+
+  // ScopeSpans body { scope (1), spans (2, repeated) }
+  const scopeSpansBody = Buffer.concat([
+    pbLenField(1, scopeBody),
+    pbLenField(2, spanBody),
+  ]);
+  // ResourceSpans.scope_spans (field 2)
+  const scopeSpansField = pbLenField(2, scopeSpansBody);
+
+  // ResourceSpans body
+  const resourceSpansBody = Buffer.concat([resourceField, scopeSpansField]);
+  // TracesData.resource_spans (field 1, repeated). Top-level message is
+  // written as just its field bytes — no outer length prefix on the wire.
+  return pbLenField(1, resourceSpansBody);
+}
+
+// ---------------------------------------------------------------------------
 // runOtlpProbe(endpoint, apiKey)
 //
 // Posts a minimal synthetic OTLP traces span directly to
@@ -168,37 +257,35 @@ const fetchCustomerCollectorCounters = async (collectorName, port = 8888) => {
 // ---------------------------------------------------------------------------
 async function runOtlpProbe(endpoint, apiKey) {
   const url = `${endpoint}/v1/traces`;
-
-  // Tagged with our service name so it's identifiable in Helix if the probe span lands.
-  const payload = {
-    resourceSpans: [{
-      resource: { attributes: [{ key: 'service.name', value: { stringValue: 'helix-configurator-probe' } }] },
-      scopeSpans: [{
-        spans: [{
-          traceId: crypto.randomBytes(16).toString('hex'),
-          spanId: crypto.randomBytes(8).toString('hex'),
-          name: 'apikey-probe',
-          kind: 1,
-          startTimeUnixNano: Date.now() * 1_000_000,
-          endTimeUnixNano: (Date.now() + 1) * 1_000_000,
-          status: { code: 1 },
-        }],
-      }],
-    }],
-  };
+  // Protobuf body (matches the gateway's exporter wire format — see encoder
+  // comment above for why this isn't JSON).
+  const body = encodeOtlpProbeTracesPayload();
 
   const t0 = Date.now();
   try {
-    const r = await axios.post(url, payload, {
+    const r = await axios.post(url, body, {
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-protobuf',
+        'Accept': 'application/x-protobuf',
         'X-Api-Key': apiKey,
         'X-Source': 'helix-configurator-probe',
       },
       timeout: 8000,
       validateStatus: () => true,
+      // Don't let axios try to parse a protobuf response as JSON.
+      responseType: 'arraybuffer',
     });
     const latencyMs = Date.now() - t0;
+    // For non-success responses, surface the (text-decoded, truncated) body
+    // so the operator can see what Helix actually objected to instead of
+    // guessing from the status code alone.
+    const bodySnippet = (() => {
+      try {
+        const s = Buffer.from(r.data || []).toString('utf8').trim();
+        if (!s) return '';
+        return s.length > 240 ? `${s.slice(0, 240)}…` : s;
+      } catch { return ''; }
+    })();
     if (r.status >= 200 && r.status < 300) {
       return {
         status: 'valid',
@@ -211,7 +298,7 @@ async function runOtlpProbe(endpoint, apiKey) {
       return {
         status: 'rejected',
         httpStatus: 401,
-        message: 'Helix rejected the API key (HTTP 401 Unauthorized).',
+        message: `Helix rejected the API key (HTTP 401 Unauthorized).${bodySnippet ? ` Response: ${bodySnippet}` : ''}`,
         remediation: 'The key is malformed, expired, or revoked. Generate a new one in the BMC Helix Portal and paste it on Step 1.',
       };
     }
@@ -219,7 +306,7 @@ async function runOtlpProbe(endpoint, apiKey) {
       return {
         status: 'rejected',
         httpStatus: 403,
-        message: 'Helix accepted the key but the tenant refused this request (HTTP 403).',
+        message: `Helix accepted the key but the tenant refused this request (HTTP 403).${bodySnippet ? ` Response: ${bodySnippet}` : ''}`,
         remediation: 'The key is recognized but lacks permission, or the tenant is blocking the source IP. Verify the key role in the BMC Helix Portal.',
       };
     }
@@ -227,14 +314,14 @@ async function runOtlpProbe(endpoint, apiKey) {
       return {
         status: 'tenant-error',
         httpStatus: r.status,
-        message: `Helix returned HTTP ${r.status}.`,
-        remediation: 'The endpoint accepted the connection but rejected the request. Check that HELIX_ENDPOINT is the tenant-root URL (no trailing /otlp/v1/traces).',
+        message: `Helix returned HTTP ${r.status}.${bodySnippet ? ` Response: ${bodySnippet}` : ''}`,
+        remediation: 'The endpoint accepted the connection but rejected the OTLP payload. Common causes: HELIX_ENDPOINT includes a trailing /v1/traces (it should be the OTLP root, e.g. https://<tenant>.onbmc.com/otlp), or the tenant requires a different content type. Your real gateway traffic may still be working — confirm via Step 4\'s verify-trace flow.',
       };
     }
     return {
       status: 'helix-error',
       httpStatus: r.status,
-      message: `Helix returned HTTP ${r.status}.`,
+      message: `Helix returned HTTP ${r.status}.${bodySnippet ? ` Response: ${bodySnippet}` : ''}`,
       remediation: 'Helix-side error. Retry shortly; if persistent, check the tenant status page.',
     };
   } catch (e) {

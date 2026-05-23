@@ -1,15 +1,25 @@
 // Read / write the .env file that holds the Helix tenant credentials. The
 // configurator-managed values are the only ones surfaced — other env vars
 // in the file are preserved as-is on write.
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
 
+// Serializes POST handlers so concurrent saves can't interleave their
+// read-modify-write and lose updates. Sync I/O previously gave this for
+// free via event-loop blocking; with async fs we need an explicit chain.
+let envWriteChain = Promise.resolve();
+const withEnvWriteLock = (fn) => {
+  const next = envWriteChain.then(fn, fn);
+  envWriteChain = next.catch(() => {});
+  return next;
+};
+
 function register(app) {
-  app.get('/api/env', (req, res) => {
+  app.get('/api/env', async (req, res) => {
     try {
-      const envContent = fs.readFileSync(ENV_PATH, 'utf8');
+      const envContent = await fs.readFile(ENV_PATH, 'utf8');
       const vars = {};
       envContent.split('\n').forEach(line => {
         const [key, ...value] = line.split('=');
@@ -31,42 +41,44 @@ function register(app) {
     }
   });
 
-  app.post('/api/env', (req, res) => {
+  app.post('/api/env', async (req, res) => {
     const { HELIX_ENDPOINT, HELIX_API_KEY, X_SOURCE, APP_URL, BUSINESS_SERVICE_KEY, HELIX_EVENTS_ENDPOINT } = req.body;
     try {
-      let envContent = fs.readFileSync(ENV_PATH, 'utf8');
+      await withEnvWriteLock(async () => {
+        const envContent = await fs.readFile(ENV_PATH, 'utf8');
 
-      // Trim values so trailing whitespace from copy/paste doesn't propagate.
-      const trim = (v) => (typeof v === 'string' ? v.trim() : '');
-      const updates = {
-        HELIX_ENDPOINT: trim(HELIX_ENDPOINT),
-        HELIX_API_KEY: trim(HELIX_API_KEY),
-        X_SOURCE: trim(X_SOURCE),
-        APP_URL: trim(APP_URL),
-        BUSINESS_SERVICE_KEY: trim(BUSINESS_SERVICE_KEY),
-        HELIX_EVENTS_ENDPOINT: trim(HELIX_EVENTS_ENDPOINT),
-      };
+        // Trim values so trailing whitespace from copy/paste doesn't propagate.
+        const trim = (v) => (typeof v === 'string' ? v.trim() : '');
+        const updates = {
+          HELIX_ENDPOINT: trim(HELIX_ENDPOINT),
+          HELIX_API_KEY: trim(HELIX_API_KEY),
+          X_SOURCE: trim(X_SOURCE),
+          APP_URL: trim(APP_URL),
+          BUSINESS_SERVICE_KEY: trim(BUSINESS_SERVICE_KEY),
+          HELIX_EVENTS_ENDPOINT: trim(HELIX_EVENTS_ENDPOINT),
+        };
 
-      let lines = envContent.split('\n');
-      Object.keys(updates).forEach(key => {
-        let found = false;
-        lines = lines.map(line => {
-          if (line.startsWith(`${key}=`)) {
-            found = true;
-            return `${key}=${updates[key]}`;
+        let lines = envContent.split('\n');
+        Object.keys(updates).forEach(key => {
+          let found = false;
+          lines = lines.map(line => {
+            if (line.startsWith(`${key}=`)) {
+              found = true;
+              return `${key}=${updates[key]}`;
+            }
+            return line;
+          });
+          // Only append when the user actually set a value. Empty values for keys
+          // that aren't already in .env stay out of the file rather than creating
+          // bare `KEY=` lines that confuse other env loaders.
+          if (!found && updates[key]) {
+            lines.push(`${key}=${updates[key]}`);
           }
-          return line;
         });
-        // Only append when the user actually set a value. Empty values for keys
-        // that aren't already in .env stay out of the file rather than creating
-        // bare `KEY=` lines that confuse other env loaders.
-        if (!found && updates[key]) {
-          lines.push(`${key}=${updates[key]}`);
-        }
-      });
 
-      const newContent = lines.join('\n');
-      fs.writeFileSync(ENV_PATH, newContent, 'utf8');
+        const newContent = lines.join('\n');
+        await fs.writeFile(ENV_PATH, newContent, 'utf8');
+      });
 
       // Reload into process.env so subsequent same-process reads see fresh
       // values. The collector container WON'T pick up the new values from a
