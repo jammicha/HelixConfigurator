@@ -44,7 +44,12 @@ interface NavAvatarProps {
 // chrome now that the standalone Logout link is gone.
 export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, currentPage, onJumpToOnboarding, onJumpToDashboard, onOpenSetPassword, onRemovePassword, externalApps }) => {
   const ext = externalApps || {};
-  const hasExternalLinks = !!(ext.otelDashboardUrl || ext.aiopsServiceUrl || ext.applicationUrl);
+  // AIOps Business Service and Application UI render persistently (greyed
+  // when their values aren't set); OTel dashboard is still gated on a real
+  // Helix endpoint. The section is therefore always visible.
+  const extItemBase = 'flex items-center gap-2 px-3 py-2 text-sm transition-colors';
+  const extItemActive = 'text-gray-200 hover:bg-gray-900 hover:text-white';
+  const extItemDisabled = 'text-gray-500 opacity-60 cursor-not-allowed';
 
   // Active-state styling for the page the user is currently on. Layered
   // on top of the base item classes via concat so it overrides hover/text
@@ -126,48 +131,62 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
               View OTel Data
             </a>
 
-            {hasExternalLinks && (
-              <>
-                <div className="border-t border-gray-800 mt-1 pt-1">
-                  <div className="px-3 py-2 text-tiny font-semibold text-gray-500 uppercase tracking-wider">Open in Helix</div>
-                </div>
-                {ext.otelDashboardUrl && (
-                  <a
-                    href={ext.otelDashboardUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setOpenMenu(null)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-gray-900 hover:text-white transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4 text-gray-400" />
-                    OTel dashboard
-                  </a>
-                )}
-                {ext.aiopsServiceUrl && (
-                  <a
-                    href={ext.aiopsServiceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setOpenMenu(null)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-gray-900 hover:text-white transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4 text-gray-400" />
-                    AIOps Business Service
-                  </a>
-                )}
-                {ext.applicationUrl && (
-                  <a
-                    href={ext.applicationUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setOpenMenu(null)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-gray-900 hover:text-white transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4 text-gray-400" />
-                    Application UI
-                  </a>
-                )}
-              </>
+            <div className="border-t border-gray-800 mt-1 pt-1">
+              <div className="px-3 py-2 text-tiny font-semibold text-gray-500 uppercase tracking-wider">Open in Helix</div>
+            </div>
+            {ext.otelDashboardUrl && (
+              <a
+                href={ext.otelDashboardUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setOpenMenu(null)}
+                className={`${extItemBase} ${extItemActive}`}
+              >
+                <ExternalLink className="w-4 h-4 text-gray-400" />
+                OTel dashboard
+              </a>
+            )}
+            {ext.aiopsServiceUrl ? (
+              <a
+                href={ext.aiopsServiceUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setOpenMenu(null)}
+                className={`${extItemBase} ${extItemActive}`}
+              >
+                <ExternalLink className="w-4 h-4 text-gray-400" />
+                AIOps Business Service
+              </a>
+            ) : (
+              <span
+                aria-disabled="true"
+                title="Set the AIOps Business Service Key in Step 1 to enable this link."
+                className={`${extItemBase} ${extItemDisabled}`}
+              >
+                <ExternalLink className="w-4 h-4 text-gray-600" />
+                AIOps Business Service
+              </span>
+            )}
+            {ext.applicationUrl ? (
+              <a
+                href={ext.applicationUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setOpenMenu(null)}
+                className={`${extItemBase} ${extItemActive}`}
+              >
+                <ExternalLink className="w-4 h-4 text-gray-400" />
+                Application UI
+              </a>
+            ) : (
+              <span
+                aria-disabled="true"
+                title="Set the App URL in Step 1 to enable this link."
+                className={`${extItemBase} ${extItemDisabled}`}
+              >
+                <ExternalLink className="w-4 h-4 text-gray-600" />
+                Application UI
+              </span>
             )}
           </div>
         )}

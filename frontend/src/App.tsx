@@ -1137,6 +1137,8 @@ const App = () => {
         setEnvVars({ HELIX_ENDPOINT: '', HELIX_API_KEY: '', X_SOURCE: '', APP_URL: '', BUSINESS_SERVICE_KEY: '' });
         setBridgeStatus(null);
         setAttachResult(null);
+        setStep3Tab('detected');
+        setK8sApplyResult(null);
         setTraceVerifyResult(null);
         setApiKeyProbe(null);
         setSetupError('');
@@ -1734,8 +1736,8 @@ ${logsData.logs || '(no logs available)'}
 
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
           {!isSetupComplete ? (
-            <div className="max-w-5xl mx-auto mt-12 space-y-6">
-              <h1 className="text-2xl font-semibold text-center text-gray-100">Welcome to Helix Configurator</h1>
+            <div className="max-w-5xl mx-auto space-y-4">
+              <h1 className="text-xl font-semibold text-center text-gray-100">Welcome to Helix Configurator</h1>
 
               <Stepper current={setupStep} onJump={setSetupStep} />
 

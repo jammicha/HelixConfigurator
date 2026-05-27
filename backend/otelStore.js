@@ -776,6 +776,14 @@ class OtelStore {
   // filter applied" and don't render NULL as an option. Same lifetime
   // semantics as listServices(): no time window, so the dropdown stays
   // useful while the workload is paused or quiet.
+  //
+  // Intentionally NOT narrowed by service: the Service dropdown narrows by
+  // namespace+container (see listServices), but the reverse direction was a
+  // UX trap. Many services (notably Jaeger HotROD-style demos) don't emit a
+  // service.namespace at all — picking one would shrink the Namespace
+  // dropdown's options to empty and leave the user without a way to clear
+  // or change their namespace filter. Keeping these lifetime gives a stable
+  // anchor.
   listFilterValues() {
     const namespaces = this.db.prepare(
       `SELECT DISTINCT service_namespace AS v FROM spans
@@ -790,7 +798,7 @@ class OtelStore {
     return { namespaces, containers };
   }
 
-  listServices() {
+  listServices({ namespace, container } = {}) {
     // Lifetime counts — not windowed. Earlier attempt at windowing made the
     // dropdown empty whenever the user paused or their workload went quiet,
     // because the spans table had no rows in the recent window even though
@@ -798,10 +806,17 @@ class OtelStore {
     // it should always offer the services that have ever sent traces. Counts
     // are best-effort and may overstate "currently active" — that's a known
     // trade-off, less bad than a vanishing dropdown.
+    //
+    // namespace/container narrow the list to services that have emitted at
+    // least one span tagged with those resource attrs — so picking a
+    // namespace in the top bar shrinks the Service dropdown to just the
+    // services that participate in that namespace.
     const params = [];
     const where = ['s.service_name IS NOT NULL'];
     where.push(`s.service_name NOT IN (${INTERNAL_SERVICES.map(() => '?').join(',')})`);
     params.push(...INTERNAL_SERVICES);
+    if (namespace) { where.push('s.service_namespace = ?'); params.push(namespace); }
+    if (container) { where.push('s.container_name = ?');    params.push(container); }
     const sql = `SELECT s.service_name AS name, COUNT(DISTINCT s.trace_id) AS traceCount
                  FROM spans s
                  WHERE ${where.join(' AND ')}
@@ -1027,11 +1042,19 @@ OtelStore.prototype.overview = function ({ sinceMs, untilMs, service, namespace,
     params.push(container);
   }
   const filterClause = filterClauses.length ? 'AND ' + filterClauses.join(' AND ') : '';
+  // Same "any non-internal participant" rule as listTraces / tracesHistogram.
+  // Without this, topServices reports synthetic verify pings (and other
+  // internal pipeline self-telemetry) that the Traces tab then filters out
+  // server-side — leading to clickable Top Services rows that land on an
+  // empty Traces view.
+  const internalClause = `AND EXISTS (SELECT 1 FROM spans s WHERE s.trace_id = t.trace_id
+                                      AND s.service_name NOT IN (${INTERNAL_SERVICES.map(() => '?').join(',')}))`;
+  params.push(...INTERNAL_SERVICES);
   const rows = this.db
     .prepare(
       `SELECT t.received_at AS ts, t.duration_ms AS dur, t.has_error AS err, t.service_name AS svc
        FROM traces t
-       WHERE t.received_at >= ? AND t.received_at <= ? ${filterClause}
+       WHERE t.received_at >= ? AND t.received_at <= ? ${filterClause} ${internalClause}
        ORDER BY t.received_at ASC`,
     )
     .all(...params);

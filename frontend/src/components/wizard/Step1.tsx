@@ -82,9 +82,8 @@ export const Step1: React.FC<Props> = ({
       >
         New to OpenTelemetry? <span className="font-semibold underline">Start here</span>
       </a>
-      <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 1: Configure helix-gateway</h2>
-      <p className="text-sm text-gray-400 mb-6">Tell the sidecar where Helix lives and what to call your service. The gateway restarts on save.</p>
-      <div className="space-y-4 mb-6">
+      <h2 className="text-lg font-semibold mb-4 text-gray-200">Step 1: Configure helix-gateway</h2>
+      <div className="space-y-3 mb-4">
         <div className="space-y-1">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             Helix Endpoint
@@ -167,7 +166,6 @@ export const Step1: React.FC<Props> = ({
             className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.X_SOURCE && errors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
             placeholder="e.g. payment-service"
           />
-          <p className="text-tiny text-gray-500">Choose a name that will map to a business service in Helix AIOps.</p>
           {envVars.X_SOURCE && errors.X_SOURCE && (
             <p id="helix-x-source-error" className="text-tiny text-danger">{errors.X_SOURCE}</p>
           )}
@@ -192,7 +190,7 @@ export const Step1: React.FC<Props> = ({
             placeholder="https://example.com or http://localhost:8080"
           />
           <p className="text-tiny text-gray-500">
-            Used for the "Open application" deep-link on the dashboard. <code className="font-mono">localhost</code>, an IP, or a public URL: anything that opens your app's UI from a browser is fine. Network wiring between helix-gateway and your collector happens on Step 3.
+            Controls the "Application UI" dashboard link.
           </p>
           {envVars.APP_URL && errors.APP_URL && (
             <p id="helix-app-url-error" className="text-tiny text-danger">{errors.APP_URL}</p>
@@ -220,7 +218,7 @@ export const Step1: React.FC<Props> = ({
             placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
           />
           <p className="text-tiny text-gray-500">
-            Enables the "Open in AIOps" deep-link on the dashboard and the per-trace "Send to AIOps" pin on the trace viewer. Find it at <code className="font-mono">https://&lt;tenant&gt;/aiops/#/entities/service/&lt;KEY&gt;?type=key</code>. Paste either the key or the full URL.
+            Grab the key from the URL of your business service in AIOps. Controls the "AIOps Business Service" dashboard link and "Open in AIOps" / "Send to AIOps" links in View OTel Data.
           </p>
         </div>
       </div>
@@ -261,7 +259,7 @@ export const Step1: React.FC<Props> = ({
         onClick={onInitialize}
         disabled={isVerifying || !canSubmit}
         title={!canSubmit ? 'Fix the field errors above before continuing' : ''}
-        className="w-full bg-primary hover:bg-primary-hover disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 py-3 rounded font-semibold transition-all"
+        className="w-full bg-primary hover:bg-primary-hover disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded font-semibold transition-all"
       >
         {isVerifying ? 'Saving…' : 'Save & initialize →'}
       </button>

@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export type TimelineBucket = {
   tsMs: number;
@@ -106,6 +107,11 @@ const TimelineChartImpl: React.FC<Props> = ({
   // cancels without applying.
   const [dragStartIdx, setDragStartIdx] = useState<number | null>(null);
   const [dragEndIdx, setDragEndIdx] = useState<number | null>(null);
+  // Ref on the SVG itself so the portal-rendered tooltip can position itself
+  // in viewport coordinates. The previous in-flow tooltip was getting clipped
+  // by ancestors with overflow:hidden (TracesTab's column, for one) — moving
+  // it into a portal anchored to document.body sidesteps the clip entirely.
+  const svgRef = useRef<SVGSVGElement | null>(null);
 
   // Resize observer so the chart scales with the container, not just the
   // initial mount width.
@@ -268,6 +274,7 @@ const TimelineChartImpl: React.FC<Props> = ({
       </div>
       <div className="relative">
       <svg
+        ref={svgRef}
         width={width}
         height={height}
         className={`block ${onRangeSelect ? 'cursor-crosshair' : ''}`}
@@ -340,12 +347,16 @@ const TimelineChartImpl: React.FC<Props> = ({
           );
         })()}
 
-        {/* Selected range shading (covers the active sinceMs..untilMs window) */}
+        {/* Selected range shading (covers the active sinceMs..untilMs window).
+            Skipped when the selection effectively spans the whole chart —
+            that happens after the bundle re-fetches at the zoomed window
+            and the visible buckets already represent the selection. */}
         {selectedRange && buckets.length > 0 && bucketSizeMs > 0 && (() => {
           const totalSpanMs = buckets.length * bucketSizeMs;
           const start = (Math.max(selectedRange.sinceMs, buckets[0].tsMs) - buckets[0].tsMs) / totalSpanMs;
           const end = (Math.min(selectedRange.untilMs, buckets[buckets.length - 1].tsMs + bucketSizeMs) - buckets[0].tsMs) / totalSpanMs;
           if (end <= start) return null;
+          if (start <= 0.01 && end >= 0.99) return null;
           const x = padding.left + innerW * start;
           const w = innerW * (end - start);
           return (
@@ -547,17 +558,29 @@ const TimelineChartImpl: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Hover tooltip — positioned near the bucket */}
-      {hover && bucketSizeMs > 0 && (
-        <div
-          className="absolute z-10 pointer-events-none bg-gray-1000 border border-gray-700 rounded px-2.5 py-1.5 shadow-4 text-tiny text-gray-200"
-          style={{
-            left: Math.min(width - 200, Math.max(0, xOf(hoverIdx!) - 90)),
-            top: -8,
-            transform: 'translateY(-100%)',
-            minWidth: 180,
-          }}
-        >
+      {/* Hover tooltip — rendered via a portal to document.body so ancestor
+          overflow:hidden (TracesTab's flex column, etc.) can't clip it.
+          Positioned in viewport coordinates anchored to the SVG, with a
+          flip-below fallback for the rare case where the chart sits within
+          the tooltip's vertical reach of the viewport top. */}
+      {hover && bucketSizeMs > 0 && svgRef.current && createPortal(
+        (() => {
+          const r = svgRef.current!.getBoundingClientRect();
+          const xWithin = Math.min(width - 200, Math.max(0, xOf(hoverIdx!) - 90));
+          const TOOLTIP_HEIGHT_BUDGET = 180; // worst case (latency mode w/ p50/p95/p99)
+          const flipBelow = r.top < TOOLTIP_HEIGHT_BUDGET + 8;
+          const positionStyle: React.CSSProperties = flipBelow
+            ? { top: r.bottom + 8 }
+            : { top: r.top - 8, transform: 'translateY(-100%)' };
+          return (
+            <div
+              className="fixed z-50 pointer-events-none bg-gray-1000 border border-gray-700 rounded px-2.5 py-1.5 shadow-4 text-tiny text-gray-200"
+              style={{
+                left: r.left + xWithin,
+                minWidth: 180,
+                ...positionStyle,
+              }}
+            >
           <div className="tabular-nums text-gray-400 text-[10px]">
             {formatTime(hover.tsMs)} – {formatTime(hover.tsMs + bucketSizeMs)}
           </div>
@@ -620,7 +643,10 @@ const TimelineChartImpl: React.FC<Props> = ({
           ) : (
             <div className="text-gray-500">No activity</div>
           )}
-        </div>
+            </div>
+          );
+        })(),
+        document.body
       )}
       </div>
     </div>

@@ -10,9 +10,9 @@ export const StepZero: React.FC = () => {
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold">Start from zero</h1>
           <p className="text-base text-gray-400 leading-relaxed">
-            Three ways to see Helix at work without committing to instrumentation: a 60-second
-            synthetic scenario, the upstream OpenTelemetry demo, or tailored guides for
-            instrumenting your own apps.
+            Three ways to see Helix without instrumenting your own apps first: a 60-second
+            synthetic scenario, the upstream OpenTelemetry demo, or guides for instrumenting
+            your own.
           </p>
         </header>
 
@@ -30,13 +30,11 @@ export const StepZero: React.FC = () => {
               <div className="text-tiny uppercase tracking-wider text-blue-300 mb-1">Real apps, real SDKs</div>
               <h2 className="text-h3 font-semibold text-gray-100 mb-2">Try the OpenTelemetry demo against Helix</h2>
               <p className="text-base text-gray-300 mb-3 leading-relaxed">
-                The OpenTelemetry project maintains a fully-instrumented polyglot demo (the
-                Astronomy Shop) with ~15 services across Java, .NET, Python, Node, Go, and Rust.
-                Real SDKs, cross-language traces, metrics, and logs. Spin it up locally, then add{' '}
+                A polyglot demo app (~15 services across Java, .NET, Python, Node, Go, Rust)
+                wired with real SDKs. Run it locally, then point its collector at{' '}
                 <code className="font-mono text-sm bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-gray-200">
                   http://helix-gateway:4318
-                </code>
-                {' '}as an exporter target in its collector config.
+                </code>.
               </p>
               <a
                 href="https://opentelemetry.io/docs/demo/"

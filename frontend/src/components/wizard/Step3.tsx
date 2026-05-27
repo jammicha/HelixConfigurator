@@ -137,7 +137,7 @@ export const Step3: React.FC<Props> = ({
           ? <>This step bridges <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-gateway</code> with an existing OTel collector. You can skip this step.</>
           : singleCollector
             ? <>We'll bridge <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helix-gateway</code> to <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">{singleCollector.name}</code>'s network so their OTLP traffic can flow over loopback.</>
-            : 'helix-gateway and your collector need to share a Docker network so their OTLP traffic can flow over loopback.'}
+            : 'helix-gateway and your collector need to share a Docker network to talk to each other.'}
       </p>
 
       {bridgeStatus?.kind === 'error' && (
@@ -205,8 +205,8 @@ export const Step3: React.FC<Props> = ({
 
           {detectedCollectors.length === 0 ? (
             <div className="p-4 text-tiny text-gray-400 border border-gray-800 rounded bg-gray-1000 space-y-2 leading-relaxed">
-              <p>No external OTel collector detected on this host.</p>
-              <p className="text-gray-500">Have a collector running somewhere we couldn't see (Kubernetes, bare-metal, a remote host)? Switch to the <button onClick={() => setTab('manual')} className="text-active hover:underline font-semibold">Manual</button> tab to attach it. Otherwise, skip this step.</p>
+              <p>No external collector detected on this host.</p>
+              <p className="text-gray-500">If yours runs elsewhere (Kubernetes, bare-metal, remote), use the <button onClick={() => setTab('manual')} className="text-active hover:underline font-semibold">Manual</button> tab. Otherwise, skip this step.</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -313,7 +313,7 @@ export const Step3: React.FC<Props> = ({
               )}
             </div>
           )}
-          <p className="text-tiny text-gray-500 mt-3">After attaching, restart your collector so helix-gateway resolves.</p>
+          <p className="text-tiny text-gray-500 mt-3">Restart your collector after attaching so it picks up the new network.</p>
         </div>
       )}
 

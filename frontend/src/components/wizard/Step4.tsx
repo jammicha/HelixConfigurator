@@ -176,7 +176,7 @@ export const Step4: React.FC<Props> = ({
   return (
     <div className="adapt-card">
       <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
-      <p className="text-sm text-gray-400 mb-5">Restart your app or collector first if you just changed config.</p>
+      <p className="text-sm text-gray-400 mb-4">If you just changed config, restart your app or collector before verifying.</p>
 
       {!someoneAttached && detectedCollectors.length > 0 && (
         // Collectors were detected on this host but none of them are bridged
@@ -301,7 +301,7 @@ export const Step4: React.FC<Props> = ({
         ) : (
           <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/40 rounded text-sm">
             <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-            <span className="text-gray-200">Not yet verified. Run the synthetic check below.</span>
+            <span className="text-gray-200">Not verified yet — click Verify gateway → Helix below.</span>
           </div>
         )}
       </div>

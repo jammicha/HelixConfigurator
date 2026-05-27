@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Check,
   Clock,
+  Download,
   ExternalLink,
   LayoutDashboard,
   Loader2,
@@ -122,6 +123,11 @@ export const OtelDataPage: React.FC = () => {
   const [diagOpen, setDiagOpen] = useState(false);
   const [restartingName, setRestartingName] = useState<string | null>(null);
   const [restartResult, setRestartResult] = useState<{ name: string; ok: boolean; message: string } | null>(null);
+  // Diagnostics → "Export to JSON". Bundles a sampled subset of the current
+  // trace/log/error view into a downloadable file for sharing in a support
+  // ticket / bug repro. Sample cap keeps file size sane.
+  const [exporting, setExporting] = useState(false);
+  const EXPORT_TRACE_CAP = 25;
   const diagRef = useRef<HTMLDivElement | null>(null);
 
   // Timeline state. customRange is set when the user clicks a bucket on the
@@ -192,6 +198,87 @@ export const OtelDataPage: React.FC = () => {
       document.removeEventListener('keydown', onKey);
     };
   }, [customRangePopoverOpen]);
+
+  const exportDiagnostics = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      // Sample = first N of the currently-rendered list. The list is already
+      // ordered by the user's active sort (typically received-desc), so this
+      // captures "what's at the top of my Traces tab right now". A random
+      // sample would be less reproducible across exports.
+      const sampled = traces.slice(0, EXPORT_TRACE_CAP);
+      const details = await Promise.all(sampled.map(t =>
+        fetch(`/api/traces/${t.trace_id}`)
+          .then(r => (r.ok ? r.json() : null))
+          .catch(() => null)
+      ));
+
+      // Redact the endpoint host (keeps scheme + path so debugging path/auth
+      // shapes still works). Leave tenantId / source / businessServiceKey —
+      // those are tenant identifiers, not secrets, and they're often what a
+      // support engineer needs to correlate. The full API key never makes it
+      // here in the first place (only its tenant-prefix is exposed via
+      // /api/env), so no extra redaction needed.
+      const redactEndpoint = (ep: string): string => {
+        if (!ep) return ep;
+        try {
+          const u = new URL(ep);
+          return `${u.protocol}//<redacted-host>${u.pathname}${u.search}`;
+        } catch {
+          return '<redacted>';
+        }
+      };
+
+      const bundle = {
+        exportedAt: new Date().toISOString(),
+        exportVersion: 1,
+        view: {
+          activeTab,
+          filters: {
+            service: serviceFilter || null,
+            namespace: namespaceFilter || null,
+            container: containerFilter || null,
+            status: statusFilter || null,
+            search: searchQuery || null,
+            minMs,
+          },
+          range,
+          customRange,
+          slowThresholdMs,
+        },
+        helixEnv: helixEnv
+          ? {
+              endpoint: redactEndpoint(helixEnv.endpoint),
+              tenantId: helixEnv.tenantId,
+              source: helixEnv.source,
+              businessServiceKey: helixEnv.businessServiceKey,
+            }
+          : null,
+        sample: {
+          tracesAvailable: traces.length,
+          tracesIncluded: details.filter(Boolean).length,
+          strategy: `first ${EXPORT_TRACE_CAP} of current sort order`,
+        },
+        traces: details.filter(Boolean),
+        errors,
+        logs,
+      };
+
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.download = `helix-otel-export-${ts}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const restartCollector = async (name: string) => {
     if (restartingName) return;
@@ -385,13 +472,18 @@ export const OtelDataPage: React.FC = () => {
   // we actually want fresh data.
   const [refreshNonce, setRefreshNonce] = useState(0);
   const overviewWindow = useMemo<{ sinceMs?: number; untilMs?: number }>(() => {
+    // customRange (set by click/drag on any histogram) takes precedence
+    // so the bundle re-fetches with the zoomed window — histograms rebin
+    // to finer buckets and the headline stats reflect the selection,
+    // matching how resolveWindow() already drives refreshTraces/Logs/Errors.
+    if (customRange) return { sinceMs: customRange.sinceMs, untilMs: customRange.untilMs };
     const r = TIME_RANGES.find(x => x.value === range);
     if (!r?.ms) return {};
     const now = Date.now();
     return { sinceMs: now - r.ms, untilMs: now };
     // refreshNonce intentionally drives the recompute alongside range.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, refreshNonce]);
+  }, [range, customRange, refreshNonce]);
   const ov = useOverview({
     sinceMs: overviewWindow.sinceMs,
     untilMs: overviewWindow.untilMs,
@@ -401,13 +493,24 @@ export const OtelDataPage: React.FC = () => {
     slowThresholdMs,
   });
 
-  const refreshServices = async () => {
+  const refreshServices = useCallback(async () => {
     // Two endpoints fetched in parallel: services for the existing dropdown
-    // and filter-values for the new namespace/container dropdowns. Both
-    // return lifetime distinct values; neither is expensive enough to
-    // warrant a single composite endpoint.
+    // and filter-values for the namespace/container dropdowns. Both return
+    // lifetime distinct values; neither is expensive enough to warrant a
+    // single composite endpoint.
+    //
+    // Narrowing is one-way: the Service dropdown narrows by the active
+    // namespace/container so picking a namespace shrinks the service list
+    // to services that participate in it. Namespace and Container lists are
+    // intentionally NOT narrowed by the active service — many services
+    // (Jaeger HotROD-style demos in particular) don't carry a
+    // service.namespace, and narrowing the Namespace picker by them would
+    // shrink its options to empty and strand any active namespace filter.
+    const svcParams = new URLSearchParams();
+    if (namespaceFilter) svcParams.set('namespace', namespaceFilter);
+    if (containerFilter) svcParams.set('container', containerFilter);
     const [svcRes, fvRes] = await Promise.all([
-      fetch('/api/traces/services'),
+      fetch(`/api/traces/services${svcParams.toString() ? `?${svcParams}` : ''}`),
       fetch('/api/traces/filter-values'),
     ]);
     if (svcRes.ok) {
@@ -419,7 +522,7 @@ export const OtelDataPage: React.FC = () => {
       setNamespaces(Array.isArray(j.namespaces) ? j.namespaces : []);
       setContainers(Array.isArray(j.containers) ? j.containers : []);
     }
-  };
+  }, [namespaceFilter, containerFilter]);
 
   const refreshErrors = async () => {
     const params = new URLSearchParams();
@@ -562,15 +665,20 @@ export const OtelDataPage: React.FC = () => {
   }, [range]);
 
   useEffect(() => {
-    refreshServices();
     refreshErrors();
     refreshLogs();
-    // The service list reflects every service that participates in any trace
-    // (spans table, lifetime). 30 s tick picks up new services emitting their
-    // first span without a full page reload.
+  }, []);
+
+  // Service/Namespace/Container dropdowns are mutually narrowed by the
+  // active filters, so refetch whenever any of them changes (refreshServices'
+  // own deps capture the current values). 30s tick picks up new services
+  // emitting their first span without a full page reload — recreating the
+  // interval on filter change keeps it bound to the current closure.
+  useEffect(() => {
+    refreshServices();
     const id = setInterval(refreshServices, 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [refreshServices]);
 
   // Realtime SSE — push new traces and errors into the lists without polling.
   // The connection is shared across both tabs; tab switches don't tear it down.
@@ -907,12 +1015,15 @@ export const OtelDataPage: React.FC = () => {
               from Traces, which was confusing (active filter, no UI to clear it).
               Conditionally rendered: only show a dropdown if we've actually seen
               spans carrying that resource attr, so collectors that don't set
-              service.namespace / container.name don't get a useless picker.
+              service.namespace / container.name don't get a useless picker. The
+              || namespaceFilter clause is belt-and-suspenders for a deep-linked
+              filter that arrives before the first /filter-values response —
+              keeps the (stale) clear-out option reachable.
               Highlighted with the active color when a filter is engaged so the
               non-Traces tabs (which have no other filter UI) make the active
               filter visible at a glance.
             */}
-            {namespaces.length > 0 && (
+            {(namespaces.length > 0 || namespaceFilter) && (
               <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
                 <Server className="w-3.5 h-3.5" />
                 Namespace
@@ -934,7 +1045,7 @@ export const OtelDataPage: React.FC = () => {
                 </select>
               </label>
             )}
-            {containers.length > 0 && (
+            {(containers.length > 0 || containerFilter) && (
               <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
                 <Server className="w-3.5 h-3.5" />
                 Container
@@ -1005,6 +1116,28 @@ export const OtelDataPage: React.FC = () => {
                   )}
                   <div className="px-3 py-2 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">
                     Use when traces stop arriving despite the Stream pill showing Live. Common when the OTel demo collector's <code className="font-mono text-gray-400">memory_limiter</code> trips after long runs.
+                  </div>
+                  {/* Bundles the currently-rendered traces (capped sample) +
+                      all visible logs/errors + active filters + a redacted
+                      copy of helixEnv into a single JSON file. Aimed at
+                      attaching to support tickets so the recipient can see
+                      both the data and the view configuration. */}
+                  <div className="px-3 py-2 border-t border-gray-800">
+                    <button
+                      type="button"
+                      onClick={exportDiagnostics}
+                      disabled={exporting || traces.length === 0}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-tiny rounded bg-gray-800 hover:bg-gray-700 text-gray-200 font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                      title={traces.length === 0 ? 'No traces in current view to export' : `Download a JSON bundle of the first ${Math.min(EXPORT_TRACE_CAP, traces.length)} traces in view (with their spans + logs), plus visible logs/errors and active filters. Endpoint host is redacted.`}
+                    >
+                      {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                      {exporting ? 'Exporting…' : 'Export to JSON'}
+                      {!exporting && traces.length > 0 && (
+                        <span className="text-tiny text-gray-500 font-normal">
+                          ({Math.min(EXPORT_TRACE_CAP, traces.length)} of {traces.length})
+                        </span>
+                      )}
+                    </button>
                   </div>
                 </div>
               )}

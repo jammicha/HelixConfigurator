@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Activity, AlertTriangle, Database, ExternalLink, FileText, Loader2, Server, X } from 'lucide-react';
+import { Activity, AlertTriangle, Database, ExternalLink, FileText, Loader2, Play, Server, X } from 'lucide-react';
 import { TimelineChart, TIMELINE_COLORS } from '../TimelineChart';
 import { BmcChevron } from './BmcChevron';
 import { StatusPill } from './StatusPill';
 import { MIN_DURATION_PRESETS } from './constants';
 import { useSlowThreshold } from './SlowThresholdContext';
 import { buildHelixTraceUrl, formatDuration, formatRelative, hasRealHelixEndpoint } from './utils';
+import { useSyntheticRun } from '../../hooks/useSyntheticRun';
 import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
 
 export const TracesTab: React.FC<{
@@ -84,6 +85,14 @@ export const TracesTab: React.FC<{
             {services.map(s => (
               <option key={s.name} value={s.name}>{s.name} ({s.traceCount})</option>
             ))}
+            {/* The Service list is narrowed by the active namespace/container.
+                If the user picked a service and then a namespace that excludes
+                it, render a self-referential option so the filter stays
+                visible and clearable — same pattern as the Namespace dropdown
+                in the page top bar. */}
+            {serviceFilter && !services.some(s => s.name === serviceFilter) && (
+              <option value={serviceFilter}>{serviceFilter} (stale)</option>
+            )}
           </select>
         </div>
         {/*
@@ -149,7 +158,13 @@ export const TracesTab: React.FC<{
           </div>
         </div>
         <div className="ml-auto text-tiny text-gray-500 pb-1">
-          {traces.length} trace{traces.length === 1 ? '' : 's'} • cap 500 (sliding window)
+          {(() => {
+            const windowTotal = histogram?.buckets.reduce((a, b) => a + (b.total || 0), 0) ?? null;
+            if (windowTotal != null && windowTotal > traces.length) {
+              return <>{traces.length} of {windowTotal.toLocaleString()} traces in window <span className="text-gray-600" title="The table shows the most recent matching traces (server-capped). The volume chart counts everything in the window.">· most recent shown</span></>;
+            }
+            return <>{traces.length} trace{traces.length === 1 ? '' : 's'}</>;
+          })()}
         </div>
       </div>
 
@@ -319,27 +334,70 @@ export const TracesTab: React.FC<{
   );
 };
 
-const TracesEmptyState: React.FC<{ filtered: boolean }> = ({ filtered }) => (
-  <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
-    <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
-      <Activity className="w-6 h-6 text-gray-500" />
-    </div>
-    <h3 className="text-base font-semibold text-gray-200 mb-2">
-      {filtered ? 'No traces match these filters' : 'No traces received yet'}
-    </h3>
-    <p className="text-sm text-gray-400 max-w-md mb-3 leading-relaxed">
-      {filtered ? (
-        <>Try widening the time range, or clear the service filter to see all traces.</>
-      ) : (
-        <>Send traffic to your instrumented application. Spans will stream in here within a few seconds of arriving at the gateway.</>
-      )}
-    </p>
-    {!filtered && (
-      <p className="text-tiny text-gray-500 max-w-md leading-relaxed">
-        Reminder: your application should be exporting OpenTelemetry traces to{' '}
-        <code className="font-mono text-gray-300 bg-gray-1000 px-1.5 py-0.5 rounded">helix-gateway:4318</code>{' '}
-        (HTTP) or <code className="font-mono text-gray-300 bg-gray-1000 px-1.5 py-0.5 rounded">helix-gateway:4317</code> (gRPC).
+const TracesEmptyState: React.FC<{ filtered: boolean }> = ({ filtered }) => {
+  // Only fire the synthetic-run hook in the unfiltered "no data anywhere"
+  // branch — when filtered=true the user has data, just nothing matching,
+  // and a generate-data CTA would be misleading.
+  return (
+    <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
+      <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
+        <Activity className="w-6 h-6 text-gray-500" />
+      </div>
+      <h3 className="text-base font-semibold text-gray-200 mb-2">
+        {filtered ? 'No traces match these filters' : 'No traces received yet'}
+      </h3>
+      <p className="text-sm text-gray-400 max-w-md mb-3 leading-relaxed">
+        {filtered ? (
+          <>Try widening the time range, or clear the service filter to see all traces.</>
+        ) : (
+          <>Send traffic to your instrumented application. Spans will stream in here within a few seconds of arriving at the gateway.</>
+        )}
       </p>
-    )}
-  </div>
-);
+      {!filtered && (
+        <>
+          <p className="text-tiny text-gray-500 max-w-md leading-relaxed">
+            Reminder: your application should be exporting OpenTelemetry traces to{' '}
+            <code className="font-mono text-gray-300 bg-gray-1000 px-1.5 py-0.5 rounded">helix-gateway:4318</code>{' '}
+            (HTTP) or <code className="font-mono text-gray-300 bg-gray-1000 px-1.5 py-0.5 rounded">helix-gateway:4317</code> (gRPC).
+          </p>
+          <SyntheticGenerateAffordance />
+        </>
+      )}
+    </div>
+  );
+};
+
+// "Or generate synthetic traces" CTA — only rendered inside the unfiltered
+// empty state above. Same scenario the Step 0 page uses (60-second burst,
+// ~service.namespace=Helix-Configurator-Demo), so the data appears in this
+// table without any filter switching once spans arrive at the gateway.
+// Reuses useSyntheticRun so this CTA reflects a run already in flight from
+// /step-zero or the Overview tab.
+const SyntheticGenerateAffordance: React.FC = () => {
+  const { status, starting, startError, start } = useSyntheticRun();
+  const isRunning = !!status?.running;
+
+  return (
+    <div className="mt-6 pt-6 border-t border-gray-800 max-w-md w-full">
+      <p className="text-tiny text-gray-500 mb-2">No app to instrument yet?</p>
+      {isRunning ? (
+        <div className="inline-flex items-center gap-2 text-tiny text-gray-300">
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-300" />
+          Generating synthetic traces — {status!.sent_traces} sent
+          {status!.eta_s != null && <> · {status!.eta_s}s remaining</>}
+        </div>
+      ) : (
+        <button
+          onClick={() => start()}
+          disabled={starting}
+          className="inline-flex items-center gap-2 px-3 py-1.5 text-tiny rounded font-semibold bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-60"
+          title="Run a 60-second burst of realistic e-commerce traces. They'll appear here within a few seconds."
+        >
+          {starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+          Generate synthetic traces
+        </button>
+      )}
+      {startError && <p className="mt-2 text-tiny text-danger">{startError}</p>}
+    </div>
+  );
+};
