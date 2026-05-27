@@ -123,6 +123,17 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
   const slowThresholdMs = useSlowThreshold();
   const [criticalPathOnly, setCriticalPathOnly] = useState(false);
   const [traceView, setTraceView] = useState<'waterfall' | 'flame'>('waterfall');
+  // SpanId → true means "this span's subtree is hidden in the waterfall".
+  // Toggled only from the SpanRow chevron (parents only); leaf rows never
+  // see a toggle callback so the chevron keeps its legacy detail-open meaning.
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  const toggleCollapsed = (spanId: string) => {
+    setCollapsedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(spanId)) next.delete(spanId); else next.add(spanId);
+      return next;
+    });
+  };
   const traceStartNs = useMemo(() => {
     let min = Infinity;
     for (const s of spans) if (s.startTimeNs < min) min = s.startTimeNs;
@@ -163,6 +174,47 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
     for (const s of spans) if (!visited.has(s.spanId)) out.push({ span: s, depth: 0 });
     return out;
   }, [spans]);
+
+  // Transitive descendant count per span. Used to decide whether a row gets a
+  // tree-collapse chevron, and to label collapsed parents with how many spans
+  // are hidden underneath.
+  const descendantCountById = useMemo(() => {
+    const byParent = new Map<string, SpanDetail[]>();
+    for (const s of spans) {
+      const p = s.parentSpanId || '';
+      if (!byParent.has(p)) byParent.set(p, []);
+      byParent.get(p)!.push(s);
+    }
+    const counts = new Map<string, number>();
+    const count = (id: string): number => {
+      const cached = counts.get(id);
+      if (cached != null) return cached;
+      const kids = byParent.get(id) || [];
+      let n = kids.length;
+      for (const k of kids) n += count(k.spanId);
+      counts.set(id, n);
+      return n;
+    };
+    for (const s of spans) count(s.spanId);
+    return counts;
+  }, [spans]);
+
+  // Filter the rendered list to hide any span whose ancestor chain crosses a
+  // collapsed id. The collapsed parent itself stays visible.
+  const visibleOrdered = useMemo(() => {
+    if (collapsedIds.size === 0) return ordered;
+    const parentById = new Map<string, string | null>();
+    for (const s of spans) parentById.set(s.spanId, s.parentSpanId || null);
+    const isHidden = (spanId: string): boolean => {
+      let p = parentById.get(spanId) || null;
+      while (p) {
+        if (collapsedIds.has(p)) return true;
+        p = parentById.get(p) || null;
+      }
+      return false;
+    };
+    return ordered.filter(o => !isHidden(o.span.spanId));
+  }, [ordered, collapsedIds, spans]);
 
   const nPlusOne = useMemo(() => detectNPlusOne(spans), [spans]);
 
@@ -434,7 +486,11 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
             </label>
           )}
           <span className="ml-auto text-tiny text-gray-500">
-            {traceView === 'waterfall' ? `${ordered.filter(o => !criticalPathOnly || criticalPath.has(o.span.spanId)).length} spans` : `${spans.length} spans • aggregated by depth`}
+            {traceView === 'waterfall' ? (() => {
+              const shown = visibleOrdered.filter(o => !criticalPathOnly || criticalPath.has(o.span.spanId)).length;
+              const hidden = ordered.length - visibleOrdered.length;
+              return hidden > 0 ? `${shown} spans • ${hidden} hidden` : `${shown} spans`;
+            })() : `${spans.length} spans • aggregated by depth`}
           </span>
         </div>
         {traceView === 'waterfall' ? (
@@ -445,18 +501,24 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
               <span className="w-20 text-right">Duration</span>
             </div>
             <div className="divide-y divide-gray-800">
-              {ordered.filter(o => !criticalPathOnly || criticalPath.has(o.span.spanId)).map(({ span, depth }) => (
-                <SpanRow
-                  key={`${span.spanId}-${span.traceId}`}
-                  span={span}
-                  depth={depth}
-                  traceStartNs={traceStartNs}
-                  traceDurationNs={traceDurationNs}
-                  logs={logsBySpan.get(span.spanId) || []}
-                  isOnCriticalPath={criticalPath.has(span.spanId)}
-                  criticalInterval={criticalIntervals.get(span.spanId) || null}
-                />
-              ))}
+              {visibleOrdered.filter(o => !criticalPathOnly || criticalPath.has(o.span.spanId)).map(({ span, depth }) => {
+                const descendantCount = descendantCountById.get(span.spanId) || 0;
+                return (
+                  <SpanRow
+                    key={`${span.spanId}-${span.traceId}`}
+                    span={span}
+                    depth={depth}
+                    traceStartNs={traceStartNs}
+                    traceDurationNs={traceDurationNs}
+                    logs={logsBySpan.get(span.spanId) || []}
+                    isOnCriticalPath={criticalPath.has(span.spanId)}
+                    criticalInterval={criticalIntervals.get(span.spanId) || null}
+                    descendantCount={descendantCount}
+                    isCollapsed={collapsedIds.has(span.spanId)}
+                    onToggleCollapsed={descendantCount > 0 ? () => toggleCollapsed(span.spanId) : null}
+                  />
+                );
+              })}
             </div>
           </>
         ) : (

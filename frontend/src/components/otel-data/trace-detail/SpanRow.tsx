@@ -13,7 +13,13 @@ export const SpanRow: React.FC<{
   logs: LogRecord[];
   isOnCriticalPath: boolean;
   criticalInterval: { startNs: number; endNs: number } | null;
-}> = ({ span, depth, traceStartNs, traceDurationNs, logs, isOnCriticalPath, criticalInterval }) => {
+  // Tree-collapse: parents pass a toggle callback + their transitive descendant
+  // count. Leaves pass onToggleCollapsed=null and the chevron continues to
+  // mean "open this row's detail panel" (legacy single-chevron behavior).
+  descendantCount: number;
+  isCollapsed: boolean;
+  onToggleCollapsed: (() => void) | null;
+}> = ({ span, depth, traceStartNs, traceDurationNs, logs, isOnCriticalPath, criticalInterval, descendantCount, isCollapsed, onToggleCollapsed }) => {
   const slowThresholdMs = useSlowThreshold();
   const [open, setOpen] = useState(false);
   const offsetNs = Math.max(0, span.startTimeNs - traceStartNs);
@@ -98,13 +104,41 @@ export const SpanRow: React.FC<{
         className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-gray-800/40 transition-colors"
       >
         <div className="w-[28rem] flex items-center gap-2 min-w-0" style={{ paddingLeft: depth * 14 }}>
-          {open ? <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
+          {/* Parent rows: the chevron is a tree-collapse toggle. We use a real
+              <button> nested in the outer button (technically invalid HTML, but
+              browsers accept it and React's stopPropagation reliably keeps the
+              outer detail-toggle handler from also firing). Negative margins
+              extend the hit area without changing the row's height so the
+              caret is comfortable to click — 14px alone was too small.
+              Leaf rows fall back to the legacy chevron-as-detail-indicator. */}
+          {onToggleCollapsed ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); onToggleCollapsed(); }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="text-gray-500 hover:text-gray-100 hover:bg-gray-700/60 cursor-pointer flex-shrink-0 inline-flex items-center justify-center rounded -my-2 -ml-2 pl-2 pr-1.5 py-2"
+              title={isCollapsed ? `Expand ${descendantCount} hidden span${descendantCount === 1 ? '' : 's'}` : `Collapse ${descendantCount} child span${descendantCount === 1 ? '' : 's'}`}
+              aria-label={isCollapsed ? 'Expand subtree' : 'Collapse subtree'}
+            >
+              {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          ) : (
+            open ? <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+          )}
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className={`text-sm truncate ${isError ? 'text-[#ff8a8a]' : 'text-gray-100'}`}>{span.name}</span>
               {isError && <span className="adapt-badge-danger flex-shrink-0">Error</span>}
               {dbSystem && <span className="adapt-badge-info flex-shrink-0 inline-flex items-center gap-1"><Database className="w-2.5 h-2.5" />{dbSystem}</span>}
               {isSlow && !isError && <span className="adapt-badge-warning flex-shrink-0">Slow</span>}
+              {isCollapsed && descendantCount > 0 && (
+                <span
+                  className="adapt-badge-info flex-shrink-0"
+                  title={`Subtree is collapsed; ${descendantCount} span${descendantCount === 1 ? '' : 's'} hidden.`}
+                >
+                  +{descendantCount} hidden
+                </span>
+              )}
               {logs.length > 0 && (
                 <span
                   className={`${logBadgeClass} flex-shrink-0 inline-flex items-center gap-1`}
