@@ -39,13 +39,14 @@ function register(app, { otelStore, docker }) {
   });
 
   app.get('/api/traces/services', (req, res) => {
-    res.json({ services: otelStore.listServices() });
+    const { namespace, container } = readResourceFilters(req.query);
+    res.json({ services: otelStore.listServices({ namespace, container }) });
   });
 
   // Distinct values for the namespace/container filter dropdowns. Kept
   // alongside /services so the page can fetch all three lists with one
   // round-trip (we'll batch on the client). Lifetime values — see
-  // listFilterValues for why we don't window.
+  // listFilterValues for why we don't window or narrow.
   app.get('/api/traces/filter-values', (req, res) => {
     res.json(otelStore.listFilterValues());
   });
