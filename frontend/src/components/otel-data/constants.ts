@@ -11,6 +11,12 @@ export const TIME_RANGES: { value: TimeRange; label: string; ms: number | null }
 
 export const SLOW_THRESHOLD_MS = 1000;
 
+// Max traces requested for the list and retained in the live SSE merge.
+// Matches the backend store ceiling (TRACE_CAP=500 in backend/otelStore.js) so
+// the viewer surfaces every retained trace instead of truncating at the route
+// default of 200. The /api/traces route clamps anything above 500 anyway.
+export const TRACE_LIST_LIMIT = 500;
+
 // Services emitted by the configurator/sidecar themselves — useful for
 // debugging the pipeline, but noise when a user is looking for their app's
 // traces. Always hidden now that the "Show internal" toggle was removed.

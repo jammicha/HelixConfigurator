@@ -24,7 +24,7 @@ import { useLocalStorageState } from '../hooks/useLocalStorageState';
 // Shared types/utilities + sub-tab components — moved out of this file to
 // keep OtelDataPage focused on page-level wiring rather than per-tab UI.
 import type { HelixEnv, OperationStat, TraceDetail, TraceStatus, TraceSummary, TimeRange, LogRecord, ErrorRecord } from './otel-data/types';
-import { TIME_RANGES, SLOW_THRESHOLD_MS, INTERNAL_SERVICES } from './otel-data/constants';
+import { TIME_RANGES, SLOW_THRESHOLD_MS, INTERNAL_SERVICES, TRACE_LIST_LIMIT } from './otel-data/constants';
 import { SlowThresholdProvider } from './otel-data/SlowThresholdContext';
 import { traceStatus } from './otel-data/utils';
 import { CustomRangePopover } from './otel-data/CustomRangePopover';
@@ -450,6 +450,7 @@ export const OtelDataPage: React.FC = () => {
     if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
     if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
     if (searchQuery.trim()) params.set('q', searchQuery.trim());
+    params.set('limit', String(TRACE_LIST_LIMIT));
     const res = await fetch(`/api/traces?${params}`);
     if (res.ok) {
       const j = await res.json();
@@ -724,8 +725,8 @@ export const OtelDataPage: React.FC = () => {
         }
         setTraces(prev => {
           const filtered = prev.filter(t => t.trace_id !== summary.trace_id);
-          // Keep newest first, cap at 200 to mirror server query.
-          return [summary, ...filtered].slice(0, 200);
+          // Keep newest first, cap at TRACE_LIST_LIMIT to mirror server query.
+          return [summary, ...filtered].slice(0, TRACE_LIST_LIMIT);
         });
         // New service? Refresh the dropdown.
         setServices(prev => prev.some(s => s.name === summary.service_name)
