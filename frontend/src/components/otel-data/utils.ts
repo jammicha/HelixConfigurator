@@ -48,17 +48,20 @@ export const severityBadgeClass = (s: string): string => {
 };
 
 // Format a nanosecond Unix timestamp as Helix expects in the dashboard's
-// TraceTimestamp variable: "YYYY-MM-DD HH:MM:SS.NNNNNNNNN" in browser-local
-// time. JS numbers preserve millisecond accuracy at these magnitudes; the
-// trailing nanoseconds are zero-padded since we don't have sub-ms data.
+// TraceTimestamp variable: "YYYY-MM-DD HH:MM:SS.NNNNNNNNN" in UTC. Helix
+// matches this string against the stored span time (UTC); formatting in
+// browser-local time sent e.g. a US-Central trace 5h off, so the dashboard
+// resolved no matching trace. JS numbers preserve millisecond accuracy at
+// these magnitudes; the trailing nanoseconds are zero-padded since we don't
+// have sub-ms data.
 export const formatHelixTimestamp = (timeNs: number | null | undefined): string => {
   if (!timeNs) return '';
   const ms = Math.floor(timeNs / 1e6);
   const d = new Date(ms);
   const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  return `${date} ${time}.${pad(d.getMilliseconds(), 3)}000000`;
+  const date = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  const time = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  return `${date} ${time}.${pad(d.getUTCMilliseconds(), 3)}000000`;
 };
 
 // Install bundles ship HELIX_ENDPOINT=https://your-tenant.onbmc.com so the
@@ -115,7 +118,12 @@ export const buildHelixTraceUrl = (
     'var-TraceTimestamp': formatHelixTimestamp(timeNs),
     'var-TraceId': traceId.toUpperCase(),
   });
-  return `${env.endpoint.replace(/\/+$/, '')}/dashboards/d/OTelTraceDetails/otel-trace-details?${params.toString()}`;
+  // URLSearchParams encodes the space in var-TraceTimestamp as "+", which
+  // Helix can read literally and then fail to match the stored
+  // "YYYY-MM-DD HH:MM:SS" value. Emit %20 instead. A literal "+" in any value
+  // is already percent-encoded as %2B, so this only rewrites encoded spaces.
+  const qs = params.toString().replace(/\+/g, '%20');
+  return `${env.endpoint.replace(/\/+$/, '')}/dashboards/d/OTelTraceDetails/otel-trace-details?${qs}`;
 };
 
 // Detect N+1 pattern: 5+ spans with the same db.operation + db.name.
