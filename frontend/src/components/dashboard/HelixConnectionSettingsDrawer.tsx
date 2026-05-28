@@ -46,6 +46,27 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
     return () => { document.body.style.overflow = prev; };
   }, [open]);
 
+  type ProvState = 'idle' | 'running' | 'done' | 'error';
+  const [classState, setClassState] = React.useState<ProvState>('idle');
+  const [classMsg, setClassMsg] = React.useState('');
+  const [policyState, setPolicyState] = React.useState<ProvState>('idle');
+  const [policyMsg, setPolicyMsg] = React.useState('');
+
+  const provision = async (
+    path: string,
+    setState: (s: ProvState) => void,
+    setMsg: (m: string) => void,
+    okMsg: string,
+  ) => {
+    setState('running'); setMsg('');
+    try {
+      const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { setState('done'); setMsg(data.alreadyExists ? `${okMsg} (already existed)` : okMsg); }
+      else { setState('error'); setMsg(data.error || `Request failed (${res.status})`); }
+    } catch (e: any) { setState('error'); setMsg(e.message || 'Network error'); }
+  };
+
   if (!open) return null;
 
   return (
@@ -152,6 +173,33 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
               className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
               placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
             />
+          </div>
+
+          <div className="space-y-2 pt-2 border-t border-gray-800">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AIOps Provisioning</div>
+            <p className="text-tiny text-gray-500">Provisions against your <em>saved</em> connection. Update settings first, then provision the event class, then the correlation policy.</p>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => provision('/api/situations/provision-class', setClassState, setClassMsg, 'Event class provisioned')}
+                disabled={classState === 'running'}
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded border border-gray-800 hover:border-active text-sm font-semibold text-gray-200 disabled:opacity-60"
+              >
+                {classState === 'running' && <Loader2 className="w-4 h-4 animate-spin" />}
+                1. Provision event class
+              </button>
+              {classMsg && <span className={`text-tiny ${classState === 'error' ? 'text-danger-text' : 'text-gray-400'}`}>{classMsg}</span>}
+              <button
+                type="button"
+                onClick={() => provision('/api/situations/provision-correlation-policy', setPolicyState, setPolicyMsg, 'Correlation policy provisioned')}
+                disabled={policyState === 'running'}
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded border border-gray-800 hover:border-active text-sm font-semibold text-gray-200 disabled:opacity-60"
+              >
+                {policyState === 'running' && <Loader2 className="w-4 h-4 animate-spin" />}
+                2. Provision correlation policy
+              </button>
+              {policyMsg && <span className={`text-tiny ${policyState === 'error' ? 'text-danger-text' : 'text-gray-400'}`}>{policyMsg}</span>}
+            </div>
           </div>
         </div>
 
