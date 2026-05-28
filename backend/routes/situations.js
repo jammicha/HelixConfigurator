@@ -211,15 +211,20 @@ function register(app, { otelStore }) {
   // pattern as provision-class. Upsert: list policies, match by name, PUT or POST.
   app.post('/api/situations/provision-correlation-policy', async (req, res) => {
     const apiKey = (process.env.HELIX_API_KEY || '').trim();
-    if (!apiKey) return res.status(412).json({ error: 'HELIX_API_KEY not configured - set it on the Settings page first.' });
+    if (!apiKey) return res.status(412).json({ error: 'HELIX_API_KEY not configured — set it on the Settings page first.' });
     const baseUrl = resolveEventsBaseUrl();
-    if (!baseUrl) return res.status(412).json({ error: 'No events endpoint configured - set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
+    if (!baseUrl) return res.status(412).json({ error: 'No events endpoint configured — set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
 
     const headers = { 'Content-Type': 'application/json', Authorization: `apiKey ${apiKey}` };
     const policiesUrl = `${baseUrl}/events-service/api/v1.0/event_policies`;
     try {
       // List existing policies to decide create vs update.
       const list = await axios.get(policiesUrl, { headers, timeout: 15_000, validateStatus: () => true });
+      // Guard the read: a failed list (bad key, wrong host) must surface here,
+      // not fall through to a blind POST that masks the real cause.
+      if (list.status < 200 || list.status >= 300) {
+        return res.status(502).json({ error: `Helix event-policies list returned ${list.status}`, upstream: list.data });
+      }
       const existing = Array.isArray(list.data) ? list.data : (list.data && list.data.responseContent) || [];
       const action = selectPolicyUpsert(existing, CORRELATION_POLICY_NAME);
       const policy = buildCorrelationPolicy();
@@ -232,9 +237,9 @@ function register(app, { otelStore }) {
       if (response.status >= 200 && response.status < 300) {
         return res.json({ ok: true, action: action.method, policyName: CORRELATION_POLICY_NAME, upstream: response.data });
       }
-      return res.status(502).json({ error: `Helix event_policies API returned ${response.status}`, upstream: response.data });
+      return res.status(502).json({ error: `Helix event-policies API returned ${response.status}`, upstream: response.data });
     } catch (e) {
-      return res.status(502).json({ error: 'Failed to reach Helix event_policies API', details: e.message });
+      return res.status(502).json({ error: 'Failed to reach Helix event-policies API', details: e.message });
     }
   });
 }
