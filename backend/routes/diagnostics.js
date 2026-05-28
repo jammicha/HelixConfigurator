@@ -413,10 +413,34 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     // receiver probe into the same Promise.all shaves the obvious 5s+2s
     // serial wait. `Promise.allSettled` lets each probe fail independently
     // — a topology failure shouldn't drag the receiver verdict down.
+    // helix-gateway is recreated on every attach — the OTLP listener has to be
+    // rebound to accept on the freshly-connected network interface (see the
+    // bridge-network route). otelcol then takes ~1-3s to re-bind :4318, and the
+    // frontend fires this verify the instant the attach POST returns, so a
+    // single probe routinely catches the gateway mid-boot. Retry briefly so a
+    // boot-window miss doesn't become a sticky false "unreachable" (the Step 3
+    // effect only re-runs verify when the collector identity changes, so a
+    // false negative here lingers on screen until the user navigates away). A
+    // healthy gateway answers the first attempt, so steady-state adds no delay.
+    const probeReceiver = async () => {
+      const deadline = Date.now() + 3500;
+      for (;;) {
+        try {
+          await axios.get(`http://${targetContainer}:4318/`, { timeout: 2000, validateStatus: () => true });
+          return 'ok';
+        } catch (err) {
+          const transient = err.code === 'ECONNREFUSED' || err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
+          if (!transient) return 'unknown'; // DNS/other — not a down receiver
+          if (Date.now() >= deadline) return 'unreachable';
+          await new Promise(r => setTimeout(r, 600));
+        }
+      }
+    };
+
     const probes = await Promise.allSettled([
       withDockerTimeout(docker.getContainer(targetContainer).inspect(), 'container.inspect', 5_000),
       collector ? withDockerTimeout(docker.getContainer(collector).inspect(), 'container.inspect', 5_000) : Promise.resolve(null),
-      axios.get(`http://${targetContainer}:4318/`, { timeout: 2000, validateStatus: () => true }),
+      probeReceiver(),
       collector ? fetchCustomerCollectorCounters(collector) : Promise.resolve(null),
     ]);
     const [gwInspectRes, colInspectRes, receiverRes, exporterBaselineRes] = probes;
@@ -441,16 +465,11 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
       console.warn('step3-verify topology probe:', gwInspectRes.reason?.message || gwInspectRes.reason);
     }
 
-    // Receiver verdict: 404 is fine — proves the listener is bound. Only
-    // connection-refused / timeout means it's actually down.
-    let gatewayReceiver = 'unknown';
-    if (receiverRes.status === 'fulfilled') {
-      gatewayReceiver = 'ok';
-    } else {
-      const err = receiverRes.reason || {};
-      gatewayReceiver = (err.code === 'ECONNREFUSED' || err.code === 'ECONNABORTED' || /timeout/i.test(err.message || ''))
-        ? 'unreachable' : 'unknown';
-    }
+    // Receiver verdict from probeReceiver: 'ok' (any HTTP response — 404 still
+    // proves the listener is bound), 'unreachable' (conn-refused/timeout for the
+    // whole retry window), or 'unknown' (DNS/other). It resolves rather than
+    // rejects, so a rejected settle here is itself an unexpected failure.
+    const gatewayReceiver = receiverRes.status === 'fulfilled' ? receiverRes.value : 'unknown';
 
     // Exporter: needs a 3s second sample after the baseline to detect a
     // non-zero send_failed delta. Baseline was fetched in the parallel
