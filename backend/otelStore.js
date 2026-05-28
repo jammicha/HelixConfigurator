@@ -724,27 +724,49 @@ class OtelStore {
     // request, one of them scanning span attribute JSON). The CTE form runs
     // each rollup exactly once against indexed columns. EXPLAIN QUERY PLAN
     // shows a single SCAN of traces + index lookups into the CTEs.
+    // When a service is selected, surface that service's *entry span* per
+    // trace — the earliest span belonging to the service, which is its
+    // top-level (server) operation. This lets the row be shown from the
+    // selected service's perspective (operation/duration/status) the way
+    // Helix's per-service trace tables do, instead of always showing the
+    // trace root (which is the load/traffic-generator in the demo). The
+    // service param for this CTE is prepended to the bind list below, since
+    // the CTE's placeholder precedes every WHERE placeholder in the SQL.
+    const svcCte = service
+      ? `, ssp AS (
+           SELECT trace_id, name AS svc_operation, duration_ms AS svc_duration_ms,
+                  status_code AS svc_status_code, start_time_ns AS svc_start_ns,
+                  ROW_NUMBER() OVER (PARTITION BY trace_id
+                                     ORDER BY start_time_ns ASC, span_id ASC) AS rn
+           FROM spans WHERE service_name = ?
+         )`
+      : '';
+    const svcSelect = service
+      ? ', ssp.svc_operation, ssp.svc_duration_ms, ssp.svc_status_code, ssp.svc_start_ns'
+      : '';
+    const svcJoin = service ? ' LEFT JOIN ssp ON ssp.trace_id = t.trace_id AND ssp.rn = 1' : '';
     const sql = `
       WITH lc AS (SELECT trace_id, COUNT(*) AS c FROM log_records GROUP BY trace_id),
            ec AS (SELECT trace_id, COUNT(*) AS c FROM span_errors GROUP BY trace_id),
            dc AS (SELECT trace_id, COUNT(*) AS c FROM spans
                   WHERE json_extract(attributes_json, '$."db.system"') IS NOT NULL
                      OR json_extract(attributes_json, '$."db.system.name"') IS NOT NULL
-                  GROUP BY trace_id)
+                  GROUP BY trace_id)${svcCte}
       SELECT
         t.*,
         COALESCE(lc.c, 0) AS log_count,
         COALESCE(ec.c, 0) AS error_count,
-        COALESCE(dc.c, 0) AS db_call_count
+        COALESCE(dc.c, 0) AS db_call_count${svcSelect}
       FROM traces t
       LEFT JOIN lc ON lc.trace_id = t.trace_id
       LEFT JOIN ec ON ec.trace_id = t.trace_id
-      LEFT JOIN dc ON dc.trace_id = t.trace_id
+      LEFT JOIN dc ON dc.trace_id = t.trace_id${svcJoin}
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY t.received_at DESC LIMIT ?
     `;
     params.push(Math.min(Math.max(1, limit | 0), TRACE_CAP));
-    return this.db.prepare(sql).all(...params);
+    const headParams = service ? [service] : [];
+    return this.db.prepare(sql).all(...headParams, ...params);
   }
 
   getTrace(traceId) {

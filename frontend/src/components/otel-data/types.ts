@@ -28,6 +28,14 @@ export type TraceSummary = {
   log_count?: number;
   error_count?: number;
   db_call_count?: number;
+  // Populated only when the list is filtered by a service: the selected
+  // service's entry span within the trace (its top-level operation). Lets the
+  // Traces table render each row from that service's perspective, mirroring
+  // Helix's per-service trace tables, instead of the trace root.
+  svc_operation?: string | null;
+  svc_duration_ms?: number | null;
+  svc_status_code?: number | null;
+  svc_start_ns?: number | null;
 };
 
 export type SpanDetail = {

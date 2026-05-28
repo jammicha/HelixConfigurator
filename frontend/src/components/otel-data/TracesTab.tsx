@@ -197,11 +197,26 @@ export const TracesTab: React.FC<{
         </div>
       )}
 
+      {serviceFilter && (
+        <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+          Traces for <span className="font-mono text-gray-100 normal-case tracking-normal">{serviceFilter}</span>
+        </div>
+      )}
       <div className="flex-1 overflow-auto adapt-card !p-0">
-        {tracesLoading ? (
+        {tracesLoading && serviceFilter ? (
           <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading traces…
           </div>
+        ) : !serviceFilter ? (
+          // Helix-style: traces are shown per service. With no service picked
+          // (the user chose "All services"), prompt for one rather than showing
+          // a root-rooted list. If there are no services at all, fall through to
+          // the no-data empty state with its synthetic-trace CTA.
+          services.length === 0 ? (
+            <TracesEmptyState filtered={false} />
+          ) : (
+            <SelectServicePrompt services={services} onPick={setServiceFilter} />
+          )
         ) : traces.length === 0 ? (
           <TracesEmptyState filtered={!!serviceFilter || !!namespaceFilter || !!containerFilter || !!statusFilter || !!searchQuery || minMs > 0} />
         ) : (
@@ -210,7 +225,7 @@ export const TracesTab: React.FC<{
               <tr className="text-left text-tiny text-gray-400 uppercase tracking-wider">
                 <th className="px-4 py-2 font-semibold">Status</th>
                 <th className="px-4 py-2 font-semibold">Service</th>
-                <th className="px-4 py-2 font-semibold">Root operation</th>
+                <th className="px-4 py-2 font-semibold">{serviceFilter ? 'Operation' : 'Root operation'}</th>
                 <th className="px-4 py-2 font-semibold text-right">
                   <button
                     onClick={() => handleSort('duration')}
@@ -233,19 +248,34 @@ export const TracesTab: React.FC<{
               </tr>
             </thead>
             <tbody>
-              {sortedTraces.map(t => (
+              {sortedTraces.map(t => {
+                // When a service is selected, render the row from that service's
+                // perspective — its entry span's operation/duration/status —
+                // instead of the trace root. Falls back to root fields if the
+                // backend didn't resolve an entry span (shouldn't happen for a
+                // matched trace, but keeps the row well-formed).
+                const svcView = !!serviceFilter;
+                const displayService = svcView ? serviceFilter : t.service_name;
+                const displayOperation = (svcView ? (t.svc_operation ?? t.root_operation) : t.root_operation) || '';
+                const displayDuration = svcView && t.svc_duration_ms != null ? t.svc_duration_ms : t.duration_ms;
+                const displayStartNs = svcView && t.svc_start_ns != null ? t.svc_start_ns : t.start_time_ns;
+                const svcStatus: TraceStatus | undefined = svcView
+                  ? ((t.svc_status_code ?? 0) >= 2 ? 'error' : (displayDuration > slowThresholdMs ? 'slow' : 'ok'))
+                  : undefined;
+                const p95 = operationP95.get(`${displayService}|${displayOperation}`) || 0;
+                return (
                 <tr
                   key={t.trace_id}
                   onClick={() => onSelect(t.trace_id)}
                   className="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-2">
-                    <StatusPill trace={t} />
+                    <StatusPill trace={t} status={svcStatus} />
                   </td>
                   <td className="px-4 py-2 font-medium text-gray-100">
                     <span className="inline-flex items-center gap-2 flex-wrap">
                       <Server className="w-3.5 h-3.5 text-gray-500" />
-                      {t.service_name}
+                      {displayService}
                       {(t.error_count || 0) > 0 && (
                         <span
                           className="adapt-badge-danger flex-shrink-0 inline-flex items-center gap-1"
@@ -270,33 +300,27 @@ export const TracesTab: React.FC<{
                           <FileText className="w-2.5 h-2.5" />{t.log_count}
                         </span>
                       )}
-                      {(() => {
-                        const p95 = operationP95.get(`${t.service_name}|${t.root_operation}`) || 0;
-                        if (p95 > 0 && t.duration_ms > p95 * 2) {
-                          return (
-                            <span
-                              className="adapt-badge-warning flex-shrink-0 inline-flex items-center gap-1"
-                              title={`Outlier: ${formatDuration(t.duration_ms)} is ${(t.duration_ms / p95).toFixed(1)}× this operation's p95 (${formatDuration(p95)})`}
-                            >
-                              <AlertTriangle className="w-2.5 h-2.5" />Outlier
-                            </span>
-                          );
-                        }
-                        return null;
-                      })()}
+                      {p95 > 0 && displayDuration > p95 * 2 && (
+                        <span
+                          className="adapt-badge-warning flex-shrink-0 inline-flex items-center gap-1"
+                          title={`Outlier: ${formatDuration(displayDuration)} is ${(displayDuration / p95).toFixed(1)}× this operation's p95 (${formatDuration(p95)})`}
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5" />Outlier
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="px-4 py-2 text-gray-300 text-tiny">
                     <button
-                      onClick={(e) => { e.stopPropagation(); setSearchQuery(t.root_operation || ''); }}
+                      onClick={(e) => { e.stopPropagation(); setSearchQuery(displayOperation); }}
                       title="Filter list to this operation"
                       className="text-left hover:text-link hover:underline truncate max-w-md"
                     >
-                      {t.root_operation}
+                      {displayOperation}
                     </button>
                   </td>
-                  <td className={`px-4 py-2 text-right tabular-nums ${t.duration_ms > slowThresholdMs ? 'text-warning font-semibold' : 'text-gray-300'}`}>
-                    {formatDuration(t.duration_ms)}
+                  <td className={`px-4 py-2 text-right tabular-nums ${displayDuration > slowThresholdMs ? 'text-warning font-semibold' : 'text-gray-300'}`}>
+                    {formatDuration(displayDuration)}
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums text-gray-400">{t.span_count}</td>
                   <td className="px-4 py-2 text-tiny text-gray-500">{formatRelative(t.received_at)}</td>
@@ -305,8 +329,8 @@ export const TracesTab: React.FC<{
                       {(() => {
                         const url = buildHelixTraceUrl(helixEnv, {
                           traceId: t.trace_id,
-                          serviceName: t.service_name,
-                          timeNs: t.start_time_ns,
+                          serviceName: displayService,
+                          timeNs: displayStartNs,
                         });
                         if (!url) return null;
                         return (
@@ -326,7 +350,8 @@ export const TracesTab: React.FC<{
                     </td>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -334,6 +359,36 @@ export const TracesTab: React.FC<{
     </div>
   );
 };
+
+// Shown when no service is selected (the "All services" choice). Mirrors
+// Helix's per-service trace model: pick a service to see its traces. Lists the
+// available services as quick-pick chips so the user doesn't have to reopen the
+// dropdown.
+const SelectServicePrompt: React.FC<{
+  services: { name: string; traceCount: number }[];
+  onPick: (s: string) => void;
+}> = ({ services, onPick }) => (
+  <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
+    <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
+      <Server className="w-6 h-6 text-gray-500" />
+    </div>
+    <h3 className="text-base font-semibold text-gray-200 mb-2">Select a service</h3>
+    <p className="text-sm text-gray-400 max-w-md mb-4 leading-relaxed">
+      Traces are shown per service. Pick one to see its operations, latency, and status.
+    </p>
+    <div className="flex flex-wrap gap-2 justify-center max-w-lg">
+      {services.slice(0, 12).map(s => (
+        <button
+          key={s.name}
+          onClick={() => onPick(s.name)}
+          className="px-3 py-1.5 text-tiny rounded font-semibold bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
+        >
+          {s.name} <span className="text-gray-500">({s.traceCount})</span>
+        </button>
+      ))}
+    </div>
+  </div>
+);
 
 const TracesEmptyState: React.FC<{ filtered: boolean }> = ({ filtered }) => {
   // Only fire the synthetic-run hook in the unfiltered "no data anywhere"

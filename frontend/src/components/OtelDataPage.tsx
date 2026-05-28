@@ -354,6 +354,20 @@ export const OtelDataPage: React.FC = () => {
     () => services.filter(s => !INTERNAL_SERVICES.has(s.name)),
     [services],
   );
+  // Helix shows traces per service and never has an empty selection. On first
+  // load (when the URL didn't pin a service) auto-select the busiest service so
+  // the Traces table is populated immediately. The ref makes this fire once —
+  // afterwards an empty serviceFilter means the user explicitly chose "All
+  // services", which the Traces tab renders as a "pick a service" prompt.
+  const didAutoSelectService = useRef(false);
+  useEffect(() => {
+    if (didAutoSelectService.current) return;
+    if (serviceFilter) { didAutoSelectService.current = true; return; }
+    if (visibleServices.length === 0) return;
+    const busiest = visibleServices.reduce((a, b) => (b.traceCount > a.traceCount ? b : a), visibleServices[0]);
+    setServiceFilter(busiest.name);
+    didAutoSelectService.current = true;
+  }, [serviceFilter, visibleServices]);
   // serviceFilter is page-level state (Traces uses it server-side). For
   // Logs/Errors we apply it client-side here — the stores aren't huge (200
   // rows each) so a JS filter on every change is fine, and a server-side
