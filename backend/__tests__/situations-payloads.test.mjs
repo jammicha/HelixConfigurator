@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const {
-  OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME,
+  OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, selectPolicyUpsert,
 } = require('../routes/situations-payloads');
 
@@ -27,6 +27,13 @@ describe('buildClassDefinition', () => {
   it('keeps helix_trace_id as the dedup slot', () => {
     const slot = buildClassDefinition().attributes.find(a => a.name === 'helix_trace_id');
     expect(slot.allFacet).toEqual(expect.arrayContaining([{ name: 'dup_detect', value: 'true' }]));
+  });
+  it('ADDED_SLOTS lists only the slots this feature adds (helix_trace_id pre-existed)', () => {
+    // Task 5 patches an already-registered class with exactly these. helix_trace_id
+    // is intentionally excluded — it shipped with the original class definition.
+    expect(ADDED_SLOTS).toEqual(['service_name', 'service_namespace', 'trace_url']);
+    const slotNames = buildClassDefinition().attributes.map(a => a.name);
+    for (const s of ADDED_SLOTS) expect(slotNames).toContain(s);
   });
 });
 
