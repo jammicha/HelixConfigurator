@@ -10,11 +10,6 @@ const {
   buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, selectPolicyUpsert,
 } = require('./situations-payloads');
 
-// Custom event class for OTel-derived events. Created via the Provision
-// button on the Settings page (POST /api/situations/provision-class). The
-// class inherits from EVENT and adds `helix_trace_id` as a dedup slot so
-// BMC's auto-dedup matches re-sends of the same trace.
-
 // Derive the events-service base URL. Prefer an explicit HELIX_EVENTS_ENDPOINT
 // (Settings page) since `HELIX_ENDPOINT` typically points at the OTLP ingest
 // host, not the portal root. Fall back to the origin of HELIX_ENDPOINT, which
