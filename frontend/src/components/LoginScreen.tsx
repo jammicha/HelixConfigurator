@@ -38,13 +38,13 @@ export const LoginScreen: React.FC<Props> = ({ onLogin }) => {
             autoFocus
             value={password}
             onChange={(e) => { setPassword(e.target.value); setError(''); }}
-            className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm"
+            className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
             placeholder="Enter shared access password"
           />
         </div>
         {error && (
           <div className="flex gap-3 p-3 bg-[#f5bcc6]/20 border border-danger/40 rounded text-sm items-start" role="alert">
-            <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
+            <X className="w-4 h-4 text-danger-text flex-shrink-0 mt-0.5" aria-label="Error" />
             <span className="text-gray-300">{error}</span>
           </div>
         )}

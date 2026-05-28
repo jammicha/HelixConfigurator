@@ -79,7 +79,7 @@ export const TracesTab: React.FC<{
           <select
             value={serviceFilter}
             onChange={(e) => setServiceFilter(e.target.value)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active min-w-[14rem]"
+            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-link min-w-[14rem]"
           >
             <option value="">All services</option>
             {services.map(s => (
@@ -107,7 +107,7 @@ export const TracesTab: React.FC<{
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as '' | TraceStatus)}
-            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
+            className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-link"
           >
             <option value="">All statuses</option>
             <option value="error">Error</option>
@@ -121,7 +121,7 @@ export const TracesTab: React.FC<{
           <select
             value={String(minMs)}
             onChange={(e) => setMinMs(parseInt(e.target.value, 10) || 0)}
-            className={`bg-gray-1000 border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-active ${
+            className={`bg-gray-1000 border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-link ${
               minMs > 0 ? 'border-warning/60 text-warning' : 'border-gray-800 text-gray-100'
             }`}
           >
@@ -137,14 +137,15 @@ export const TracesTab: React.FC<{
           </select>
         </div>
         <div className="flex flex-col gap-1 flex-1 min-w-[16rem]">
-          <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Search</label>
+          <label htmlFor="traces-search" className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Search</label>
           <div className="relative">
             <input
+              id="traces-search"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="operation, service, or trace id…"
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active pr-8"
+              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-link pr-8"
             />
             {searchQuery && (
               <button
@@ -175,7 +176,7 @@ export const TracesTab: React.FC<{
             {customRange && (
               <button
                 onClick={onClearCustomRange}
-                className="text-tiny text-active hover:underline font-semibold"
+                className="text-tiny text-link hover:underline font-semibold"
               >Clear time selection</button>
             )}
           </div>
@@ -289,7 +290,7 @@ export const TracesTab: React.FC<{
                     <button
                       onClick={(e) => { e.stopPropagation(); setSearchQuery(t.root_operation || ''); }}
                       title="Filter list to this operation"
-                      className="text-left hover:text-active hover:underline truncate max-w-md"
+                      className="text-left hover:text-link hover:underline truncate max-w-md"
                     >
                       {t.root_operation}
                     </button>
@@ -397,7 +398,7 @@ const SyntheticGenerateAffordance: React.FC = () => {
           Generate synthetic traces
         </button>
       )}
-      {startError && <p className="mt-2 text-tiny text-danger">{startError}</p>}
+      {startError && <p className="mt-2 text-tiny text-danger-text">{startError}</p>}
     </div>
   );
 };

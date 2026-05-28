@@ -315,10 +315,11 @@ export const AiopsPage: React.FC = () => {
                 </div>
 
                 <div className="mt-5 max-w-xl">
-                  <label className="text-[12px] text-gray-700">
+                  <label htmlFor="aiops-app-name" className="text-[12px] text-gray-700">
                     Name <span className="text-red-500">(required)</span>
                   </label>
                   <input
+                    id="aiops-app-name"
                     type="text"
                     value={xSource}
                     onChange={(e) => setXSource(e.target.value)}

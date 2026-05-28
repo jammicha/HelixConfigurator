@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Loader2 } from 'lucide-react';
 import type { SmartAddProposal } from '../../hooks/useSmartAdd';
+import { useEscClose } from '../../hooks/useEscClose';
 
 type GatewayConfigModalProps = {
   open: boolean;
@@ -11,10 +12,14 @@ type GatewayConfigModalProps = {
 // Read-only YAML viewer opened from Step 2's "view gateway config" link.
 // Full editing happens on the dashboard's YAML editor card.
 export const GatewayConfigModal: React.FC<GatewayConfigModalProps> = ({ open, text, onClose }) => {
+  useEscClose(open, onClose);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Gateway config"
         className="adapt-card !p-0 max-w-3xl w-full max-h-[80vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -23,7 +28,7 @@ export const GatewayConfigModal: React.FC<GatewayConfigModalProps> = ({ open, te
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Gateway config</div>
             <div className="text-sm text-gray-200">Where the auth headers live</div>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-200 p-1 rounded hover:bg-gray-800">
+          <button onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-200 p-1 rounded hover:bg-gray-800">
             <X className="w-5 h-5" />
           </button>
         </header>
@@ -73,6 +78,8 @@ export const SmartAddPreviewModal: React.FC<SmartAddPreviewModalProps> = ({
   onApply,
   onCopyPath,
 }) => {
+  // Esc closes, but not mid-apply (mirrors the backdrop's !applying guard).
+  useEscClose(open && !applying, onClose);
   if (!open || !proposal || !proposal.proposedYaml || !proposal.exporterName) return null;
 
   const exporterName = proposal.exporterName;
@@ -97,6 +104,9 @@ export const SmartAddPreviewModal: React.FC<SmartAddPreviewModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60" onClick={() => !applying && onClose()}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Smart-add preview"
         className="adapt-card !p-0 max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -111,7 +121,7 @@ export const SmartAddPreviewModal: React.FC<SmartAddPreviewModalProps> = ({
                 <button
                   type="button"
                   onClick={() => onCopyPath(proposal.hostConfigPath!)}
-                  className="text-active hover:underline font-semibold flex-shrink-0"
+                  className="text-link hover:underline font-semibold flex-shrink-0"
                 >
                   Copy path
                 </button>
@@ -125,6 +135,7 @@ export const SmartAddPreviewModal: React.FC<SmartAddPreviewModalProps> = ({
           <button
             onClick={onClose}
             disabled={applying}
+            aria-label="Close"
             className="text-gray-400 hover:text-gray-200 p-1 rounded hover:bg-gray-800 disabled:opacity-50 flex-shrink-0"
           >
             <X className="w-5 h-5" />

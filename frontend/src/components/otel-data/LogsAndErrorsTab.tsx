@@ -91,7 +91,7 @@ export const LogsAndErrorsTab: React.FC<{
             <select
               value={serviceFilter}
               onChange={(e) => setServiceFilter(e.target.value)}
-              className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active min-w-[14rem]"
+              className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-link min-w-[14rem]"
             >
               <option value="">All services</option>
               {services.map(s => (
@@ -106,7 +106,7 @@ export const LogsAndErrorsTab: React.FC<{
                 <select
                   value={severityFilter}
                   onChange={(e) => setSeverityFilter(e.target.value)}
-                  className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active"
+                  className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-link"
                 >
                   {SEVERITY_OPTIONS.map(s => (
                     <option key={s} value={s}>{s ? s : 'All severities'}</option>
@@ -114,14 +114,15 @@ export const LogsAndErrorsTab: React.FC<{
                 </select>
               </div>
               <div className="flex flex-col gap-1 w-64">
-                <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Search</label>
+                <label htmlFor="logs-search" className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Search</label>
                 <div className="relative">
                   <input
+                    id="logs-search"
                     type="text"
                     value={logQuery}
                     onChange={(e) => setLogQuery(e.target.value)}
                     placeholder="message body or service…"
-                    className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-active pr-8"
+                    className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-link pr-8"
                   />
                   {logQuery && (
                     <button
@@ -151,7 +152,7 @@ export const LogsAndErrorsTab: React.FC<{
               {customRange && (
                 <button
                   onClick={onClearCustomRange}
-                  className="text-tiny text-active hover:underline font-semibold"
+                  className="text-tiny text-link hover:underline font-semibold"
                 >Clear time selection</button>
               )}
             </div>
@@ -234,7 +235,7 @@ const LogsView: React.FC<{
                   <span className="inline-flex items-center gap-2">
                     <button
                       onClick={() => onJumpToTrace(l.traceId)}
-                      className="text-active hover:text-[#a5baff] text-tiny font-semibold"
+                      className="text-link hover:text-white text-tiny font-semibold"
                     >
                       Open trace →
                     </button>
@@ -368,7 +369,7 @@ const ErrorsView: React.FC<{
                   <span className="inline-flex items-center gap-2">
                     <button
                       onClick={() => onJumpToTrace(e.trace_id)}
-                      className="text-active hover:text-[#a5baff] text-tiny font-semibold"
+                      className="text-link hover:text-white text-tiny font-semibold"
                     >
                       Open trace →
                     </button>
@@ -443,7 +444,7 @@ const ErrorGroupRow: React.FC<{
               <span className="inline-flex items-center gap-2 flex-shrink-0">
                 <button
                   onClick={() => onJumpToTrace(e.trace_id)}
-                  className="text-active hover:text-[#a5baff] font-semibold"
+                  className="text-link hover:text-white font-semibold"
                 >Open trace →</button>
                 {(() => {
                   const url = buildHelixTraceUrl(helixEnv, { traceId: e.trace_id, serviceName: e.service_name, timeNs: e.ts_ns });

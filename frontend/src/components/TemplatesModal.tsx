@@ -92,7 +92,7 @@ export const TemplatesModal: React.FC<Props> = ({ isOpen, templates, loadingTemp
                   </div>
                   {isSelected ? (
                     <span
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-tiny font-semibold border border-success/60 bg-success/10 text-success flex-shrink-0"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-tiny font-semibold border border-success/60 bg-success/10 text-success-text flex-shrink-0"
                       title="This template's content matches the currently loaded config"
                     >
                       <Check className="w-3.5 h-3.5" />

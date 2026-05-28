@@ -63,7 +63,7 @@ export const SystemHealthPanel: React.FC<Props> = ({ health, gatewayStatus, acti
         <div className="bg-gray-1000 border border-gray-800 rounded p-3">
           <div className="text-tiny text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Server className="w-3 h-3" /> Gateway</div>
           <div className="flex items-center justify-between gap-2">
-            <div className={`text-sm font-semibold ${health.gatewayStatus === 'running' ? 'text-success' : 'text-warning'}`}>
+            <div className={`text-sm font-semibold ${health.gatewayStatus === 'running' ? 'text-success-text' : 'text-warning'}`}>
               {health.gatewayStatus}{health.gatewayExitCode != null ? ` (${health.gatewayExitCode})` : ''}
             </div>
             <div className="flex items-center gap-0.5 flex-shrink-0">

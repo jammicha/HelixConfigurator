@@ -40,7 +40,7 @@ const RollupPanel: React.FC<{
   rows: { key: string; cells: React.ReactNode[] }[];
   footer: string | null;
 }> = ({ icon, title, subtitle, tone, columns, rows, footer }) => {
-  const headerTone = tone === 'danger' ? 'text-[#ff8a8a]' : tone === 'warning' ? 'text-warning' : 'text-active';
+  const headerTone = tone === 'danger' ? 'text-[#ff8a8a]' : tone === 'warning' ? 'text-warning' : 'text-link';
   return (
     <div className="adapt-card !p-0 overflow-hidden">
       <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 bg-gray-900">
@@ -86,7 +86,7 @@ const ServiceBreakdownPanel: React.FC<{
   return (
     <div className="adapt-card !p-3 mb-3">
       <div className="flex items-center gap-2 mb-2">
-        <Server className="w-3.5 h-3.5 text-active" />
+        <Server className="w-3.5 h-3.5 text-link" />
         <span className="text-sm font-semibold text-gray-200">Service breakdown</span>
         <span className="text-tiny text-gray-500 ml-auto">where the time went</span>
       </div>

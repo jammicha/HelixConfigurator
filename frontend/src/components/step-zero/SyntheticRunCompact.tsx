@@ -64,7 +64,7 @@ export const SyntheticRunCompact: React.FC<Props> = ({
         {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
         {label}
       </button>
-      {startError && <span className="text-tiny text-danger">{startError}</span>}
+      {startError && <span className="text-tiny text-danger-text">{startError}</span>}
     </div>
   );
 };

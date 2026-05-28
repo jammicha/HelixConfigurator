@@ -57,7 +57,7 @@ export const Step2: React.FC<Props> = ({
   const verifyBadge = verifyStatus === 'verifying'
     ? (<span className="inline-flex items-center gap-1 text-tiny text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Verifying…</span>)
     : verifyStatus === 'configured'
-    ? (<span className="inline-flex items-center gap-1 text-tiny text-success"><CheckCircle2 className="w-3 h-3" /> Verified. helix-gateway is wired in.</span>)
+    ? (<span className="inline-flex items-center gap-1 text-tiny text-success-text"><CheckCircle2 className="w-3 h-3" /> Verified. helix-gateway is wired in.</span>)
     : verifyStatus === 'not-configured'
     ? (<span className="inline-flex items-center gap-1 text-tiny text-warning"><AlertTriangle className="w-3 h-3" /> Not detected. Apply the snippet, restart the collector, then re-verify.</span>)
     : null;
@@ -81,7 +81,7 @@ export const Step2: React.FC<Props> = ({
         (with a backup + restart) for the user. POC scope. */}
     {smartAddResult && (
       <div className={`mb-4 flex items-start gap-3 p-3 rounded text-sm ${smartAddResult.ok ? 'bg-success/10 border border-success/40' : 'bg-danger/10 border border-danger/40'}`}>
-        {smartAddResult.ok ? <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />}
+        {smartAddResult.ok ? <CheckCircle2 className="w-4 h-4 text-success-text flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-danger-text flex-shrink-0 mt-0.5" />}
         <span className="text-gray-200 flex-1 break-words">{smartAddResult.message}</span>
         <button
           onClick={onDismissResult}
@@ -95,14 +95,14 @@ export const Step2: React.FC<Props> = ({
     {smartAddProposal && (
       <div className="mb-5 p-4 bg-gray-1000 border border-active/40 rounded">
         <div className="flex items-center gap-2 mb-2">
-          <Container className="w-4 h-4 text-active" />
+          <Container className="w-4 h-4 text-link" />
           <span className="text-sm font-semibold text-gray-100">Smart-add: apply automatically</span>
           <span className="ml-auto text-tiny text-gray-500">POC</span>
         </div>
         {smartAddProposal.error ? (
           <div className="p-3 rounded border border-danger/40 bg-danger/10" role="alert">
             <div className="flex items-start gap-2 mb-2">
-              <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />
+              <AlertTriangle className="w-4 h-4 text-danger-text flex-shrink-0 mt-0.5" />
               <div className="flex-1">
                 <p className="text-sm font-semibold text-gray-100">Smart-add couldn't reach this collector</p>
                 <p className="text-tiny text-gray-300 mt-1 break-words">{smartAddProposal.error}</p>
@@ -126,7 +126,7 @@ export const Step2: React.FC<Props> = ({
           <>
             <p className="text-tiny text-gray-300 mb-3">
               Detected <code className="font-mono text-gray-100">{smartAddProposal.name}</code> at <code className="font-mono text-gray-200">{smartAddProposal.configPath}</code>.{' '}
-              <span className="text-success font-semibold">Already configured.</span> <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
+              <span className="text-success-text font-semibold">Already configured.</span> <code className="font-mono">{smartAddProposal.existingExporterName}</code> already points at <code className="font-mono">helix-gateway:4318</code>. No changes needed.
             </p>
             {onVerifyExporter && (
               <div className="flex items-center gap-2 flex-wrap">
@@ -203,7 +203,7 @@ export const Step2: React.FC<Props> = ({
       queue_size: 10000`} />
         <p className="text-tiny text-gray-500 -mt-4 mb-6">
           Add this snippet to your collector configuration (e.g. <code className="font-mono">otelcol-config.yaml</code>). The API key is{' '}
-          <button onClick={onOpenGatewayConfig} className="text-active hover:underline font-semibold">managed by the gateway</button>.
+          <button onClick={onOpenGatewayConfig} className="text-link hover:underline font-semibold">managed by the gateway</button>.
         </p>
 
         <div className="mb-2 flex items-baseline justify-between gap-3">

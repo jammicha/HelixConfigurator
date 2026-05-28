@@ -106,7 +106,7 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
               }}
               className={cx(currentPage === 'onboarding') + ' w-full text-left'}
             >
-              <Compass className={`w-4 h-4 ${currentPage === 'onboarding' ? 'text-primary' : 'text-gray-400'}`} />
+              <Compass className={`w-4 h-4 ${currentPage === 'onboarding' ? 'text-link' : 'text-gray-400'}`} />
               Onboarding
             </button>
             <a
@@ -120,14 +120,14 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
               }}
               className={cx(currentPage === 'dashboard')}
             >
-              <LayoutDashboard className={`w-4 h-4 ${currentPage === 'dashboard' ? 'text-primary' : 'text-gray-400'}`} />
+              <LayoutDashboard className={`w-4 h-4 ${currentPage === 'dashboard' ? 'text-link' : 'text-gray-400'}`} />
               Gateway Dashboard
             </a>
             <a
               href="/otel-data"
               className={cx(currentPage === 'otel-data')}
             >
-              <BarChart2 className={`w-4 h-4 ${currentPage === 'otel-data' ? 'text-primary' : 'text-gray-400'}`} />
+              <BarChart2 className={`w-4 h-4 ${currentPage === 'otel-data' ? 'text-link' : 'text-gray-400'}`} />
               View OTel Data
             </a>
 
@@ -231,7 +231,7 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
               <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-2">UI access</div>
               {authRequired ? (
                 <div className="space-y-2">
-                  <div className="text-success inline-flex items-center gap-1.5 text-sm">
+                  <div className="text-success-text inline-flex items-center gap-1.5 text-sm">
                     <Check className="w-3.5 h-3.5" aria-hidden="true" />
                     Password required to sign in
                   </div>
@@ -240,7 +240,7 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
                       type="button"
                       onClick={() => { setOpenMenu(null); onOpenSetPassword?.(); }}
                       disabled={!onOpenSetPassword}
-                      className="text-primary hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
+                      className="text-link hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
                     >
                       Change password
                     </button>
@@ -249,7 +249,7 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
                       type="button"
                       onClick={() => { setOpenMenu(null); onRemovePassword?.(); }}
                       disabled={!onRemovePassword}
-                      className="text-danger hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
+                      className="text-danger-text hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
                     >
                       Remove password
                     </button>
@@ -273,7 +273,7 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
                     type="button"
                     onClick={() => { setOpenMenu(null); onOpenSetPassword?.(); }}
                     disabled={!onOpenSetPassword}
-                    className="text-tiny text-primary hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
+                    className="text-tiny text-link hover:underline disabled:opacity-50 disabled:hover:no-underline disabled:cursor-not-allowed"
                   >
                     Set a password →
                   </button>

@@ -85,11 +85,12 @@ export const Step1: React.FC<Props> = ({
       <h2 className="text-lg font-semibold mb-4 text-gray-200">Step 1: Configure helix-gateway</h2>
       <div className="space-y-3 mb-4">
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+          <label htmlFor="helix-endpoint" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             Helix Endpoint
-            {!errors.HELIX_ENDPOINT && envVars.HELIX_ENDPOINT && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
+            {!errors.HELIX_ENDPOINT && envVars.HELIX_ENDPOINT && <Check className="w-3.5 h-3.5 text-success-text inline" aria-label="OK" />}
           </label>
           <input
+            id="helix-endpoint"
             type="url"
             name="helix-ingest-endpoint"
             autoComplete="off"
@@ -100,20 +101,21 @@ export const Step1: React.FC<Props> = ({
             onChange={(e) => setEnvVars({ ...envVars, HELIX_ENDPOINT: e.target.value })}
             aria-invalid={!!(envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT)}
             aria-describedby={envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT ? 'helix-endpoint-error' : undefined}
-            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
+            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm ${envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-link'}`}
             placeholder="https://your-tenant.onbmc.com"
           />
           {envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT && (
-            <p id="helix-endpoint-error" className="text-tiny text-danger">{errors.HELIX_ENDPOINT}</p>
+            <p id="helix-endpoint-error" className="text-tiny text-danger-text">{errors.HELIX_ENDPOINT}</p>
           )}
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+          <label htmlFor="helix-api-key" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             X-API Key
-            {!errors.HELIX_API_KEY && envVars.HELIX_API_KEY && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
+            {!errors.HELIX_API_KEY && envVars.HELIX_API_KEY && <Check className="w-3.5 h-3.5 text-success-text inline" aria-label="OK" />}
           </label>
           <div className="relative">
             <input
+              id="helix-api-key"
               type="text"
               name="helix-x-api-key"
               autoComplete="off"
@@ -128,7 +130,7 @@ export const Step1: React.FC<Props> = ({
               aria-invalid={!!(envVars.HELIX_API_KEY && errors.HELIX_API_KEY)}
               aria-describedby={envVars.HELIX_API_KEY && errors.HELIX_API_KEY ? 'helix-api-key-error' : undefined}
               style={!showApiKey ? { WebkitTextSecurity: 'disc', textSecurity: 'disc' } as React.CSSProperties : undefined}
-              className={`w-full bg-gray-1000 border rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm ${envVars.HELIX_API_KEY && errors.HELIX_API_KEY ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
+              className={`w-full bg-gray-1000 border rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm ${envVars.HELIX_API_KEY && errors.HELIX_API_KEY ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-link'}`}
               placeholder="Paste your API key from the Helix portal"
             />
             <button
@@ -141,18 +143,19 @@ export const Step1: React.FC<Props> = ({
           </div>
           <p className="text-tiny text-gray-500">Paste the full key. The format is parsed automatically.</p>
           {envVars.HELIX_API_KEY && errors.HELIX_API_KEY && (
-            <p id="helix-api-key-error" className="text-tiny text-danger">{errors.HELIX_API_KEY}</p>
+            <p id="helix-api-key-error" className="text-tiny text-danger-text">{errors.HELIX_API_KEY}</p>
           )}
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2 flex-wrap">
+          <label htmlFor="helix-x-source" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2 flex-wrap">
             <span className="flex items-center gap-2">
               X-Source
-              {!errors.X_SOURCE && envVars.X_SOURCE && <Check className="w-3.5 h-3.5 text-success inline" aria-label="OK" />}
+              {!errors.X_SOURCE && envVars.X_SOURCE && <Check className="w-3.5 h-3.5 text-success-text inline" aria-label="OK" />}
             </span>
             <span className="normal-case tracking-normal text-gray-500 font-normal">· Business Service name in Helix topology &amp; AIOps</span>
           </label>
           <input
+            id="helix-x-source"
             type="text"
             name="helix-x-source"
             autoComplete="off"
@@ -163,19 +166,20 @@ export const Step1: React.FC<Props> = ({
             onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
             aria-invalid={!!(envVars.X_SOURCE && errors.X_SOURCE)}
             aria-describedby={envVars.X_SOURCE && errors.X_SOURCE ? 'helix-x-source-error' : undefined}
-            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.X_SOURCE && errors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
+            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm ${envVars.X_SOURCE && errors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-link'}`}
             placeholder="e.g. payment-service"
           />
           {envVars.X_SOURCE && errors.X_SOURCE && (
-            <p id="helix-x-source-error" className="text-tiny text-danger">{errors.X_SOURCE}</p>
+            <p id="helix-x-source-error" className="text-tiny text-danger-text">{errors.X_SOURCE}</p>
           )}
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
+          <label htmlFor="helix-app-url" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
             <span>App URL</span>
             <span className="normal-case tracking-normal text-gray-500 font-normal">· optional</span>
           </label>
           <input
+            id="helix-app-url"
             type="url"
             name="helix-app-url"
             autoComplete="off"
@@ -186,22 +190,23 @@ export const Step1: React.FC<Props> = ({
             onChange={(e) => setEnvVars({ ...envVars, APP_URL: e.target.value })}
             aria-invalid={!!(envVars.APP_URL && errors.APP_URL)}
             aria-describedby={envVars.APP_URL && errors.APP_URL ? 'helix-app-url-error' : undefined}
-            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm ${envVars.APP_URL && errors.APP_URL ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-active'}`}
+            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm ${envVars.APP_URL && errors.APP_URL ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-link'}`}
             placeholder="https://example.com or http://localhost:8080"
           />
           <p className="text-tiny text-gray-500">
             Controls the "Application UI" dashboard link.
           </p>
           {envVars.APP_URL && errors.APP_URL && (
-            <p id="helix-app-url-error" className="text-tiny text-danger">{errors.APP_URL}</p>
+            <p id="helix-app-url-error" className="text-tiny text-danger-text">{errors.APP_URL}</p>
           )}
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
+          <label htmlFor="helix-business-service-key" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
             <span>AIOps Business Service Key</span>
             <span className="normal-case tracking-normal text-gray-500 font-normal">· optional</span>
           </label>
           <input
+            id="helix-business-service-key"
             type="text"
             name="helix-business-service-key"
             autoComplete="off"
@@ -214,7 +219,7 @@ export const Step1: React.FC<Props> = ({
             // opaque key the backend stores — saves the user a paste-trim-
             // copy round trip when they grab the URL from their browser bar.
             onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
-            className="w-full bg-gray-1000 border border-gray-800 focus:border-active rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
+            className="w-full bg-gray-1000 border border-gray-800 focus:border-link rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
             placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
           />
           <p className="text-tiny text-gray-500">
@@ -225,8 +230,8 @@ export const Step1: React.FC<Props> = ({
 
       {setupError && (
         <div className="mb-4 flex gap-3 p-3 bg-danger/10 border border-danger/40 rounded text-sm items-start">
-          <X className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
-          <div><span className="text-danger font-semibold">Verification failed:</span> <span className="text-gray-300">{setupError}</span></div>
+          <X className="w-4 h-4 text-danger-text flex-shrink-0 mt-0.5" aria-label="Error" />
+          <div><span className="text-danger-text font-semibold">Verification failed:</span> <span className="text-gray-300">{setupError}</span></div>
         </div>
       )}
 
@@ -242,7 +247,7 @@ export const Step1: React.FC<Props> = ({
         </button>
         {testConnectionResult && (
           <div role="status" aria-live="polite" className={`flex items-start gap-2 text-tiny p-2.5 rounded border ${
-            testConnectionResult.status === 'valid' ? 'bg-success/10 border-success/40 text-success' : 'bg-warning/10 border-warning/40 text-warning'
+            testConnectionResult.status === 'valid' ? 'bg-success/10 border-success/40 text-success-text' : 'bg-warning/10 border-warning/40 text-warning'
           }`}>
             {testConnectionResult.status === 'valid'
               ? <Check className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />

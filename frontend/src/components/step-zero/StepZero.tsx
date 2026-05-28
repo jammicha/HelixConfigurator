@@ -40,7 +40,7 @@ export const StepZero: React.FC = () => {
                 href="https://opentelemetry.io/docs/demo/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-base text-primary hover:underline"
+                className="inline-flex items-center gap-1.5 text-base text-link hover:underline"
               >
                 Set up the OpenTelemetry demo <ExternalLink className="w-4 h-4" />
               </a>

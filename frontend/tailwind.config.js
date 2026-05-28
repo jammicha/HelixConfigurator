@@ -13,6 +13,13 @@ export default {
         secondary: '#dde0ee',
         active: '#3759d8',
         'active-hover': '#1f37bd',
+        // On-dark accessible text tokens. The brand primary/active are too dark
+        // to read as text on the gray-900/1000 surfaces (~2.2-2.9:1); these pass
+        // WCAG AA (>=4.5:1) for accent links and status text. Keep using
+        // primary/active for *fills* (white-on-fill already passes).
+        link: '#a5baff',
+        'danger-text': '#ff8a8a',
+        'success-text': '#34d399',
         state: '#ff5a4e',
         success: '#11845b',
         'success-hover': '#006640',

@@ -45,7 +45,7 @@ const PipelineBanner: React.FC<{ status: PipelineStatus; detail: string }> = ({ 
   const config = {
     receiving: {
       bg: 'bg-success/10 border-success/40',
-      icon: <CheckCircle2 className="w-5 h-5 text-success flex-shrink-0" />,
+      icon: <CheckCircle2 className="w-5 h-5 text-success-text flex-shrink-0" />,
       headline: 'Telemetry is flowing into Helix.',
     },
     degraded: {
@@ -55,7 +55,7 @@ const PipelineBanner: React.FC<{ status: PipelineStatus; detail: string }> = ({ 
     },
     broken: {
       bg: 'bg-danger/10 border-danger/40',
-      icon: <AlertTriangle className="w-5 h-5 text-danger flex-shrink-0" />,
+      icon: <AlertTriangle className="w-5 h-5 text-danger-text flex-shrink-0" />,
       headline: 'Telemetry is not reaching Helix.',
     },
   }[status];
@@ -80,7 +80,7 @@ const SystemHealth: React.FC = () => (
           <Server className="w-3 h-3" /> Gateway
         </div>
         <div className="flex items-center justify-between">
-          <div className="text-base font-semibold text-success">{MOCK.gateway.status}</div>
+          <div className="text-base font-semibold text-success-text">{MOCK.gateway.status}</div>
           <div className="flex items-center gap-1">
             <button className="p-1 text-gray-500 hover:text-gray-200" title="Start"><Play className="w-3.5 h-3.5" /></button>
             <button className="p-1 text-gray-500 hover:text-gray-200" title="Stop"><Pause className="w-3.5 h-3.5" /></button>
@@ -122,8 +122,8 @@ type Collector = {
 
 const FeedbackStrip: React.FC<{ feedback: Feedback; onDismiss: () => void }> = ({ feedback, onDismiss }) => {
   const styles = {
-    success: 'bg-success/10 border-success/40 text-success',
-    error: 'bg-danger/10 border-danger/40 text-danger',
+    success: 'bg-success/10 border-success/40 text-success-text',
+    error: 'bg-danger/10 border-danger/40 text-danger-text',
     info: 'bg-blue-950/30 border-blue-900 text-blue-200',
   }[feedback.type];
   const icon = feedback.type === 'success'
@@ -154,7 +154,7 @@ const DiagnosticPanel: React.FC<{ data: DiagnosticData; loading: boolean; onClos
     </div>
     {loading && <div className="text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Probing gateway…</div>}
     {!loading && data?.error && (
-      <div className="text-sm text-danger">Probe failed: {data.error}</div>
+      <div className="text-sm text-danger-text">Probe failed: {data.error}</div>
     )}
     {!loading && data && !data.error && (
       <div className="grid grid-cols-3 gap-3 text-sm">
@@ -195,12 +195,12 @@ const ServicesPanel: React.FC<{ data: Collector[]; loading: boolean; onClose: ()
           <div key={c.name} className="flex items-center gap-3 text-sm">
             <span className="font-mono text-gray-200 truncate flex-1">{c.name}</span>
             {c.sharesNetworkWithSidecar ? (
-              <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/20 text-success">bridged</span>
+              <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/20 text-success-text">bridged</span>
             ) : (
               <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/20 text-warning">not bridged</span>
             )}
             {c.isKubernetes && (
-              <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/20 text-primary">k8s</span>
+              <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/20 text-link">k8s</span>
             )}
             <span className="text-tiny text-gray-500 truncate max-w-[200px]" title={c.image}>{c.image}</span>
           </div>
@@ -269,7 +269,7 @@ const RecentServices: React.FC = () => (
   <div className="adapt-card">
     <div className="flex items-center justify-between mb-3">
       <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Recent services</div>
-      <a href="/otel-data" className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
+      <a href="/otel-data" className="inline-flex items-center gap-1.5 text-sm text-link hover:underline">
         <Eye className="w-4 h-4" /> View OTel data
       </a>
     </div>
@@ -332,11 +332,11 @@ const OpenInHelix: React.FC = () => (
   <div className="adapt-card">
     <div className="text-tiny font-semibold text-gray-400 uppercase tracking-wider mb-3">Open in Helix</div>
     <div className="flex items-center gap-2 flex-wrap text-sm">
-      <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">OTel dashboard <ExternalLink className="w-3.5 h-3.5" /></a>
+      <a href="#" className="inline-flex items-center gap-1.5 text-link hover:underline">OTel dashboard <ExternalLink className="w-3.5 h-3.5" /></a>
       <span className="text-gray-700">·</span>
-      <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">AIOps service <ExternalLink className="w-3.5 h-3.5" /></a>
+      <a href="#" className="inline-flex items-center gap-1.5 text-link hover:underline">AIOps service <ExternalLink className="w-3.5 h-3.5" /></a>
       <span className="text-gray-700">·</span>
-      <a href="#" className="inline-flex items-center gap-1.5 text-primary hover:underline">Application UI <ExternalLink className="w-3.5 h-3.5" /></a>
+      <a href="#" className="inline-flex items-center gap-1.5 text-link hover:underline">Application UI <ExternalLink className="w-3.5 h-3.5" /></a>
     </div>
   </div>
 );

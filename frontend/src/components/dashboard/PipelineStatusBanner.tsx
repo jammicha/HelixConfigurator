@@ -74,7 +74,7 @@ const deriveStatus = (h: SystemHealth | null): DerivedStatus => {
 const STYLES: Record<PipelineStatus, { bg: string; icon: React.ReactNode }> = {
   receiving: {
     bg: 'bg-success/10 border-success/40',
-    icon: <CheckCircle2 className="w-5 h-5 text-success flex-shrink-0" />,
+    icon: <CheckCircle2 className="w-5 h-5 text-success-text flex-shrink-0" />,
   },
   degraded: {
     bg: 'bg-warning/10 border-warning/40',
@@ -82,7 +82,7 @@ const STYLES: Record<PipelineStatus, { bg: string; icon: React.ReactNode }> = {
   },
   broken: {
     bg: 'bg-danger/10 border-danger/40',
-    icon: <AlertTriangle className="w-5 h-5 text-danger flex-shrink-0" />,
+    icon: <AlertTriangle className="w-5 h-5 text-danger-text flex-shrink-0" />,
   },
 };
 

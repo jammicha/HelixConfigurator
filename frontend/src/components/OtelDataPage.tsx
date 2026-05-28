@@ -910,7 +910,7 @@ export const OtelDataPage: React.FC = () => {
                     }
                   }}
                   title={customRange ? 'Custom window active. Pick a preset to clear, or re-select Custom… to edit.' : 'Time range. Persists across tabs.'}
-                  className={`bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${customRange ? 'text-active' : 'text-gray-200'}`}
+                  className={`bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-link normal-case tracking-normal font-normal ${customRange ? 'text-link' : 'text-gray-200'}`}
                 >
                   {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   <option value="custom">{customRange ? 'Custom window' : 'Custom…'}</option>
@@ -948,7 +948,7 @@ export const OtelDataPage: React.FC = () => {
                 value={streamMode}
                 onChange={(e) => setStreamMode(e.target.value as StreamMode)}
                 title="Live = realtime SSE + 30s rollup poll. 30s/1m/5m = snapshot poll at that cadence (no realtime). Paused = freeze the view."
-                className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${
+                className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-link normal-case tracking-normal font-normal ${
                   streamMode === 'paused'
                     ? 'border-warning/60 text-warning'
                     : streamMode === 'live'
@@ -993,7 +993,7 @@ export const OtelDataPage: React.FC = () => {
                 value={String(slowThresholdMs)}
                 onChange={(e) => setSlowThresholdMs(parseInt(e.target.value, 10) || SLOW_THRESHOLD_MS)}
                 title="Duration above which traces and spans are flagged as slow. Affects the Slow status filter, duration coloring, and the histogram's ok/slow segmentation."
-                className="bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny text-gray-200 focus:outline-none focus:border-active normal-case tracking-normal font-normal"
+                className="bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny text-gray-200 focus:outline-none focus:border-link normal-case tracking-normal font-normal"
               >
                 <option value="250">250ms</option>
                 <option value="500">500ms</option>
@@ -1031,8 +1031,8 @@ export const OtelDataPage: React.FC = () => {
                   value={namespaceFilter}
                   onChange={(e) => setNamespaceFilter(e.target.value)}
                   title="Filter by OTel resource attribute service.namespace. Applies to every tab."
-                  className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${
-                    namespaceFilter ? 'border-active text-active' : 'border-gray-800 text-gray-200'
+                  className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-link normal-case tracking-normal font-normal ${
+                    namespaceFilter ? 'border-active text-link' : 'border-gray-800 text-gray-200'
                   }`}
                 >
                   <option value="">All</option>
@@ -1053,8 +1053,8 @@ export const OtelDataPage: React.FC = () => {
                   value={containerFilter}
                   onChange={(e) => setContainerFilter(e.target.value)}
                   title="Filter by OTel resource attribute container.name (or k8s.container.name). Applies to every tab."
-                  className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-active normal-case tracking-normal font-normal ${
-                    containerFilter ? 'border-active text-active' : 'border-gray-800 text-gray-200'
+                  className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-link normal-case tracking-normal font-normal ${
+                    containerFilter ? 'border-active text-link' : 'border-gray-800 text-gray-200'
                   }`}
                 >
                   <option value="">All</option>
@@ -1107,7 +1107,7 @@ export const OtelDataPage: React.FC = () => {
                     </div>
                   )}
                   {restartResult && (
-                    <div className={`px-3 py-2 border-t border-gray-800 text-tiny inline-flex items-center gap-1.5 ${restartResult.ok ? 'text-[#5eead4]' : 'text-danger'}`}>
+                    <div className={`px-3 py-2 border-t border-gray-800 text-tiny inline-flex items-center gap-1.5 ${restartResult.ok ? 'text-[#5eead4]' : 'text-danger-text'}`}>
                       {restartResult.ok
                         ? <Check className="w-3.5 h-3.5" aria-hidden="true" />
                         : <X className="w-3.5 h-3.5" aria-hidden="true" />}

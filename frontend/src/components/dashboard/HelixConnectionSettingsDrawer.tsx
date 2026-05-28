@@ -77,21 +77,23 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
 
         <div className="flex-1 p-6 space-y-5">
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Ingest Endpoint</label>
+            <label htmlFor="conn-endpoint" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Ingest Endpoint</label>
             <input
+              id="conn-endpoint"
               type="text"
               value={envVars.HELIX_ENDPOINT}
               onChange={(e) => setEnvVars({ ...envVars, HELIX_ENDPOINT: e.target.value })}
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm"
+              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
               placeholder="https://otel-itom.onbmc.com"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">X-Api-Key (TenantID::AccessKey::SecretKey)</label>
+            <label htmlFor="conn-api-key" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">X-Api-Key (TenantID::AccessKey::SecretKey)</label>
             <div className="relative">
               <input
                 type="text"
+                id="conn-api-key"
                 name="helix-x-api-key"
                 autoComplete="off"
                 spellCheck={false}
@@ -103,7 +105,7 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
                   const parsed = parseHelixKeyBundle(e.target.value);
                   setEnvVars({ ...envVars, HELIX_API_KEY: parsed ?? e.target.value });
                 }}
-                className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
+                className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
                 placeholder="123456789::ABCDE12345::FGHIJ67890..."
               />
               <button
@@ -117,34 +119,37 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">X-Source (Business Service)</label>
+            <label htmlFor="conn-x-source" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">X-Source (Business Service)</label>
             <input
+              id="conn-x-source"
               type="text"
               value={envVars.X_SOURCE}
               onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm"
+              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
               placeholder="Source Name"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">App URL (optional)</label>
+            <label htmlFor="conn-app-url" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">App URL (optional)</label>
             <input
+              id="conn-app-url"
               type="text"
               value={envVars.APP_URL}
               onChange={(e) => setEnvVars({ ...envVars, APP_URL: e.target.value })}
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all text-sm"
+              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
               placeholder="http://localhost:8080"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AIOps Business Service Key (optional)</label>
+            <label htmlFor="conn-bskey" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AIOps Business Service Key (optional)</label>
             <input
+              id="conn-bskey"
               type="text"
               value={envVars.BUSINESS_SERVICE_KEY}
               onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm"
+              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
               placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
             />
           </div>

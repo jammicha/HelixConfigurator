@@ -1617,7 +1617,7 @@ ${logsData.logs || '(no logs available)'}
                 <button
                   onClick={() => handleDisconnectContainer(container.name)}
                   disabled={loadingContainers.has(container.name)}
-                  className="text-gray-400 hover:text-danger transition-colors p-1 disabled:opacity-60"
+                  className="text-gray-400 hover:text-danger-text transition-colors p-1 disabled:opacity-60"
                   title="Disconnect from Bridge"
                   aria-label={`Disconnect ${container.name} from helix-bridge`}
                 >
@@ -1913,10 +1913,10 @@ ${logsData.logs || '(no logs available)'}
                 <div className="text-xs text-gray-400 animate-pulse">Injecting synthetic diagnostic trace…</div>
               )}
               {traceInjectionStatus === 'success' && (
-                <div className="text-xs text-success">Synthetic Trace Injected Successfully</div>
+                <div className="text-xs text-success-text">Synthetic Trace Injected Successfully</div>
               )}
               {traceInjectionStatus === 'error' && (
-                <div className="text-xs text-danger">Trace Injection Failed</div>
+                <div className="text-xs text-danger-text">Trace Injection Failed</div>
               )}
 
               {/* External Helix-app shortcuts (OTel dashboard, AIOps service,
@@ -1993,7 +1993,7 @@ ${logsData.logs || '(no logs available)'}
                                     Fail
                                   </span>
                                   {subDetail && (
-                                    <span className="text-[10px] text-danger font-medium text-center leading-tight">
+                                    <span className="text-[10px] text-danger-text font-medium text-center leading-tight">
                                       {subDetail}
                                     </span>
                                   )}
@@ -2011,7 +2011,7 @@ ${logsData.logs || '(no logs available)'}
                             {expandedRemediations[i] && remediation && (
                               <div className="bg-gray-1000 border-l-2 border-danger p-3 rounded-r text-xs text-gray-200 animate-in fade-in slide-in-from-top-2 duration-200">
                                 <div className="flex items-center justify-between mb-1">
-                                  <p className="font-bold text-danger uppercase tracking-tighter">Remediation Step:</p>
+                                  <p className="font-bold text-danger-text uppercase tracking-tighter">Remediation Step:</p>
                                   <button
                                     onClick={() => {
                                       const text = `[${title}] ${subDetail ? subDetail + '\n' : ''}${remediation}`;
@@ -2055,7 +2055,7 @@ ${logsData.logs || '(no logs available)'}
                         )}
                         {diagAlert && (
                           <span
-                            className="flex items-center gap-2 bg-[#f5bcc6]/20 border border-danger/40 text-danger px-3 py-1 rounded text-tiny font-semibold uppercase tracking-wide"
+                            className="flex items-center gap-2 bg-[#f5bcc6]/20 border border-danger/40 text-danger-text px-3 py-1 rounded text-tiny font-semibold uppercase tracking-wide"
                             title="Counted from log lines containing 'sending queue is full', 'exporting failed', 'connection refused', or 'deadline exceeded' in the streamed container."
                           >
                             <span className="font-bold">!</span> Drop events in logs. Check network or queue limits.
@@ -2099,7 +2099,7 @@ ${logsData.logs || '(no logs available)'}
                               </div>
                               <div className="bg-gray-800 border-l-2 border-success px-3 py-1.5 rounded-r min-w-[88px]">
                                 <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Sent</div>
-                                <div className="text-xl font-semibold text-success leading-none tabular-nums">{liveMetrics.sent}</div>
+                                <div className="text-xl font-semibold text-success-text leading-none tabular-nums">{liveMetrics.sent}</div>
                                 {renderSpark(ratesFor('sent'), '#11845b')}
                               </div>
                               {(() => {
@@ -2118,7 +2118,7 @@ ${logsData.logs || '(no logs available)'}
                                     title={breakdown}
                                   >
                                     <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Dropped</div>
-                                    <div className="text-xl font-semibold text-danger leading-none tabular-nums">{droppedHeadline}</div>
+                                    <div className="text-xl font-semibold text-danger-text leading-none tabular-nums">{droppedHeadline}</div>
                                     {liveMetrics.failed !== diagAlertCount && (
                                       <div className="text-[9px] text-gray-500 leading-tight">
                                         {diagAlertCount} log · {liveMetrics.failed} metric
@@ -2149,8 +2149,8 @@ ${logsData.logs || '(no logs available)'}
                             const colorByKind: Record<TimelineKind, string> = {
                               'config-saved': 'bg-info/15 border-info/40 text-info',
                               'restart': 'bg-warning/15 border-warning/40 text-warning',
-                              'attach': 'bg-success/15 border-success/40 text-success',
-                              'error-spike': 'bg-danger/15 border-danger/40 text-danger',
+                              'attach': 'bg-success/15 border-success/40 text-success-text',
+                              'error-spike': 'bg-danger/15 border-danger/40 text-danger-text',
                               'verify': 'bg-gray-800 border-gray-700 text-gray-300',
                             };
                             return (
@@ -2188,7 +2188,7 @@ ${logsData.logs || '(no logs available)'}
                     <div
                       ref={logContainerRef}
                       onScroll={handleLogScroll}
-                      className="bg-gray-1000 p-4 rounded border border-gray-800 h-64 overflow-y-auto font-mono text-sm text-success"
+                      className="bg-gray-1000 p-4 rounded border border-gray-800 h-64 overflow-y-auto font-mono text-sm text-success-text"
                       style={{fontFamily: "'Source Code Pro', monospace"}}
                     >
                       {visibleLogs.map((log, idx) => (
@@ -2319,7 +2319,7 @@ ${logsData.logs || '(no logs available)'}
       >
         <div className="bg-gray-900 px-4 border-b border-gray-700 flex items-center justify-between flex-shrink-0 h-[52px]">
           <h2 id="discovered-services-title" className="text-lg font-semibold flex items-center gap-2">
-            <Activity className="w-5 h-5 text-primary" />
+            <Activity className="w-5 h-5 text-link" />
             Discovered Services
           </h2>
           <button

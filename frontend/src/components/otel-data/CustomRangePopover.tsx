@@ -35,7 +35,7 @@ export const CustomRangePopover: React.FC<{
           type="datetime-local"
           value={start}
           onChange={(e) => { setStart(e.target.value); setErr(''); }}
-          className="mt-1 block w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-active"
+          className="mt-1 block w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-link"
         />
       </label>
       <label className="block text-tiny text-gray-400 mb-2">
@@ -44,10 +44,10 @@ export const CustomRangePopover: React.FC<{
           type="datetime-local"
           value={end}
           onChange={(e) => { setEnd(e.target.value); setErr(''); }}
-          className="mt-1 block w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-active"
+          className="mt-1 block w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-link"
         />
       </label>
-      {err && <div className="text-tiny text-danger mb-2">{err}</div>}
+      {err && <div className="text-tiny text-danger-text mb-2">{err}</div>}
       <div className="flex items-center justify-between gap-2">
         <button
           onClick={onClear}

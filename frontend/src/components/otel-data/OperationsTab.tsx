@@ -29,7 +29,7 @@ export const OperationsTab: React.FC<{
   // thresholds. Stays on ADAPT palette (success / warning / danger muted) so
   // the visual signal is readable without bright fills.
   const latencyTone = (ms: number): string => {
-    if (ms <= 200) return 'bg-success/10 text-success';
+    if (ms <= 200) return 'bg-success/10 text-success-text';
     if (ms <= slowThresholdMs) return 'bg-warning/10 text-warning';
     return 'bg-danger/15 text-[#ff8a8a]';
   };

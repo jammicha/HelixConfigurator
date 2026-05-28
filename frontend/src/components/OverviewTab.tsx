@@ -210,7 +210,7 @@ export const OverviewTab: React.FC<Props> = ({
             </a>
           </div>
           {testTraceStatus === 'error' && (
-            <p className="text-tiny text-danger inline-flex items-center gap-1 justify-center">
+            <p className="text-tiny text-danger-text inline-flex items-center gap-1 justify-center">
               <AlertTriangle className="w-3.5 h-3.5" /> {testTraceError}
             </p>
           )}
@@ -270,13 +270,13 @@ export const OverviewTab: React.FC<Props> = ({
       {customRange && (
         <div className="mb-3 flex items-center justify-between gap-3 px-1">
           <div className="text-tiny text-gray-400">
-            <span className="text-active font-semibold uppercase tracking-wider mr-2">Zoomed</span>
+            <span className="text-link font-semibold uppercase tracking-wider mr-2">Zoomed</span>
             {new Date(customRange.sinceMs).toLocaleTimeString([], { hour12: false })} –{' '}
             {new Date(customRange.untilMs).toLocaleTimeString([], { hour12: false })}
           </div>
           <button
             onClick={onClearCustomRange}
-            className="text-tiny text-active hover:underline font-semibold"
+            className="text-tiny text-link hover:underline font-semibold"
           >Clear time selection</button>
         </div>
       )}
@@ -387,7 +387,7 @@ export const OverviewTab: React.FC<Props> = ({
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-tiny text-active hover:text-white inline-flex items-center gap-1.5 font-semibold whitespace-nowrap"
+                  className="text-tiny text-link hover:text-white inline-flex items-center gap-1.5 font-semibold whitespace-nowrap"
                 >
                   Open in AIOps Topology
                   <ExternalLink className="w-3 h-3" />

@@ -56,7 +56,7 @@ export const TopList: React.FC<Props> = ({
             const toneClassFor = (tone: 'danger' | 'warning' | 'neutral' | 'success') =>
               tone === 'danger' ? 'bg-danger/15 text-[#ff8a8a] border-danger/30'
               : tone === 'warning' ? 'bg-warning/15 text-warning border-warning/30'
-              : tone === 'success' ? 'bg-success/15 text-success border-success/30'
+              : tone === 'success' ? 'bg-success/15 text-success-text border-success/30'
               : 'bg-gray-800 text-gray-300 border-gray-700';
             const allTags = [
               ...(r.tags || []),

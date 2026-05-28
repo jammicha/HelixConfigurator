@@ -131,7 +131,7 @@ export const LanguageGuide: React.FC<Props> = ({ language }) => {
           <div className="text-base text-gray-400 mb-3">
             Agent JAR download:{' '}
             <a href={snippet.agentDownload} target="_blank" rel="noopener noreferrer"
-              className="text-primary hover:underline inline-flex items-center gap-1 break-all">
+              className="text-link hover:underline inline-flex items-center gap-1 break-all">
               {snippet.agentDownload}
               <ExternalLink className="w-4 h-4 flex-shrink-0" />
             </a>
@@ -143,7 +143,7 @@ export const LanguageGuide: React.FC<Props> = ({ language }) => {
             href={snippet.zeroCodeDocsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-base text-primary hover:underline"
+            className="inline-flex items-center gap-1.5 text-base text-link hover:underline"
           >
             Official OpenTelemetry zero-code guide for {LANG_LABEL[language]}
             <ExternalLink className="w-4 h-4" />
@@ -187,7 +187,7 @@ export const LanguageGuide: React.FC<Props> = ({ language }) => {
             href={snippet.manual.docsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-base text-primary hover:underline"
+            className="inline-flex items-center gap-1.5 text-base text-link hover:underline"
           >
             Official OpenTelemetry SDK docs for {LANG_LABEL[language]}
             <ExternalLink className="w-4 h-4" />

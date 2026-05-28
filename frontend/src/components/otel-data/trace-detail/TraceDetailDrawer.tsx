@@ -149,7 +149,7 @@ export const TraceDetailDrawer: React.FC<{
                       ? 'border border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500 hover:text-gray-200'
                       : isAnomalous
                         ? hasError
-                          ? 'border border-danger/60 bg-danger/10 text-danger hover:bg-danger/20'
+                          ? 'border border-danger/60 bg-danger/10 text-danger-text hover:bg-danger/20'
                           : 'border border-warning/60 bg-warning/10 text-warning hover:bg-warning/20'
                         : 'border border-gray-800 text-gray-300 hover:border-active hover:text-white'
                   }`}
@@ -167,7 +167,7 @@ export const TraceDetailDrawer: React.FC<{
                 </button>
                 {(sendMsg || alreadySent || attempts.length > 0) && (
                   <div className="absolute top-full right-0 mt-1 max-w-xs text-right z-30">
-                    <div className={`text-tiny ${sendState === 'error' ? 'text-danger' : 'text-gray-400'}`}>
+                    <div className={`text-tiny ${sendState === 'error' ? 'text-danger-text' : 'text-gray-400'}`}>
                       {sendMsg || (alreadySent
                         ? `Already sent ${formatRelative(priorSend!.sentAt)} as ${priorSend!.severity}.`
                         : '')}
@@ -178,7 +178,7 @@ export const TraceDetailDrawer: React.FC<{
                             href={aiopsConsoleUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-0.5 text-active hover:text-[#a5baff]"
+                            className="inline-flex items-center gap-0.5 text-link hover:text-white"
                             title="Open the AIOps console. Find your event in the Situations list (precise event-detail URL refines once validated)."
                           >
                             Open AIOps <ExternalLink className="w-3 h-3" />
@@ -193,7 +193,7 @@ export const TraceDetailDrawer: React.FC<{
                         </summary>
                         <ul className="px-2 pb-2 space-y-0.5 max-h-48 overflow-auto">
                           {attempts.map((a, i) => (
-                            <li key={i} className={a.ok ? 'text-gray-400' : 'text-danger'}>
+                            <li key={i} className={a.ok ? 'text-gray-400' : 'text-danger-text'}>
                               <span className="text-gray-500">{formatRelative(a.at)}</span>
                               {' · '}
                               {a.ok ? `sent as ${a.severity || 'EVENT'}` : (a.error || 'failed')}

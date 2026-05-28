@@ -175,7 +175,7 @@ export const Step3: React.FC<Props> = ({
         <div className="mt-2">
           {k8sDetected && (
             <div className="mb-4 flex items-start gap-3 p-3 bg-primary/10 border border-primary/40 rounded text-sm">
-              <Hexagon className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+              <Hexagon className="w-4 h-4 text-link flex-shrink-0 mt-0.5" />
               <div className="flex-1">
                 <div className="font-semibold text-gray-100 mb-1">Kubernetes detected</div>
                 <p className="text-tiny text-gray-300">
@@ -187,7 +187,7 @@ export const Step3: React.FC<Props> = ({
                 disabled={k8sApplying || k8sApplyResult === 'applied'}
                 className={`flex-shrink-0 px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${
                   k8sApplyResult === 'applied'
-                    ? 'bg-success/20 text-success border border-success/40 cursor-default'
+                    ? 'bg-success/20 text-success-text border border-success/40 cursor-default'
                     : 'bg-primary hover:bg-primary-hover text-white disabled:opacity-60'
                 }`}
               >
@@ -200,13 +200,13 @@ export const Step3: React.FC<Props> = ({
             </div>
           )}
           {k8sApplyResult === 'failed' && (
-            <div className="mb-3 text-tiny text-danger inline-flex items-center gap-1.5"><X className="w-3.5 h-3.5" aria-hidden="true" /> Could not apply template. Retry, or apply it from the YAML editor on the dashboard.</div>
+            <div className="mb-3 text-tiny text-danger-text inline-flex items-center gap-1.5"><X className="w-3.5 h-3.5" aria-hidden="true" /> Could not apply template. Retry, or apply it from the YAML editor on the dashboard.</div>
           )}
 
           {detectedCollectors.length === 0 ? (
             <div className="p-4 text-tiny text-gray-400 border border-gray-800 rounded bg-gray-1000 space-y-2 leading-relaxed">
               <p>No external collector detected on this host.</p>
-              <p className="text-gray-500">If yours runs elsewhere (Kubernetes, bare-metal, remote), use the <button onClick={() => setTab('manual')} className="text-active hover:underline font-semibold">Manual</button> tab. Otherwise, skip this step.</p>
+              <p className="text-gray-500">If yours runs elsewhere (Kubernetes, bare-metal, remote), use the <button onClick={() => setTab('manual')} className="text-link hover:underline font-semibold">Manual</button> tab. Otherwise, skip this step.</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -219,7 +219,7 @@ export const Step3: React.FC<Props> = ({
                       <div className="flex items-center gap-2 flex-wrap mb-0.5">
                         <span className="text-gray-200 font-mono text-sm truncate">{c.name}</span>
                         {c.isKubernetes && (
-                          <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/20 text-primary inline-flex items-center gap-1">
+                          <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/20 text-link inline-flex items-center gap-1">
                             <Hexagon className="w-2.5 h-2.5" />k8s
                           </span>
                         )}
@@ -235,7 +235,7 @@ export const Step3: React.FC<Props> = ({
                           </span>
                         )}
                         {reachable ? (
-                          <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/20 text-success">bridged</span>
+                          <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/20 text-success-text">bridged</span>
                         ) : (
                           <span className="text-tiny font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/20 text-warning">not bridged</span>
                         )}
@@ -260,7 +260,7 @@ export const Step3: React.FC<Props> = ({
                         const sharedNetwork = c.networks.find(n => !attachable.includes(n) && n !== 'helix-bridge') || c.networks[0];
                         return (
                           <div className="flex flex-col items-end gap-1">
-                            <span className="px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-success/20 text-success border border-success/40">
+                            <span className="px-3 py-1.5 text-tiny rounded font-semibold uppercase tracking-wider bg-success/20 text-success-text border border-success/40">
                               Attached{sharedNetwork ? <> on <code className="font-mono normal-case tracking-normal">{sharedNetwork}</code></> : null}
                             </span>
                             {sharedNetwork && sharedNetwork !== 'helix-bridge' && (
@@ -304,7 +304,7 @@ export const Step3: React.FC<Props> = ({
                 );
               })}
               {attachResult && (
-                <div className={`text-tiny inline-flex items-center gap-1.5 ${attachResult.ok ? 'text-success' : 'text-danger'}`}>
+                <div className={`text-tiny inline-flex items-center gap-1.5 ${attachResult.ok ? 'text-success-text' : 'text-danger-text'}`}>
                   {attachResult.ok
                     ? <Check className="w-3.5 h-3.5" aria-hidden="true" />
                     : <X className="w-3.5 h-3.5" aria-hidden="true" />}
@@ -349,7 +349,7 @@ export const Step3: React.FC<Props> = ({
           </div>
         ) : verifyResult.overall === 'green' ? (
           <div className="mt-4 flex items-start gap-3 p-2.5 bg-success/10 border border-success/40 rounded text-tiny text-gray-300">
-            <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0 mt-0.5" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-success-text flex-shrink-0 mt-0.5" />
             <span>
               <span className="font-semibold text-gray-100">{verifyResult.message}</span>{' '}
               {verifyResult.sharedNetwork && bridgedCollector && (
@@ -368,7 +368,7 @@ export const Step3: React.FC<Props> = ({
           </div>
         ) : (
           <div className="mt-4 flex items-start gap-3 p-2.5 bg-danger/10 border border-danger/40 rounded text-tiny text-gray-300">
-            <X className="w-3.5 h-3.5 text-danger flex-shrink-0 mt-0.5" aria-label="Error" />
+            <X className="w-3.5 h-3.5 text-danger-text flex-shrink-0 mt-0.5" aria-label="Error" />
             <span>
               <span className="font-semibold text-gray-100">{verifyResult.message}</span>{' '}
               {verifyResult.remediation}

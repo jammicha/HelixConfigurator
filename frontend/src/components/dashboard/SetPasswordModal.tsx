@@ -143,17 +143,18 @@ export const SetPasswordModal: React.FC<Props> = ({ open, mode, hasExistingPassw
 
                 <div className="space-y-3">
                   <div>
-                    <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider block mb-1">New password</label>
+                    <label htmlFor="new-password" className="text-tiny font-semibold text-gray-400 uppercase tracking-wider block mb-1">New password</label>
                     <div className="relative">
                       <input
                         ref={inputRef}
+                        id="new-password"
                         type={show ? 'text' : 'password'}
                         name="newPassword"
                         value={pw1}
                         onChange={(e) => setPw1(e.target.value)}
                         onKeyDown={onPw1Key}
                         disabled={phase.kind === 'submitting'}
-                        className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm disabled:opacity-60"
+                        className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm disabled:opacity-60"
                         placeholder={`At least ${MIN_LEN} characters`}
                         autoComplete="new-password"
                       />
@@ -168,15 +169,16 @@ export const SetPasswordModal: React.FC<Props> = ({ open, mode, hasExistingPassw
                   </div>
 
                   <div>
-                    <label className="text-tiny font-semibold text-gray-400 uppercase tracking-wider block mb-1">Confirm new password</label>
+                    <label htmlFor="confirm-password" className="text-tiny font-semibold text-gray-400 uppercase tracking-wider block mb-1">Confirm new password</label>
                     <input
+                      id="confirm-password"
                       type={show ? 'text' : 'password'}
                       name="confirm"
                       value={pw2}
                       onChange={(e) => setPw2(e.target.value)}
                       onKeyDown={onPw2Key}
                       disabled={phase.kind === 'submitting'}
-                      className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-active focus:shadow-[0_0_0_2px_rgba(55,89,216,0.2)] transition-all font-mono text-sm disabled:opacity-60"
+                      className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm disabled:opacity-60"
                       placeholder="Re-enter the password"
                       autoComplete="new-password"
                     />
@@ -184,7 +186,7 @@ export const SetPasswordModal: React.FC<Props> = ({ open, mode, hasExistingPassw
                 </div>
 
                 {phase.kind === 'form' && phase.error && (
-                  <div className="mt-3 text-tiny text-danger inline-flex items-center gap-1.5">
+                  <div className="mt-3 text-tiny text-danger-text inline-flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" /> {phase.error}
                   </div>
                 )}
@@ -207,7 +209,7 @@ export const SetPasswordModal: React.FC<Props> = ({ open, mode, hasExistingPassw
 
             {phase.kind === 'waiting' && (
               <div className="flex items-start gap-3">
-                <Loader2 className="w-5 h-5 text-primary animate-spin flex-shrink-0 mt-0.5" />
+                <Loader2 className="w-5 h-5 text-link animate-spin flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <div className="text-sm font-semibold text-gray-100">Restarting configurator…</div>
                   <div className="text-sm text-gray-400 mt-1 leading-relaxed">
@@ -222,7 +224,7 @@ export const SetPasswordModal: React.FC<Props> = ({ open, mode, hasExistingPassw
 
             {phase.kind === 'failed' && (
               <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-danger flex-shrink-0 mt-0.5" />
+                <AlertTriangle className="w-5 h-5 text-danger-text flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <div className="text-sm font-semibold text-gray-100">Restart didn’t complete</div>
                   <div className="text-sm text-gray-400 mt-1 leading-relaxed">

@@ -38,8 +38,8 @@ export const StatCard: React.FC<Props> = ({
     deltaDirection === 'flat' || !deltaDirection
       ? 'text-gray-500'
       : deltaDirection === betterWhen
-        ? 'text-success'
-        : 'text-danger';
+        ? 'text-success-text'
+        : 'text-danger-text';
   const DeltaIcon =
     deltaDirection === 'up' ? TrendingUp : deltaDirection === 'down' ? TrendingDown : Minus;
 
