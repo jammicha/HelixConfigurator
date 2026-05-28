@@ -97,31 +97,7 @@ function register(app, { otelStore }) {
       return res.status(412).json({ error: 'No events endpoint configured — set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
     }
 
-    // Class definition: helix_trace_id carries the dedup facet, plus a few
-    // OTel-flavored slots that surface usefully in the AIOps console.
-    const classDef = {
-      name: OTEL_TRACE_ANOMALY_CLASS,
-      parentClassName: 'EVENT',
-      attributes: [
-        {
-          name: 'helix_trace_id',
-          dataType: 'STRING',
-          enum: false,
-          allFacet: [
-            { name: 'dup_detect', value: 'true' },
-            { name: 'mandatory', value: 'true' },
-          ],
-        },
-        { name: 'root_operation', dataType: 'STRING', enum: false },
-        { name: 'duration_ms', dataType: 'STRING', enum: false },
-        { name: 'p95_ms', dataType: 'STRING', enum: false },
-        { name: 'span_count', dataType: 'STRING', enum: false },
-        { name: 'has_error', dataType: 'STRING', enum: false },
-        { name: 'service_id', dataType: 'STRING', enum: false },
-        { name: 'business_service_key', dataType: 'STRING', enum: false },
-        { name: 'x_source', dataType: 'STRING', enum: false },
-      ],
-    };
+    const classDef = buildClassDefinition();
 
     const url = `${baseUrl}/events-service/api/v1.0/events/classes`;
     try {
@@ -141,7 +117,21 @@ function register(app, { otelStore }) {
       // class is in the desired state from the caller's perspective.
       const body = JSON.stringify(response.data || '').toLowerCase();
       if (response.status === 409 || body.includes('already exist') || body.includes('duplicate')) {
-        return res.json({ ok: true, className: OTEL_TRACE_ANOMALY_CLASS, alreadyExists: true, upstream: response.data });
+        // Class already exists — try to add any newly-introduced slots so older
+        // tenants pick up service_name/service_namespace/trace_url. (The exact
+        // update verb is being confirmed against a live tenant in Task 1; PUT of
+        // the full definition is the working assumption. Degrade gracefully if
+        // the update is rejected so an existing class is never left broken.)
+        const updateUrl = `${url}/${OTEL_TRACE_ANOMALY_CLASS}`;
+        const upd = await axios.put(updateUrl, classDef, {
+          headers: { 'Content-Type': 'application/json', Authorization: `apiKey ${apiKey}` },
+          timeout: 15_000,
+          validateStatus: () => true,
+        });
+        if (upd.status >= 200 && upd.status < 300) {
+          return res.json({ ok: true, className: OTEL_TRACE_ANOMALY_CLASS, updated: true, addedSlots: ADDED_SLOTS, upstream: upd.data });
+        }
+        return res.json({ ok: true, className: OTEL_TRACE_ANOMALY_CLASS, alreadyExists: true, slotUpdate: `failed (${upd.status})`, upstream: upd.data });
       }
       return res.status(502).json({
         error: `Helix event-classes API returned ${response.status}`,
