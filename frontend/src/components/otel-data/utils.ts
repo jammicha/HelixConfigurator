@@ -94,17 +94,23 @@ export const buildHelixBusinessServiceUrl = (env: HelixEnv | null): string | nul
 
 export const buildHelixTraceUrl = (
   env: HelixEnv | null,
-  { traceId, serviceName, timeNs }: { traceId: string; serviceName: string; timeNs: number },
+  { traceId, serviceName, timeNs, namespace }: { traceId: string; serviceName: string; timeNs: number; namespace?: string | null },
 ): string | null => {
   // hasRealHelixEndpoint check centralizes the placeholder guard: every
   // caller's `if (!url) return null;` becomes the guard automatically,
   // so trace-row chevrons stop rendering a link to `your-tenant.onbmc.com`
   // when the install bundle's default hasn't been replaced yet.
   if (!env || !env.tenantId || !traceId || !hasRealHelixEndpoint(env)) return null;
+  // var-OTelNamespace filters on the OTel `service.namespace` resource attr,
+  // which is distinct from X_SOURCE (the X-Source ingest header / business
+  // service). The collector forwards spans to Helix carrying their original
+  // service.namespace, so the dashboard only resolves the trace when this
+  // matches the namespace the trace actually landed in. Fall back to
+  // env.source only when the caller can't supply the trace's namespace.
   const params = new URLSearchParams({
     orgId: env.tenantId,
     'var-BusinessService': env.source || '',
-    'var-OTelNamespace': env.source || '',
+    'var-OTelNamespace': namespace || env.source || '',
     'var-OTelService': serviceName || '',
     'var-TraceTimestamp': formatHelixTimestamp(timeNs),
     'var-TraceId': traceId.toUpperCase(),

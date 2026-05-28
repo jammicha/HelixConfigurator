@@ -212,6 +212,7 @@ export const TraceDetailDrawer: React.FC<{
                     traceId,
                     serviceName: detail.summary.service_name,
                     timeNs: detail.summary.start_time_ns,
+                    namespace: detail.summary.service_namespace,
                   })
                 : null;
               if (!url) return null;

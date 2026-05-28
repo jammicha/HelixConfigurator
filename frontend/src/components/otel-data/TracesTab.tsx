@@ -203,20 +203,10 @@ export const TracesTab: React.FC<{
         </div>
       )}
       <div className="flex-1 overflow-auto adapt-card !p-0">
-        {tracesLoading && serviceFilter ? (
+        {tracesLoading ? (
           <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading traces…
           </div>
-        ) : !serviceFilter ? (
-          // Helix-style: traces are shown per service. With no service picked
-          // (the user chose "All services"), prompt for one rather than showing
-          // a root-rooted list. If there are no services at all, fall through to
-          // the no-data empty state with its synthetic-trace CTA.
-          services.length === 0 ? (
-            <TracesEmptyState filtered={false} />
-          ) : (
-            <SelectServicePrompt services={services} onPick={setServiceFilter} />
-          )
         ) : traces.length === 0 ? (
           <TracesEmptyState filtered={!!serviceFilter || !!namespaceFilter || !!containerFilter || !!statusFilter || !!searchQuery || minMs > 0} />
         ) : (
@@ -331,6 +321,7 @@ export const TracesTab: React.FC<{
                           traceId: t.trace_id,
                           serviceName: displayService,
                           timeNs: displayStartNs,
+                          namespace: t.service_namespace,
                         });
                         if (!url) return null;
                         return (
@@ -359,36 +350,6 @@ export const TracesTab: React.FC<{
     </div>
   );
 };
-
-// Shown when no service is selected (the "All services" choice). Mirrors
-// Helix's per-service trace model: pick a service to see its traces. Lists the
-// available services as quick-pick chips so the user doesn't have to reopen the
-// dropdown.
-const SelectServicePrompt: React.FC<{
-  services: { name: string; traceCount: number }[];
-  onPick: (s: string) => void;
-}> = ({ services, onPick }) => (
-  <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
-    <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
-      <Server className="w-6 h-6 text-gray-500" />
-    </div>
-    <h3 className="text-base font-semibold text-gray-200 mb-2">Select a service</h3>
-    <p className="text-sm text-gray-400 max-w-md mb-4 leading-relaxed">
-      Traces are shown per service. Pick one to see its operations, latency, and status.
-    </p>
-    <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-      {services.slice(0, 12).map(s => (
-        <button
-          key={s.name}
-          onClick={() => onPick(s.name)}
-          className="px-3 py-1.5 text-tiny rounded font-semibold bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200"
-        >
-          {s.name} <span className="text-gray-500">({s.traceCount})</span>
-        </button>
-      ))}
-    </div>
-  </div>
-);
 
 const TracesEmptyState: React.FC<{ filtered: boolean }> = ({ filtered }) => {
   // Only fire the synthetic-run hook in the unfiltered "no data anywhere"

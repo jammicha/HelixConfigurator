@@ -312,6 +312,21 @@ describe('namespace/container filtering', () => {
     expect(filtered).toEqual(['ta']);
   });
 
+  it('exposes the root span service_namespace on the trace summary', () => {
+    // Root span (no parent) carries the namespace the trace "lives" in; a
+    // child span in a different namespace must NOT win — the deep-link's
+    // var-OTelNamespace has to match the root, the same span we take
+    // service_name/root_operation from.
+    store.ingestSpans([
+      { ...makeSpan({ traceId: 'tns', spanId: 'root', parentSpanId: '', serviceName: 'cart-api' }), serviceNamespace: 'ecommerce-prod' },
+      { ...makeSpan({ traceId: 'tns', spanId: 'child', parentSpanId: 'root', serviceName: 'inventory' }), serviceNamespace: 'warehouse' },
+    ]);
+
+    expect(store.getTrace('tns').summary.service_namespace).toBe('ecommerce-prod');
+    const [row] = store.listTraces({});
+    expect(row.service_namespace).toBe('ecommerce-prod');
+  });
+
   it('listFilterValues returns distinct non-null values', () => {
     ingestWithAttrs({ traceId: 'ta', serviceName: 'cart-api', namespace: 'prod', container: 'cart-a' });
     ingestWithAttrs({ traceId: 'tb', serviceName: 'inventory', namespace: 'prod', container: 'inv-a' });

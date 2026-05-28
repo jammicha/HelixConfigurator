@@ -248,6 +248,7 @@ class OtelStore {
       CREATE TABLE IF NOT EXISTS traces (
         trace_id TEXT PRIMARY KEY,
         service_name TEXT,
+        service_namespace TEXT,
         root_operation TEXT,
         start_time_ns INTEGER,
         end_time_ns INTEGER,
@@ -326,6 +327,11 @@ class OtelStore {
     };
     addColumn('spans', 'service_namespace', 'TEXT');
     addColumn('spans', 'container_name', 'TEXT');
+    // traces.service_namespace is denormalized from the root span (below) so
+    // the trace summary — and the "View in Helix" deep-link built from it —
+    // can scope to the namespace the trace actually lives in. Pre-existing
+    // rows get NULL until their next ingest recomputes the summary.
+    addColumn('traces', 'service_namespace', 'TEXT');
     try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_namespace ON spans(service_namespace)'); } catch {}
     try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_container ON spans(container_name)'); } catch {}
   }
@@ -356,13 +362,20 @@ class OtelStore {
         events_json = excluded.events_json
     `);
     this.recomputeTrace = this.db.prepare(`
-      INSERT INTO traces (trace_id, service_name, root_operation, start_time_ns, end_time_ns,
+      INSERT INTO traces (trace_id, service_name, service_namespace, root_operation, start_time_ns, end_time_ns,
                           duration_ms, span_count, has_error, received_at)
       SELECT
         @traceId,
         COALESCE((SELECT service_name FROM spans WHERE trace_id = @traceId
                    AND (parent_span_id IS NULL OR parent_span_id = '') LIMIT 1),
                  (SELECT service_name FROM spans WHERE trace_id = @traceId LIMIT 1)),
+        -- Namespace of the root span (same span we take service_name from), so
+        -- the deep-link's var-OTelNamespace matches var-OTelService. Falls back
+        -- to the earliest span's namespace for partial/rootless traces.
+        COALESCE((SELECT service_namespace FROM spans WHERE trace_id = @traceId
+                   AND (parent_span_id IS NULL OR parent_span_id = '') LIMIT 1),
+                 (SELECT service_namespace FROM spans WHERE trace_id = @traceId
+                   ORDER BY start_time_ns ASC LIMIT 1)),
         COALESCE((SELECT name FROM spans WHERE trace_id = @traceId
                    AND (parent_span_id IS NULL OR parent_span_id = '') LIMIT 1),
                  (SELECT name FROM spans WHERE trace_id = @traceId
@@ -377,6 +390,7 @@ class OtelStore {
         @receivedAt
       ON CONFLICT(trace_id) DO UPDATE SET
         service_name = excluded.service_name,
+        service_namespace = excluded.service_namespace,
         root_operation = excluded.root_operation,
         start_time_ns = excluded.start_time_ns,
         end_time_ns = excluded.end_time_ns,

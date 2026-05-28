@@ -15,6 +15,10 @@ export type Histogram = {
 export type TraceSummary = {
   trace_id: string;
   service_name: string;
+  // Root span's service.namespace, denormalized onto the trace by the backend.
+  // Drives var-OTelNamespace in the "View in Helix" deep-link. Null when the
+  // root span carried no namespace (or for rows predating the column).
+  service_namespace?: string | null;
   root_operation: string;
   start_time_ns: number;
   end_time_ns: number;
