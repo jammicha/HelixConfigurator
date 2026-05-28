@@ -5,12 +5,15 @@
 // Auth: same API key as the OTel collector, but in the Authorization header
 // with the `apiKey` scheme instead of `X-Api-Key`.
 const axios = require('axios');
+const {
+  OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
+  buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, selectPolicyUpsert,
+} = require('./situations-payloads');
 
 // Custom event class for OTel-derived events. Created via the Provision
 // button on the Settings page (POST /api/situations/provision-class). The
 // class inherits from EVENT and adds `helix_trace_id` as a dedup slot so
 // BMC's auto-dedup matches re-sends of the same trace.
-const OTEL_TRACE_ANOMALY_CLASS = 'OTEL_TRACE_ANOMALY';
 
 // Derive the events-service base URL. Prefer an explicit HELIX_EVENTS_ENDPOINT
 // (Settings page) since `HELIX_ENDPOINT` typically points at the OTLP ingest
@@ -200,6 +203,38 @@ function register(app, { otelStore }) {
       });
     } catch (e) {
       return res.status(502).json({ error: 'Failed to reach Helix event-classes API', details: e.message });
+    }
+  });
+
+  // Provision (idempotently) the per-service correlation policy that turns
+  // OTEL_TRACE_ANOMALY events into Situations. Follows the same auth/host
+  // pattern as provision-class. Upsert: list policies, match by name, PUT or POST.
+  app.post('/api/situations/provision-correlation-policy', async (req, res) => {
+    const apiKey = (process.env.HELIX_API_KEY || '').trim();
+    if (!apiKey) return res.status(412).json({ error: 'HELIX_API_KEY not configured - set it on the Settings page first.' });
+    const baseUrl = resolveEventsBaseUrl();
+    if (!baseUrl) return res.status(412).json({ error: 'No events endpoint configured - set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
+
+    const headers = { 'Content-Type': 'application/json', Authorization: `apiKey ${apiKey}` };
+    const policiesUrl = `${baseUrl}/events-service/api/v1.0/event_policies`;
+    try {
+      // List existing policies to decide create vs update.
+      const list = await axios.get(policiesUrl, { headers, timeout: 15_000, validateStatus: () => true });
+      const existing = Array.isArray(list.data) ? list.data : (list.data && list.data.responseContent) || [];
+      const action = selectPolicyUpsert(existing, CORRELATION_POLICY_NAME);
+      const policy = buildCorrelationPolicy();
+
+      const writeUrl = action.method === 'PUT' ? `${policiesUrl}/${action.id}` : policiesUrl;
+      const response = await axios({
+        method: action.method, url: writeUrl, headers, data: policy,
+        timeout: 15_000, validateStatus: () => true,
+      });
+      if (response.status >= 200 && response.status < 300) {
+        return res.json({ ok: true, action: action.method, policyName: CORRELATION_POLICY_NAME, upstream: response.data });
+      }
+      return res.status(502).json({ error: `Helix event_policies API returned ${response.status}`, upstream: response.data });
+    } catch (e) {
+      return res.status(502).json({ error: 'Failed to reach Helix event_policies API', details: e.message });
     }
   });
 }
