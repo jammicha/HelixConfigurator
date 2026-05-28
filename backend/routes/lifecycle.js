@@ -146,7 +146,7 @@ const readEnvAsArray = async () => {
 // editing HELIX_ENDPOINT in the UI saved the new value to disk but the
 // gateway kept shipping to the placeholder https://your-tenant.onbmc.com
 // until the container was recreated. Now this endpoint does that recreate.
-const recreateGateway = async (docker, name, { addNetwork } = {}) => {
+const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) => {
   const old = docker.getContainer(name);
   const inspect = await old.inspect();
 
@@ -154,6 +154,11 @@ const recreateGateway = async (docker, name, { addNetwork } = {}) => {
   const envArray = freshEnv && freshEnv.length > 0 ? freshEnv : (inspect.Config?.Env || []);
   const allNetworks = new Set(Object.keys(inspect.NetworkSettings?.Networks || {}));
   if (addNetwork) allNetworks.add(addNetwork);
+  // Runtime-bridged networks the caller wants gone (reset). Without this the
+  // re-attach loop below faithfully carries every network the old container
+  // was on over to the fresh one, so a "reset" would recreate the gateway
+  // still bridged to the customer's collector network.
+  if (dropNetworks) for (const n of dropNetworks) allNetworks.delete(n);
 
   // Generous stop timeout so the exporter has a chance to flush its sending
   // queue. Tolerate 304 ("already stopped") and 404 (already gone).
@@ -403,17 +408,22 @@ function register(app, { docker }) {
       return res.status(500).json({ error: 'Failed to clear .env', details: e.message });
     }
 
-    // 2. Drop persisted bridged-networks so the next boot's reconcile doesn't
-    //    re-attach the gateway to whatever the user just walked away from.
+    // 2. Capture the runtime-bridged networks, then drop the persistence so the
+    //    next boot's reconcile doesn't re-attach the gateway to whatever the
+    //    user just walked away from.
+    const bridgedToDrop = await loadBridgedNetworks();
     await saveBridgedNetworks([]);
 
-    // 3. Recreate the gateway with the cleared environment. Best-effort —
-    //    even if the recreate fails, the env and persistence are cleared
-    //    and a manual restart from the dashboard will pick up the fresh
-    //    values. Networks attached at runtime drop on the recreate.
+    // 3. Recreate the gateway with the cleared environment, explicitly NOT
+    //    carrying over the runtime-bridged networks. recreateGateway re-attaches
+    //    every network the live container is on, so without dropNetworks the
+    //    fresh gateway comes back still bridged to the customer's collector —
+    //    that's the "reset, but Step 3 stays connected" bug. Best-effort: even
+    //    if the recreate fails, the env and persistence are cleared and a manual
+    //    restart from the dashboard will pick up the fresh values.
     let recreateError = null;
     try {
-      await recreateGateway(docker, sidecarName);
+      await recreateGateway(docker, sidecarName, { dropNetworks: bridgedToDrop });
     } catch (e) {
       recreateError = e.message;
       console.warn('reset-onboarding: recreate failed:', e.message);

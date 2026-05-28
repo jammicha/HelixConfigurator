@@ -1013,9 +1013,13 @@ const App = () => {
   // "Detected collectors" widget in Step 2 — surfaces which network
   // helix-gateway needs to attach to so the user's chained collector
   // can reach helix-gateway:4317.
-  const refreshDetectedCollectors = async () => {
+  // `force` appends ?refresh=1 to bypass the endpoint's 60s cache. The periodic
+  // poll reads the cache (cheap), but a refresh fired right after we mutate the
+  // gateway's network membership (attach/detach) MUST be authoritative — a
+  // cached read there returns pre-mutation state and reverts the row badge.
+  const refreshDetectedCollectors = async (force = false) => {
     try {
-      const res = await fetch('/api/discovery/collectors');
+      const res = await fetch(`/api/discovery/collectors${force ? '?refresh=1' : ''}`);
       if (!res.ok) return;
       const data = await res.json();
       setDetectedCollectors(Array.isArray(data.collectors) ? data.collectors : []);
@@ -1036,15 +1040,15 @@ const App = () => {
       setAttachResult({ network, ok: res.ok, message: data.message || data.error || 'Done' });
       if (res.ok) {
         // Optimistically flip the row's "bridged" flag so the success toast
-        // and the row badge agree immediately. Without this, refreshDetectedCollectors
-        // is fire-and-forget — React paints one frame where the toast says
-        // "Attached…" while the row still shows NOT BRIDGED + the ATTACH button,
-        // which reads as a contradiction. The backend refresh overwrites this
-        // with authoritative state a moment later.
+        // and the row badge agree immediately, covering the window until the
+        // forced refresh below returns. The refresh MUST be forced: a cached
+        // read here predates the attach and would revert the badge to NOT
+        // BRIDGED while the toast still says "Attached…", which reads as a
+        // contradiction.
         setDetectedCollectors(prev => prev.map(c =>
           c.networks.includes(network) ? { ...c, sharesNetworkWithSidecar: true } : c
         ));
-        refreshDetectedCollectors();
+        refreshDetectedCollectors(true);
         // If smart-add deferred a customer-collector restart (because the
         // gateway wasn't yet on a network this collector could reach), the
         // gateway is now on that network — finish the apply by restarting
@@ -1086,7 +1090,7 @@ const App = () => {
       });
       const data = await res.json().catch(() => ({}));
       setAttachResult({ network, ok: res.ok, message: data.message || data.error || 'Detached' });
-      if (res.ok) refreshDetectedCollectors();
+      if (res.ok) refreshDetectedCollectors(true);
     } catch (e: any) {
       setAttachResult({ network, ok: false, message: e.message || 'Request failed' });
     } finally {
@@ -1137,6 +1141,12 @@ const App = () => {
         setEnvVars({ HELIX_ENDPOINT: '', HELIX_API_KEY: '', X_SOURCE: '', APP_URL: '', BUSINESS_SERVICE_KEY: '' });
         setBridgeStatus(null);
         setAttachResult(null);
+        // The backend just dropped the gateway's bridged networks. Clear the
+        // stale list so Step 3 doesn't show the old collector as "Attached",
+        // then force a cache-bypassing refresh so the repopulated list (and the
+        // 60s discovery cache) reflect the now-disconnected state.
+        setDetectedCollectors([]);
+        refreshDetectedCollectors(true);
         setStep3Tab('detected');
         setK8sApplyResult(null);
         setTraceVerifyResult(null);
