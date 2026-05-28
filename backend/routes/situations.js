@@ -49,70 +49,16 @@ function register(app, { otelStore }) {
       return res.status(412).json({ error: 'No events endpoint configured — set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
     }
 
-    // Severity follows the anomaly criterion we validated against industry
-    // practice: errors → CRITICAL, latency outlier → MAJOR, neither → MINOR.
-    // Frontend supplies the operation's p95 so we don't recompute here; the
-    // outlier rule (duration > 2× p95) matches the trace-list flagging logic.
     const summary = trace.summary;
-    const hasError = !!summary.has_error;
-    const isOutlier = typeof p95Ms === 'number' && p95Ms > 0 && summary.duration_ms > p95Ms * 2;
-    const severity = hasError ? 'CRITICAL' : isOutlier ? 'MAJOR' : 'MINOR';
-
-    const appUrl = (process.env.APP_URL || '').trim();
-    const traceLink = appUrl ? `${appUrl.replace(/\/+$/, '')}/otel-data?selected=${summary.trace_id}` : '';
-    const flavor = hasError ? 'errored' : isOutlier ? `outlier (>2× p95 ${Math.round(p95Ms)}ms)` : 'manual send';
-    const msg = `OTel trace ${flavor}: ${summary.service_name}/${summary.root_operation} took ${Math.round(summary.duration_ms)}ms`;
-    const details = [
-      `Trace ${summary.trace_id} on service ${summary.service_name}.`,
-      `Root operation: ${summary.root_operation}. Duration: ${Math.round(summary.duration_ms)}ms across ${summary.span_count} span(s).`,
-      hasError ? 'Trace contains at least one error span.' : '',
-      isOutlier ? `Operation p95 in window: ${Math.round(p95Ms)}ms.` : '',
-      traceLink ? `Inspect in configurator: ${traceLink}` : '',
-    ].filter(Boolean).join('\n');
-
-    // BUSINESS_SERVICE_KEY is the AIOps Business Service entity this trace's
-    // service belongs to. Without it, BMC's topology_lookup facet matches the
-    // event against every service that shares the OTel service.name, which
-    // is how events ended up duplicated across services in early testing.
-    // Putting the key into `service_id` (BMC's canonical topology-lookup slot)
-    // pins the event to exactly one business service.
-    const businessServiceKey = (process.env.BUSINESS_SERVICE_KEY || '').trim();
-    // Class is OTEL_TRACE_ANOMALY (custom child of EVENT) — requires that the
-    // user has run "Provision AIOps event class" on the Settings page once.
-    // The class adds `helix_trace_id` as a dedup slot so re-sends of the same
-    // trace update the existing event instead of creating duplicates.
-    const payload = [{
-      class: OTEL_TRACE_ANOMALY_CLASS,
-      severity,
-      status: 'OPEN',
-      category: 'APPLICATION',
-      msg,
-      source_identifier: `helix-otel-trace:${summary.trace_id}`,
-      source_attributes: {
-        // service.name → source_hostname is the convention we recommend for
-        // host-style correlation policies on the customer side.
-        source_hostname: summary.service_name,
-      },
-      details,
-      class_slots: {
-        // helix_trace_id is the dedup slot (flagged dup_detect=true at class
-        // creation). Stable per trace → re-sends update rather than duplicate.
-        helix_trace_id: summary.trace_id,
-        root_operation: summary.root_operation,
-        duration_ms: String(Math.round(summary.duration_ms)),
-        span_count: String(summary.span_count),
-        has_error: hasError ? '1' : '0',
-        ...(isOutlier ? { p95_ms: String(Math.round(p95Ms)) } : {}),
-        ...(businessServiceKey ? {
-          // `service_id` is BMC's canonical topology_lookup slot for tying an
-          // event to a service model component. Mirror into business_service_key
-          // for tenants whose tag rules look there instead.
-          service_id: businessServiceKey,
-          business_service_key: businessServiceKey,
-        } : {}),
-        x_source: (process.env.X_SOURCE || '').trim(),
-      },
-    }];
+    const payload = buildAnomalyEventPayload({
+      summary,
+      p95Ms,
+      businessServiceKey: (process.env.BUSINESS_SERVICE_KEY || '').trim(),
+      xSource: process.env.X_SOURCE,
+      appUrl: process.env.APP_URL,
+    });
+    // severity for the response body comes from the built event
+    const severity = payload[0].severity;
 
     const url = `${baseUrl}/events-service/api/v1.0/events`;
     try {
