@@ -63,6 +63,10 @@ describe('buildAnomalyEventPayload', () => {
     const [evt] = buildAnomalyEventPayload({ summary, appUrl: '' });
     expect(evt.class_slots.trace_url).toBe('');
   });
+  it('trims surrounding whitespace from appUrl (parity with the old inline trim)', () => {
+    const [evt] = buildAnomalyEventPayload({ summary, appUrl: '  https://cfg.example.com  ' });
+    expect(evt.class_slots.trace_url).toBe('https://cfg.example.com/otel-data?selected=471e26391536a66fa17429e69bffd45f');
+  });
 });
 
 describe('buildCorrelationPolicy', () => {
