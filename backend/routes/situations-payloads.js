@@ -37,7 +37,7 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
   const severity = hasError ? 'CRITICAL' : isOutlier ? 'MAJOR' : 'MINOR';
   const base = (appUrl || '').replace(/\/+$/, '');
   const traceUrl = base ? `${base}/otel-data?selected=${summary.trace_id}` : '';
-  const flavor = hasError ? 'errored' : isOutlier ? `outlier (>2x p95 ${Math.round(p95Ms)}ms)` : 'manual send';
+  const flavor = hasError ? 'errored' : isOutlier ? `outlier (>2× p95 ${Math.round(p95Ms)}ms)` : 'manual send';
   const msg = `OTel trace ${flavor}: ${summary.service_name}/${summary.root_operation} took ${Math.round(summary.duration_ms)}ms`;
   const details = [
     `Trace ${summary.trace_id} on service ${summary.service_name}.`,

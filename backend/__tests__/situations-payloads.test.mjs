@@ -50,8 +50,14 @@ describe('buildAnomalyEventPayload', () => {
   it('maps severity: error->CRITICAL, outlier->MAJOR, else MINOR', () => {
     expect(buildAnomalyEventPayload({ summary, appUrl: '' })[0].severity).toBe('CRITICAL');
     const slow = { ...summary, has_error: 0, duration_ms: 500 };
-    expect(buildAnomalyEventPayload({ summary: slow, p95Ms: 200, appUrl: '' })[0].severity).toBe('MAJOR');
+    const major = buildAnomalyEventPayload({ summary: slow, p95Ms: 200, appUrl: '' })[0];
+    expect(major.severity).toBe('MAJOR');
+    // Outlier flavor must use the U+00D7 multiplication sign, matching the
+    // event message convert-trace produced before it routed through this builder.
+    expect(major.msg).toContain('>2× p95');
     expect(buildAnomalyEventPayload({ summary: slow, p95Ms: 0, appUrl: '' })[0].severity).toBe('MINOR');
+    // The real caller omits p95Ms entirely when req.body.p95Ms is absent.
+    expect(buildAnomalyEventPayload({ summary: slow, appUrl: '' })[0].severity).toBe('MINOR');
   });
   it('omits trace_url when appUrl is empty', () => {
     const [evt] = buildAnomalyEventPayload({ summary, appUrl: '' });
