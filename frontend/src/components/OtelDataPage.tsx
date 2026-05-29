@@ -26,7 +26,7 @@ import { useLocalStorageState } from '../hooks/useLocalStorageState';
 import type { HelixEnv, OperationStat, TraceDetail, TraceStatus, TraceSummary, TimeRange, LogRecord, ErrorRecord } from './otel-data/types';
 import { TIME_RANGES, SLOW_THRESHOLD_MS, INTERNAL_SERVICES, TRACE_LIST_LIMIT } from './otel-data/constants';
 import { SlowThresholdProvider } from './otel-data/SlowThresholdContext';
-import { traceStatus } from './otel-data/utils';
+import { traceStatus, buildHelixBusinessServiceUrl, hasRealHelixEndpoint } from './otel-data/utils';
 import { CustomRangePopover } from './otel-data/CustomRangePopover';
 import { TabButton } from './otel-data/TabButton';
 import { TracesTab } from './otel-data/TracesTab';
@@ -38,15 +38,45 @@ import { NavAvatar } from './NavAvatar';
 
 const HeaderUserMenu: React.FC = () => {
   const [authStatus, setAuthStatus] = useState<{ required: boolean; authenticated: boolean } | null>(null);
+  // This page renders its own NavAvatar, so it must build the "Open in Helix"
+  // links itself (App.tsx builds them for the dashboard). Without this, the
+  // AIOps Business Service / OTel dashboard links render greyed on /otel-data
+  // even when the keys are set.
+  const [externalApps, setExternalApps] = useState<{ otelDashboardUrl: string | null; aiopsServiceUrl: string | null; applicationUrl: string | null } | undefined>(undefined);
   useEffect(() => {
     fetch('/api/auth/status')
       .then(r => r.json())
       .then(d => setAuthStatus({ required: !!d.required, authenticated: !!d.authenticated }))
       .catch(() => setAuthStatus({ required: false, authenticated: true }));
   }, []);
+  useEffect(() => {
+    fetch('/api/env')
+      .then(r => r.ok ? r.json() : null)
+      .then(env => {
+        if (!env) return;
+        const tenantId = (env.HELIX_API_KEY || '').split('::')[0] || '';
+        const helixEnv = {
+          endpoint: env.HELIX_ENDPOINT || '',
+          tenantId,
+          source: env.X_SOURCE || '',
+          businessServiceKey: env.BUSINESS_SERVICE_KEY || '',
+        };
+        const base = (env.HELIX_ENDPOINT || '').replace(/\/+$/, '');
+        const src = env.X_SOURCE || '';
+        setExternalApps({
+          otelDashboardUrl: hasRealHelixEndpoint(helixEnv) && tenantId
+            ? `${base}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${tenantId}&var-BusinessService=${src}&var-OTelNamespace=${src}&from=now-3h&to=now&timezone=browser`
+            : null,
+          aiopsServiceUrl: buildHelixBusinessServiceUrl(helixEnv),
+          applicationUrl: env.APP_URL || null,
+        });
+      })
+      .catch(() => { /* env unset — links stay greyed */ });
+  }, []);
   return (
     <NavAvatar
       authStatus={authStatus}
+      externalApps={externalApps}
       onLogout={async () => {
         try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
         window.location.href = '/';
