@@ -7,7 +7,7 @@
 const axios = require('axios');
 const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
-  buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, selectPolicyUpsert,
+  buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
 } = require('./situations-payloads');
 
 // Derive the events-service base URL. Prefer an explicit HELIX_EVENTS_ENDPOINT
@@ -25,6 +25,42 @@ const resolveEventsBaseUrl = () => {
     return '';
   }
 };
+
+// The events-service REST API (classes, policies) rejects the raw API key — it
+// requires a JWT. Exchange the key's access/secret halves for one via BMC IMS
+// (`/ims/api/v1/access_keys/login`) and send it as `Authorization: Bearer <jwt>`.
+// The JWT lives 15 min; cache just under that (keyed by api key so a Settings
+// change invalidates it) to avoid logging in on every call.
+// BMC's events-service rejects axios's default Accept header
+// ("application/json, text/plain, */*") with 400 validation.request.accept.invalid.
+// Force a single valid media type on every events-service / IMS call.
+function bmcHeaders(bearer) {
+  const h = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  if (bearer) h.Authorization = `Bearer ${bearer}`;
+  return h;
+}
+
+let _bearerCache = { key: null, token: null, exp: 0 };
+async function getHelixBearerToken(baseUrl, apiKey) {
+  if (_bearerCache.token && _bearerCache.key === apiKey && Date.now() < _bearerCache.exp) {
+    return _bearerCache.token;
+  }
+  const creds = splitApiKey(apiKey);
+  if (!creds) throw new Error('HELIX_API_KEY must be in TenantID::AccessKey::SecretKey form');
+  const res = await axios.post(
+    `${baseUrl}/ims/api/v1/access_keys/login`,
+    { access_key: creds.accessKey, access_secret_key: creds.accessSecretKey },
+    { headers: bmcHeaders(), timeout: 15_000, validateStatus: () => true },
+  );
+  const jwt = res.data && res.data.json_web_token;
+  if (res.status < 200 || res.status >= 300 || !jwt) {
+    const e = new Error(`Helix IMS login returned ${res.status}`);
+    e.upstream = res.data;
+    throw e;
+  }
+  _bearerCache = { key: apiKey, token: jwt, exp: Date.now() + 14 * 60_000 };
+  return jwt;
+}
 
 function register(app, { otelStore }) {
   app.post('/api/situations/convert-trace', async (req, res) => {
@@ -50,18 +86,18 @@ function register(app, { otelStore }) {
       p95Ms,
       businessServiceKey: (process.env.BUSINESS_SERVICE_KEY || '').trim(),
       xSource: process.env.X_SOURCE,
-      appUrl: process.env.APP_URL,
     });
     // severity for the response body comes from the built event
     const severity = payload[0].severity;
 
+    let bearer;
+    try { bearer = await getHelixBearerToken(baseUrl, apiKey); }
+    catch (e) { return res.status(502).json({ error: 'Helix authentication failed', details: e.message, upstream: e.upstream }); }
+
     const url = `${baseUrl}/events-service/api/v1.0/events`;
     try {
       const response = await axios.post(url, payload, {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `apiKey ${apiKey}`,
-        },
+        headers: bmcHeaders(bearer),
         timeout: 10_000,
         // Resolve on any status so we can surface the upstream error verbatim.
         validateStatus: () => true,
@@ -92,15 +128,16 @@ function register(app, { otelStore }) {
       return res.status(412).json({ error: 'No events endpoint configured — set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
     }
 
+    let bearer;
+    try { bearer = await getHelixBearerToken(baseUrl, apiKey); }
+    catch (e) { return res.status(502).json({ error: 'Helix authentication failed', details: e.message, upstream: e.upstream }); }
+
     const classDef = buildClassDefinition();
 
     const url = `${baseUrl}/events-service/api/v1.0/events/classes`;
     try {
       const response = await axios.post(url, classDef, {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `apiKey ${apiKey}`,
-        },
+        headers: bmcHeaders(bearer),
         timeout: 15_000,
         validateStatus: () => true,
       });
@@ -119,7 +156,7 @@ function register(app, { otelStore }) {
         // the update is rejected so an existing class is never left broken.)
         const updateUrl = `${url}/${OTEL_TRACE_ANOMALY_CLASS}`;
         const upd = await axios.put(updateUrl, classDef, {
-          headers: { 'Content-Type': 'application/json', Authorization: `apiKey ${apiKey}` },
+          headers: bmcHeaders(bearer),
           timeout: 15_000,
           validateStatus: () => true,
         });
@@ -146,27 +183,26 @@ function register(app, { otelStore }) {
     const baseUrl = resolveEventsBaseUrl();
     if (!baseUrl) return res.status(412).json({ error: 'No events endpoint configured — set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
 
-    const headers = { 'Content-Type': 'application/json', Authorization: `apiKey ${apiKey}` };
-    const policiesUrl = `${baseUrl}/events-service/api/v1.0/event_policies`;
-    try {
-      // List existing policies to decide create vs update.
-      const list = await axios.get(policiesUrl, { headers, timeout: 15_000, validateStatus: () => true });
-      // Guard the read: a failed list (bad key, wrong host) must surface here,
-      // not fall through to a blind POST that masks the real cause.
-      if (list.status < 200 || list.status >= 300) {
-        return res.status(502).json({ error: `Helix event-policies list returned ${list.status}`, upstream: list.data });
-      }
-      const existing = Array.isArray(list.data) ? list.data : (list.data && list.data.responseContent) || [];
-      const action = selectPolicyUpsert(existing, CORRELATION_POLICY_NAME);
-      const policy = buildCorrelationPolicy();
+    let bearer;
+    try { bearer = await getHelixBearerToken(baseUrl, apiKey); }
+    catch (e) { return res.status(502).json({ error: 'Helix authentication failed', details: e.message, upstream: e.upstream }); }
 
-      const writeUrl = action.method === 'PUT' ? `${policiesUrl}/${action.id}` : policiesUrl;
-      const response = await axios({
-        method: action.method, url: writeUrl, headers, data: policy,
-        timeout: 15_000, validateStatus: () => true,
+    // POST the policy directly. The list endpoint 500s on this tenant, so we
+    // can't pre-check existence; create it, and treat a name collision
+    // (POLICY_ALREADY_EXIST) as a soft success — mirrors provision-class.
+    const url = `${baseUrl}/events-service/api/v1.0/event_policies`;
+    try {
+      const response = await axios.post(url, buildCorrelationPolicy(), {
+        headers: bmcHeaders(bearer),
+        timeout: 15_000,
+        validateStatus: () => true,
       });
       if (response.status >= 200 && response.status < 300) {
-        return res.json({ ok: true, action: action.method, policyName: CORRELATION_POLICY_NAME, upstream: response.data });
+        return res.json({ ok: true, policyName: CORRELATION_POLICY_NAME, upstream: response.data });
+      }
+      const body = JSON.stringify(response.data || '').toLowerCase();
+      if (body.includes('already exist') || body.includes('duplicate')) {
+        return res.json({ ok: true, policyName: CORRELATION_POLICY_NAME, alreadyExists: true, upstream: response.data });
       }
       return res.status(502).json({ error: `Helix event-policies API returned ${response.status}`, upstream: response.data });
     } catch (e) {

@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
-  buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, selectPolicyUpsert,
+  buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
 } = require('../routes/situations-payloads');
 
 const summary = {
@@ -22,7 +22,7 @@ describe('buildClassDefinition', () => {
     const names = def.attributes.map(a => a.name);
     expect(def.name).toBe(OTEL_TRACE_ANOMALY_CLASS);
     expect(def.parentClassName).toBe('EVENT');
-    expect(names).toEqual(expect.arrayContaining(['helix_trace_id', 'service_name', 'service_namespace', 'trace_url']));
+    expect(names).toEqual(expect.arrayContaining(['helix_trace_id', 'service_name', 'service_namespace']));
   });
   it('keeps helix_trace_id as the dedup slot', () => {
     const slot = buildClassDefinition().attributes.find(a => a.name === 'helix_trace_id');
@@ -31,21 +31,21 @@ describe('buildClassDefinition', () => {
   it('ADDED_SLOTS lists only the slots this feature adds (helix_trace_id pre-existed)', () => {
     // Task 5 patches an already-registered class with exactly these. helix_trace_id
     // is intentionally excluded — it shipped with the original class definition.
-    expect(ADDED_SLOTS).toEqual(['service_name', 'service_namespace', 'trace_url']);
+    expect(ADDED_SLOTS).toEqual(['service_name', 'service_namespace']);
     const slotNames = buildClassDefinition().attributes.map(a => a.name);
     for (const s of ADDED_SLOTS) expect(slotNames).toContain(s);
   });
 });
 
 describe('buildAnomalyEventPayload', () => {
-  it('populates service_name, service_namespace and trace_url slots', () => {
-    const [evt] = buildAnomalyEventPayload({ summary, p95Ms: 200, businessServiceKey: 'BSKEY', xSource: 'JM_OTEL', appUrl: 'https://cfg.example.com/' });
+  it('populates service_name and service_namespace slots', () => {
+    const [evt] = buildAnomalyEventPayload({ summary, p95Ms: 200, businessServiceKey: 'BSKEY', xSource: 'JM_OTEL' });
     expect(evt.class).toBe(OTEL_TRACE_ANOMALY_CLASS);
     expect(evt.class_slots.service_name).toBe('traffic-generator');
     expect(evt.class_slots.service_namespace).toBe('jaeger-hotrod');
-    expect(evt.class_slots.trace_url).toBe('https://cfg.example.com/otel-data?selected=471e26391536a66fa17429e69bffd45f');
     expect(evt.class_slots.helix_trace_id).toBe(summary.trace_id);
     expect(evt.source_attributes.source_hostname).toBe('traffic-generator');
+    expect(evt.class_slots).not.toHaveProperty('trace_url');
   });
   it('maps severity: error->CRITICAL, outlier->MAJOR, else MINOR', () => {
     expect(buildAnomalyEventPayload({ summary, appUrl: '' })[0].severity).toBe('CRITICAL');
@@ -59,45 +59,54 @@ describe('buildAnomalyEventPayload', () => {
     // The real caller omits p95Ms entirely when req.body.p95Ms is absent.
     expect(buildAnomalyEventPayload({ summary: slow, appUrl: '' })[0].severity).toBe('MINOR');
   });
-  it('omits trace_url when appUrl is empty', () => {
-    const [evt] = buildAnomalyEventPayload({ summary, appUrl: '' });
-    expect(evt.class_slots.trace_url).toBe('');
-  });
-  it('trims surrounding whitespace from appUrl (parity with the old inline trim)', () => {
-    const [evt] = buildAnomalyEventPayload({ summary, appUrl: '  https://cfg.example.com  ' });
-    expect(evt.class_slots.trace_url).toBe('https://cfg.example.com/otel-data?selected=471e26391536a66fa17429e69bffd45f');
-  });
 });
 
 describe('buildCorrelationPolicy', () => {
-  it('is a CORRELATION policy selecting on the custom class', () => {
+  // These assertions pin the exact schema quirks validated against a live
+  // BMC tenant — each was a real 500 before being fixed.
+  it('selects on the custom class with NO surrounding parens', () => {
     const p = buildCorrelationPolicy();
     expect(p.name).toBe(CORRELATION_POLICY_NAME);
     expect(p.types).toEqual(['CORRELATION']);
-    expect(p.selectorCriteriaList.join(' ')).toContain("class equals 'OTEL_TRACE_ANOMALY'");
+    expect(p.selectorCriteriaList[0]).toBe("class equals 'OTEL_TRACE_ANOMALY'");
+    expect(p.selectorCriteriaList[0]).not.toContain('('); // parens → "Value should start with '"
   });
-  it('groups by service_name + service_namespace and outputs a non-restricted class', () => {
+  it('groups by service_name + service_namespace with fully-specified condition nodes', () => {
     const agg = buildCorrelationPolicy().configurations[0].definition.children[0];
-    const slots = agg.conditions.map(c => `${c.slotName}=${c.slotValue}`);
-    expect(slots).toEqual(expect.arrayContaining([
+    expect(agg.within).toBe(30);
+    expect(agg.minCount).toBe(3);
+    expect(agg.conditions.map(c => `${c.slotName}=${c.slotValue}`)).toEqual([
       '$NEW.service_name=$OLD.service_name',
       '$NEW.service_namespace=$OLD.service_namespace',
-    ]));
-    expect(agg.within).toBe(15);
-    expect(agg.minCount).toBe(3);
-    expect(['Anomaly', 'Prediction', 'Situation']).not.toContain(agg.newEvent.newEventClass);
+    ]);
+    // Brackets must be present as empty strings (null → NPE; "(" → wrong).
+    for (const c of agg.conditions) {
+      expect(c.conditionBracket).toBe('');
+      expect(c.endBracket).toBe('');
+      expect(typeof c.conditionOrder).toBe('number');
+    }
+    expect(agg.conditions[0].conditionOperator).toBe('');
+    expect(agg.conditions[1].conditionOperator).toBe('AND');
+  });
+  it('aggregates to ALARM — not a restricted class, and not the class it selects on', () => {
+    const agg = buildCorrelationPolicy().configurations[0].definition.children[0];
+    expect(agg.newEvent.newEventClass).toBe('ALARM');
+    expect(['Anomaly', 'Prediction', 'Situation', 'OTEL_TRACE_ANOMALY'])
+      .not.toContain(agg.newEvent.newEventClass);
   });
 });
 
-describe('selectPolicyUpsert', () => {
-  it('returns POST when no policy matches the name', () => {
-    expect(selectPolicyUpsert([{ id: '1', name: 'other' }], CORRELATION_POLICY_NAME)).toEqual({ method: 'POST' });
+describe('splitApiKey', () => {
+  it('splits TenantID::AccessKey::SecretKey into IMS login parts', () => {
+    expect(splitApiKey('TID123::AKxyz::SKsecret')).toEqual({
+      tenantId: 'TID123', accessKey: 'AKxyz', accessSecretKey: 'SKsecret',
+    });
   });
-  it('returns PUT with the matched id when a policy matches the name', () => {
-    const existing = [{ id: '9', name: CORRELATION_POLICY_NAME }];
-    expect(selectPolicyUpsert(existing, CORRELATION_POLICY_NAME)).toEqual({ method: 'PUT', id: '9' });
-  });
-  it('tolerates a non-array input', () => {
-    expect(selectPolicyUpsert(null, CORRELATION_POLICY_NAME)).toEqual({ method: 'POST' });
+  it('returns null for malformed keys', () => {
+    expect(splitApiKey('')).toBeNull();
+    expect(splitApiKey(null)).toBeNull();
+    expect(splitApiKey('only::two')).toBeNull();
+    expect(splitApiKey('a::b::c::d')).toBeNull();
+    expect(splitApiKey('a::::c')).toBeNull(); // empty middle segment
   });
 });
