@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2, Compass } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2, Compass, FlaskConical } from 'lucide-react';
 
 type AuthShape = { required: boolean; authenticated: boolean } | null;
 
@@ -129,6 +129,13 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
             >
               <BarChart2 className={`w-4 h-4 ${currentPage === 'otel-data' ? 'text-link' : 'text-gray-400'}`} />
               View OTel Data
+            </a>
+            <a
+              href="/step-zero"
+              className={`${itemBase} ${itemIdle}`}
+            >
+              <FlaskConical className="w-4 h-4 text-gray-400" />
+              Helix Configurator Demo
             </a>
 
             <div className="border-t border-gray-800 mt-1 pt-1">
