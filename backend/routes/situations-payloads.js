@@ -69,9 +69,19 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     ? buildHelixTraceUrlFromSummary({ baseUrl, tenantId, source: (xSource || '').trim(), summary })
     : '';
 
-  const msg = (hasSpans && cause && cause.error_type)
-    ? `OTel anomaly: ${cause.probable_cause_service}/${cause.probable_cause_operation} — ${cause.error_type}`
-      + (factor ? ` (${factor}× p95)` : '')
+  // Name the cause whenever an originating error span was found — including a
+  // status-only error with no exception type (the common OTel-demo case: span
+  // sets ERROR status but emits no `exception` event). Lead with error_type,
+  // else the error message, else a bare "error". Show the p95 factor only when
+  // the trace is actually slower than baseline; "0.4× p95" on an errored-but-
+  // fast trace is noise.
+  const causeName = (hasSpans && cause && cause.probable_cause_operation)
+    ? `${cause.probable_cause_service}/${cause.probable_cause_operation}`
+    : '';
+  const causeLabel = cause ? (cause.error_type || cause.error_message || 'error') : 'error';
+  const msg = causeName
+    ? `OTel anomaly: ${causeName} — ${causeLabel}`
+      + (factor && factor >= 1 ? ` (${factor}× p95)` : '')
       + (blast.component_count > 1 ? `, ${blast.component_count} services affected` : '')
     : `OTel trace ${flavor}: ${summary.service_name}/${summary.root_operation} took ${Math.round(summary.duration_ms)}ms`;
 

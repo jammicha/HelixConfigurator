@@ -366,3 +366,22 @@ describe('buildCorrelationPolicy (enriched title)', () => {
     }
   });
 });
+
+describe('buildAnomalyEventPayload (status-only error headline)', () => {
+  const sum = { trace_id:'t', service_name:'checkout-web', service_namespace:'shop', root_operation:'POST /checkout', duration_ms:164, span_count:8, has_error:1, start_time_ns:1 };
+  it('names the cause in msg even for a status-only error (no exception type)', () => {
+    const spans = [
+      span({ serviceName:'checkout-web', name:'POST /checkout', startTimeNs:1 }),
+      span({ serviceName:'stripe-mock', name:'POST /v1/charges', startTimeNs:5, statusCode:2, statusMessage:'service_unavailable' }),
+    ];
+    const [e] = buildAnomalyEventPayload({ summary: sum, p95Ms: 400, xSource:'JM_OTEL', spans, baseUrl:'https://t.example.com', tenantId:'TID' });
+    expect(e.msg).toContain('stripe-mock/POST /v1/charges');
+    expect(e.msg).toContain('service_unavailable');
+    expect(e.msg).not.toContain('took 164ms');
+  });
+  it('suppresses the anomaly factor in msg when the trace is faster than p95', () => {
+    const spans = [ span({ serviceName:'stripe-mock', name:'POST /v1/charges', statusCode:2, statusMessage:'service_unavailable' }) ];
+    const [e] = buildAnomalyEventPayload({ summary: sum, p95Ms: 400, spans });
+    expect(e.msg).not.toContain('× p95');
+  });
+});
