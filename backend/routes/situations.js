@@ -81,11 +81,19 @@ function register(app, { otelStore }) {
     }
 
     const summary = trace.summary;
+    // The trace deep-link points at the portal dashboard, which lives at the
+    // HELIX_ENDPOINT origin (the events base URL may be a different host/path).
+    // tenantId is the first segment of the API key (TenantID::Access::Secret).
+    const tenantId = (splitApiKey(apiKey) || {}).tenantId || '';
+    const portalBaseUrl = (process.env.HELIX_ENDPOINT || '').trim();
     const payload = buildAnomalyEventPayload({
       summary,
       p95Ms,
       businessServiceKey: (process.env.BUSINESS_SERVICE_KEY || '').trim(),
       xSource: process.env.X_SOURCE,
+      spans: trace.spans,
+      baseUrl: portalBaseUrl,
+      tenantId,
     });
     // severity for the response body comes from the built event
     const severity = payload[0].severity;
