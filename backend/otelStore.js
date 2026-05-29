@@ -639,6 +639,64 @@ class OtelStore {
     }).sort((a, b) => b.trace_count - a.trace_count);
   }
 
+  // Per-(service, operation) latency percentiles computed from individual
+  // spans — NOT trace roots like listOperations. This is the p95 baseline the
+  // Traces tab's Outlier filter/badge needs when a Service filter is active:
+  // each row then shows a *participating* service's entry span (the svc_*
+  // fields listTraces attaches), whose operation — e.g. cart-api|GET /cart/items
+  // — never appears in listOperations because app services are rarely trace
+  // roots (the load generator roots every trace in the demo). Spans carry no
+  // received_at, so the window is applied through the owning trace's
+  // received_at. p50/p95 use the same nearest-rank percentile as listOperations
+  // so the two rollups agree where they overlap (root spans). Assumes a
+  // service emits one server span per operation per trace, so grouping all
+  // spans by (service, name) tracks the entry-span population listTraces shows.
+  listOperationLatencies({ sinceMs, untilMs, namespace, container } = {}) {
+    const traceWhere = [];
+    const params = [];
+    if (sinceMs) { traceWhere.push('received_at >= ?'); params.push(sinceMs); }
+    if (untilMs) { traceWhere.push('received_at <= ?'); params.push(untilMs); }
+    // Namespace/container are span-level resource attrs; scope by trace
+    // participation, same shape as listOperations / listTraces.
+    if (namespace) {
+      traceWhere.push('trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
+      params.push(namespace);
+    }
+    if (container) {
+      traceWhere.push('trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
+      params.push(container);
+    }
+    const sql = `SELECT s.service_name, s.name AS operation, s.duration_ms
+                 FROM spans s
+                 WHERE s.trace_id IN (SELECT trace_id FROM traces${traceWhere.length ? ' WHERE ' + traceWhere.join(' AND ') : ''})`;
+    const rows = this.db.prepare(sql).all(...params);
+    const groups = new Map();
+    for (const r of rows) {
+      const key = `${r.service_name || ''}|${r.operation || ''}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = { service_name: r.service_name || '', operation: r.operation || '', durations: [] };
+        groups.set(key, g);
+      }
+      g.durations.push(r.duration_ms);
+    }
+    const percentile = (sorted, p) => {
+      if (sorted.length === 0) return 0;
+      const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+      return sorted[idx];
+    };
+    return Array.from(groups.values()).map(g => {
+      const sorted = g.durations.slice().sort((a, b) => a - b);
+      return {
+        service_name: g.service_name,
+        operation: g.operation,
+        count: sorted.length,
+        p50_ms: percentile(sorted, 0.5),
+        p95_ms: percentile(sorted, 0.95),
+      };
+    }).sort((a, b) => b.p95_ms - a.p95_ms);
+  }
+
   recentThroughput(windowMs = 3_600_000) {
     const sinceMs = Date.now() - windowMs;
     // spans has no received_at column — count via traces.received_at and

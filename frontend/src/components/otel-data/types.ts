@@ -88,6 +88,19 @@ export type OperationStat = {
   slow_count: number;
 };
 
+// Per-(service, operation) span-latency percentiles from /api/operations/
+// latencies. Unlike OperationStat (grouped by trace root for the Operations
+// tab), this is keyed by any participating service's span operation, so it
+// supplies the p95 baseline the Outlier filter/badge need when a Service
+// filter is active — see buildOperationP95Map.
+export type ServiceOperationLatency = {
+  service_name: string;
+  operation: string;
+  p50_ms: number;
+  p95_ms: number;
+  count: number;
+};
+
 export type LogRecord = {
   id: number;
   traceId: string;

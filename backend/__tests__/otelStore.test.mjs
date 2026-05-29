@@ -166,6 +166,72 @@ describe('OtelStore', () => {
     });
   });
 
+  describe('listOperationLatencies', () => {
+    // Five checkout traces: a traffic-generator root (POST /checkout) plus a
+    // cart-api child (GET /cart/items). cart-api is never a trace root — the
+    // demo shape where the trace-root rollup (listOperations) has no cart-api
+    // entry, which is exactly why outlier flagging needs this span-level rollup.
+    // Durations are set via start/end so the stored duration_ms equals `d`.
+    const seedCheckoutTraces = (cartDurations) => {
+      const startNs = 1_000_000_000;
+      cartDurations.forEach((d, i) => {
+        store.ingestSpans([
+          makeSpan({ traceId: `tr${i}`, spanId: `root${i}`, parentSpanId: '', serviceName: 'traffic-generator', name: 'POST /checkout', startTimeNs: startNs, endTimeNs: startNs + 500_000_000 }),
+          makeSpan({ traceId: `tr${i}`, spanId: `cart${i}`, parentSpanId: `root${i}`, serviceName: 'cart-api', name: 'GET /cart/items', startTimeNs: startNs, endTimeNs: startNs + d * 1_000_000 }),
+        ]);
+      });
+    };
+
+    it('produces a p95 baseline for a participating (non-root) service operation', () => {
+      seedCheckoutTraces([10, 20, 30, 40, 1000]);
+      const cart = store.listOperationLatencies()
+        .find(o => o.service_name === 'cart-api' && o.operation === 'GET /cart/items');
+      expect(cart).toBeDefined();
+      expect(cart.count).toBe(5);
+      // Nearest-rank p95, same formula as listOperations: idx = floor(5*0.95)=4.
+      expect(cart.p95_ms).toBe(1000);
+      expect(cart.p50_ms).toBe(30);
+    });
+
+    it('covers an operation the trace-root rollup misses (the outlier bug)', () => {
+      seedCheckoutTraces([10, 20, 30, 40, 1000]);
+      expect(store.listOperations().some(o => o.service_name === 'cart-api')).toBe(false);
+      expect(store.listOperationLatencies().some(o => o.service_name === 'cart-api' && o.operation === 'GET /cart/items')).toBe(true);
+    });
+
+    it('still includes trace-root operations (root spans are spans too)', () => {
+      seedCheckoutTraces([10, 20, 30]);
+      const root = store.listOperationLatencies()
+        .find(o => o.service_name === 'traffic-generator' && o.operation === 'POST /checkout');
+      expect(root).toBeDefined();
+      expect(root.count).toBe(3);
+    });
+
+    it('honors the time window via the owning trace received_at (spans carry none)', () => {
+      seedCheckoutTraces([10, 20, 30]);
+      expect(store.listOperationLatencies({ sinceMs: Date.now() + 1_000_000 })).toEqual([]);
+      expect(store.listOperationLatencies().length).toBeGreaterThan(0);
+    });
+
+    it('scopes to a namespace via trace participation', () => {
+      store.ingestSpans([{
+        ...makeSpan({ traceId: 'tprod', spanId: 'p', serviceName: 'cart-api', name: 'GET /cart/items' }),
+        serviceNamespace: 'prod',
+      }]);
+      store.ingestSpans([{
+        ...makeSpan({ traceId: 'tstage', spanId: 's', serviceName: 'cart-api', name: 'GET /cart/items' }),
+        serviceNamespace: 'staging',
+      }]);
+      const prod = store.listOperationLatencies({ namespace: 'prod' });
+      expect(prod).toHaveLength(1);
+      expect(prod[0]).toMatchObject({ service_name: 'cart-api', operation: 'GET /cart/items', count: 1 });
+    });
+
+    it('returns an empty list for an empty store', () => {
+      expect(store.listOperationLatencies()).toEqual([]);
+    });
+  });
+
 });
 
 const buildSpans = (n, traceId) => Array.from({ length: n }, (_, i) => makeSpan({

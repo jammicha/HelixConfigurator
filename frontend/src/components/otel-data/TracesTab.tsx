@@ -5,7 +5,7 @@ import { BmcChevron } from './BmcChevron';
 import { StatusPill } from './StatusPill';
 import { MIN_DURATION_PRESETS } from './constants';
 import { useSlowThreshold } from './SlowThresholdContext';
-import { buildHelixTraceUrl, formatDuration, formatRelative, hasRealHelixEndpoint } from './utils';
+import { buildHelixTraceUrl, formatDuration, formatRelative, hasRealHelixEndpoint, serviceTraceView } from './utils';
 import { useSyntheticRun } from '../../hooks/useSyntheticRun';
 import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
 
@@ -244,14 +244,20 @@ export const TracesTab: React.FC<{
                 // instead of the trace root. Falls back to root fields if the
                 // backend didn't resolve an entry span (shouldn't happen for a
                 // matched trace, but keeps the row well-formed).
-                const svcView = !!serviceFilter;
-                const displayService = svcView ? serviceFilter : t.service_name;
-                const displayOperation = (svcView ? (t.svc_operation ?? t.root_operation) : t.root_operation) || '';
-                const displayDuration = svcView && t.svc_duration_ms != null ? t.svc_duration_ms : t.duration_ms;
-                const displayStartNs = svcView && t.svc_start_ns != null ? t.svc_start_ns : t.start_time_ns;
-                const svcStatus: TraceStatus | undefined = svcView
-                  ? ((t.svc_status_code ?? 0) >= 2 ? 'error' : (displayDuration > slowThresholdMs ? 'slow' : 'ok'))
-                  : undefined;
+                // Single source of truth with the page-level Status / Min-
+                // duration / Outlier filters (serviceTraceView): when a service
+                // is selected the row reflects that service's entry span, and
+                // those filters classify by the same fields so they can't drift
+                // (the bug where an Error filter showed OK rows).
+                const v = serviceTraceView(t, serviceFilter, slowThresholdMs);
+                const displayService = v.service;
+                const displayOperation = v.operation;
+                const displayDuration = v.durationMs;
+                const displayStartNs = v.startNs;
+                // Hand the pill an explicit status only under a service filter;
+                // unfiltered, StatusPill derives the trace-level verdict itself,
+                // so the no-service render is unchanged.
+                const svcStatus: TraceStatus | undefined = serviceFilter ? v.status : undefined;
                 const p95 = operationP95.get(`${displayService}|${displayOperation}`) || 0;
                 return (
                 <tr

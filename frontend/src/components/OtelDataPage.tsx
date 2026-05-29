@@ -23,10 +23,10 @@ import { useLocalStorageState } from '../hooks/useLocalStorageState';
 
 // Shared types/utilities + sub-tab components — moved out of this file to
 // keep OtelDataPage focused on page-level wiring rather than per-tab UI.
-import type { HelixEnv, OperationStat, TraceDetail, TraceStatus, TraceSummary, TimeRange, LogRecord, ErrorRecord } from './otel-data/types';
+import type { HelixEnv, OperationStat, ServiceOperationLatency, TraceDetail, TraceStatus, TraceSummary, TimeRange, LogRecord, ErrorRecord } from './otel-data/types';
 import { TIME_RANGES, SLOW_THRESHOLD_MS, INTERNAL_SERVICES, TRACE_LIST_LIMIT } from './otel-data/constants';
 import { SlowThresholdProvider } from './otel-data/SlowThresholdContext';
-import { traceStatus, buildHelixBusinessServiceUrl, hasRealHelixEndpoint } from './otel-data/utils';
+import { serviceTraceView, buildOperationP95Map, buildHelixBusinessServiceUrl, hasRealHelixEndpoint } from './otel-data/utils';
 import { CustomRangePopover } from './otel-data/CustomRangePopover';
 import { TabButton } from './otel-data/TabButton';
 import { TracesTab } from './otel-data/TracesTab';
@@ -125,6 +125,10 @@ export const OtelDataPage: React.FC = () => {
   // pill can land directly on 'errors' instead of always defaulting to 'logs'.
   const [logsErrorsSubTab, setLogsErrorsSubTab] = useState<'logs' | 'errors'>('logs');
   const [operations, setOperations] = useState<OperationStat[]>([]);
+  // Per-(service, operation) span-latency p95s for outlier baselines under an
+  // active service filter — fetched alongside `operations` in refreshOperations.
+  // See buildOperationP95Map / the operationP95 memo.
+  const [serviceOpLatencies, setServiceOpLatencies] = useState<ServiceOperationLatency[]>([]);
   const [operationsLoading, setOperationsLoading] = useState<boolean>(false);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [services, setServices] = useState<{ name: string; traceCount: number }[]>([]);
@@ -357,29 +361,47 @@ export const OtelDataPage: React.FC = () => {
   // indicator when the unifier shipped).
   const [sseConnected, setSseConnected] = useState(false);
 
+  // `service|operation` → p95 baseline for outlier flagging. Sourced from the
+  // per-service span rollup when a service is selected (so a participating
+  // service's operation has a baseline) and the trace-root rollup otherwise —
+  // matching the operation serviceTraceView surfaces for the row. Declared
+  // above visibleTraces because the outlier filter consumes it.
+  const operationP95 = useMemo(
+    () => buildOperationP95Map(operations, serviceOpLatencies, serviceFilter),
+    [operations, serviceOpLatencies, serviceFilter],
+  );
+
   const visibleTraces = useMemo(() => {
     // Backend listTraces / tracesHistogram already filter out all-internal
     // traces via the "any non-internal participating span" rule. Filtering
     // here on t.service_name (root) would incorrectly hide app traces in
     // pipelines that re-root every forwarded trace at helix-gateway —
     // which is exactly what we saw in testing.
+    //
+    // Every status / duration test classifies the trace through
+    // serviceTraceView, so the filter judges each row by exactly the fields
+    // the Traces table renders. When a service is selected that's the
+    // service's entry span (svc_*); otherwise the trace root. Without this
+    // the Error filter surfaced OK rows — it tested trace-wide has_error while
+    // the row's pill showed the selected service's own (passing) span.
     let out = traces.slice();
     if (statusFilter === 'outlier') {
-      // Outlier = trace's duration > 2× its operation's p95. Build the map
-      // only when the filter is active; depends on the same operations data
-      // the inline badge uses, so the dropdown and the badge agree.
-      const p95Map = new Map(operations.map(o => [`${o.service_name}|${o.root_operation}`, o.p95_ms]));
+      // Outlier = duration > 2× the operation's p95, judged from the same view
+      // serviceTraceView gives the row. operationP95 is sourced per-service when
+      // a service is selected, so a participating service's operation (e.g.
+      // cart-api|GET /cart/items) now has a baseline instead of always missing.
       out = out.filter(t => {
-        const p95 = p95Map.get(`${t.service_name}|${t.root_operation}`) || 0;
-        return p95 > 0 && t.duration_ms > p95 * 2;
+        const v = serviceTraceView(t, serviceFilter, slowThresholdMs);
+        const p95 = operationP95.get(`${v.service}|${v.operation}`) || 0;
+        return p95 > 0 && v.durationMs > p95 * 2;
       });
     } else if (statusFilter) {
-      out = out.filter(t => traceStatus(t, slowThresholdMs) === statusFilter);
+      out = out.filter(t => serviceTraceView(t, serviceFilter, slowThresholdMs).status === statusFilter);
     }
-    if (minMs > 0) out = out.filter(t => t.duration_ms >= minMs);
+    if (minMs > 0) out = out.filter(t => serviceTraceView(t, serviceFilter, slowThresholdMs).durationMs >= minMs);
     // searchQuery is applied server-side in refreshTraces.
     return out;
-  }, [traces, statusFilter, minMs, operations, slowThresholdMs]);
+  }, [traces, statusFilter, minMs, operationP95, slowThresholdMs, serviceFilter]);
   const visibleServices = useMemo(
     () => services.filter(s => !INTERNAL_SERVICES.has(s.name)),
     [services],
@@ -593,10 +615,26 @@ export const OtelDataPage: React.FC = () => {
       if (namespaceFilter) params.set('namespace', namespaceFilter);
       if (containerFilter) params.set('container', containerFilter);
       params.set('slowThresholdMs', String(slowThresholdMs));
-      const res = await fetch(`/api/operations?${params}`);
+      // Span-latency rollup shares the same window/resource scope but takes no
+      // slowThresholdMs (it returns raw percentiles). Fetched in parallel so
+      // the outlier baseline (per-service p95) and the Operations-tab rollup
+      // (trace-root) refresh together.
+      const latParams = new URLSearchParams();
+      if (w.sinceMs != null) latParams.set('sinceMs', String(w.sinceMs));
+      if (w.untilMs != null) latParams.set('untilMs', String(w.untilMs));
+      if (namespaceFilter) latParams.set('namespace', namespaceFilter);
+      if (containerFilter) latParams.set('container', containerFilter);
+      const [res, latRes] = await Promise.all([
+        fetch(`/api/operations?${params}`),
+        fetch(`/api/operations/latencies?${latParams}`),
+      ]);
       if (res.ok) {
         const j = await res.json();
         setOperations(j.operations || []);
+      }
+      if (latRes.ok) {
+        const lj = await latRes.json();
+        setServiceOpLatencies(lj.operations || []);
       }
     } finally {
       setOperationsLoading(false);
@@ -619,14 +657,6 @@ export const OtelDataPage: React.FC = () => {
   // paused) — previously this was hardcoded to 60s and ignored the user's
   // stream-mode selection.
   usePageRefresh(streamMode, refreshOperations);
-
-  const operationP95 = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const op of operations) {
-      m.set(`${op.service_name}|${op.root_operation}`, op.p95_ms);
-    }
-    return m;
-  }, [operations]);
 
   // Initial load + reload when filters change. customRange is included so
   // clicking a histogram bucket zooms the list into that bucket immediately.

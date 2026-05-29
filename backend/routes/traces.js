@@ -158,6 +158,25 @@ function register(app, { otelStore, docker }) {
     });
   });
 
+  // Per-(service, operation) span-latency percentiles — the p95 baseline the
+  // Traces tab's Outlier filter/badge use when a Service filter is active.
+  // Distinct from /api/operations (which groups by trace root for the
+  // Operations tab); this rollup surfaces participating services' operations
+  // like cart-api|GET /cart/items that are never trace roots. No slowThresholdMs
+  // — it returns raw latency percentiles, not slow/error tallies.
+  app.get('/api/operations/latencies', (req, res) => {
+    const { sinceMs, untilMs } = req.query;
+    const { namespace, container } = readResourceFilters(req.query);
+    res.json({
+      operations: otelStore.listOperationLatencies({
+        sinceMs: sinceMs ? Number(sinceMs) : undefined,
+        untilMs: untilMs ? Number(untilMs) : undefined,
+        namespace,
+        container,
+      }),
+    });
+  });
+
   // Lightweight Grafana-style annotations for the Overview volume chart —
   // surface gateway-lifecycle events (last restart) as vertical markers.
   // Only emit when within the chart window so off-window restarts don't

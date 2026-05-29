@@ -26,6 +26,57 @@ export const traceStatus = (trace: TraceSummary, slowThresholdMs: number = SLOW_
   return 'ok';
 };
 
+// A trace as seen from the currently-selected service's perspective. When a
+// service filter is active the Traces table renders each row from that
+// service's *entry span* — its operation/duration/status (the svc_* fields the
+// backend attaches in listTraces) — instead of the trace root. The Status,
+// Min-duration, and Outlier filters MUST classify by these same fields, or the
+// filter and the row's pill/badge disagree: e.g. an Error filter would surface
+// OK rows because a downstream span failed (has_error=1, trace-wide) while the
+// selected service's own span succeeded (svc_status_code=0). This is the single
+// source of truth both the page-level filter and the row renderer call.
+// With no service filter it collapses to the trace-level (root) verdict, so
+// the unfiltered view is byte-for-byte unchanged.
+export const serviceTraceView = (
+  trace: TraceSummary,
+  serviceFilter: string,
+  slowThresholdMs: number = SLOW_THRESHOLD_MS,
+): { service: string; operation: string; durationMs: number; startNs: number; status: TraceStatus } => {
+  const svcView = !!serviceFilter;
+  const durationMs = svcView && trace.svc_duration_ms != null ? trace.svc_duration_ms : trace.duration_ms;
+  const startNs = svcView && trace.svc_start_ns != null ? trace.svc_start_ns : trace.start_time_ns;
+  const operation = (svcView ? (trace.svc_operation ?? trace.root_operation) : trace.root_operation) || '';
+  const service = svcView ? serviceFilter : trace.service_name;
+  const status: TraceStatus = svcView
+    ? ((trace.svc_status_code ?? 0) >= 2 ? 'error' : durationMs > slowThresholdMs ? 'slow' : 'ok')
+    : traceStatus(trace, slowThresholdMs);
+  return { service, operation, durationMs, startNs, status };
+};
+
+// The `service|operation` → p95 map the Outlier filter and row badge look up.
+// The source switches with the active view, mirroring serviceTraceView: with a
+// service filter the row shows that service's entry-span operation, whose
+// baseline lives in the per-service span-latency rollup (/api/operations/
+// latencies) — the trace-root rollup has no entry for a participating service
+// like cart-api. Unfiltered, the row shows the trace root, judged against the
+// trace-root rollup (/api/operations). Keys match serviceTraceView's
+// `${service}|${operation}` either way. The span rollup also carries root
+// operations (root spans are spans), so the trace-detail drawer's root lookup
+// still resolves under an active service filter.
+export const buildOperationP95Map = (
+  rootOperations: Array<{ service_name: string; root_operation: string; p95_ms: number }>,
+  serviceOperations: Array<{ service_name: string; operation: string; p95_ms: number }>,
+  serviceFilter: string,
+): Map<string, number> => {
+  const m = new Map<string, number>();
+  if (serviceFilter) {
+    for (const o of serviceOperations) m.set(`${o.service_name}|${o.operation}`, o.p95_ms);
+  } else {
+    for (const o of rootOperations) m.set(`${o.service_name}|${o.root_operation}`, o.p95_ms);
+  }
+  return m;
+};
+
 // Group equivalent severity strings (Info/INFO/info_2/SeverityNumber=9 etc.)
 // into the canonical bucket the dropdown filters on.
 export const normalizeSeverity = (s: string): string => {
