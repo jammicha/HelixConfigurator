@@ -68,7 +68,7 @@ The `helix-otel-collector.yaml` shipped in the repo references these via `${env:
 Notes:
 - `HELIX_ENDPOINT` is the bare tenant URL — do **not** append `/otlp/v1/traces`. The gateway adds the path itself.
 - `HELIX_API_KEY` is three parts joined by `::`. The configurator validates the structure and rejects single-token strings.
-- `X_SOURCE` becomes the `service.namespace` / Business Service identifier in Helix.
+- `X_SOURCE` is the telemetry **source** header. In Helix it becomes the *OTel Namespace* only for apps that don't set their own `service.namespace` (Business Services bind to that namespace). Onboarding several apps? Give each its own `service.namespace` so they stay distinct — see [Onboarding multiple applications](#onboarding-multiple-applications).
 - `UI_AUTH_PASSWORD` enables shared-password sign-in to the configurator UI. Leave blank for open access. This is "prevent casual access" — anyone wanting real authentication should put an SSO proxy in front.
 
 ### 2. Start the services
@@ -102,6 +102,61 @@ The nav bar (`Onboarding | Gateway Dashboard | View OTel Data`) lets you move be
 ### Smart-add
 
 When exactly one OTel collector container is running alongside the configurator, Step 2 reads its mounted config and proposes a merge that wires `helix-gateway` in as an `otlphttp` exporter on every existing pipeline. The **Review changes** modal renders the proposed YAML with the added lines highlighted, surfaces the host-side path (if the config is bind-mounted, with a Copy-path button) and explains exactly which pipelines will be touched. Clicking **Apply & restart** writes the new config back inside the collector container, saves the original as `<config>.helix-bak`, and restarts the container so the change takes effect. Re-running Step 2 detects an already-applied exporter and reports "Already configured" rather than duplicating it. If smart-add can't read or merge the config (image-baked configs, unusual layouts), the wizard falls back to the copy-paste snippet path.
+
+## Onboarding multiple applications
+
+The configurator runs **one** gateway with **one** `X_SOURCE`, yet you can still land several applications in Helix as **separate OTel Namespaces** that roll up to a single Business Service. The key is `service.namespace`, **not** X-Source:
+
+- In Helix, ingested data is organized **Business Service → OTel Namespace → OTel Service**, where *OTel Namespace* = the `service.namespace` resource attribute and *OTel Service* = `service.name`.
+- The `X-Source` header is a coarse "source of the telemetry" tag. It becomes the namespace only as a **fallback**, for spans that carry no `service.namespace`. That's why a single un-namespaced app appears under `X_SOURCE` — but every app sharing the gateway would then collapse into that one namespace.
+- So to keep applications distinct, give each its own `service.namespace`. The gateway still sends a single shared `X-Source`; the namespace is what separates them.
+
+### Set each app's namespace
+
+**At the app (simplest — works with or without a collector).** Set the resource attributes on the app's OTel SDK:
+
+```bash
+OTEL_SERVICE_NAME=<service-name>
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=<app>,deployment.environment=<env>
+```
+
+**In the app's collector (fallback — when you can't set the app's environment).** Add a `resource` processor and reference it on each pipeline:
+
+```yaml
+processors:
+  resource/ns:
+    attributes:
+      - { key: service.namespace, value: <app>, action: upsert }
+
+service:
+  pipelines:
+    traces:
+      processors: [resource/ns, batch]   # add resource/ns to every pipeline
+```
+
+This is **independent of [Smart-add](#smart-add)**: smart-add only adds the `otlphttp` exporter and wires it into your pipelines' `exporters:` lists — it never touches `processors:`. The two edits don't collide, and a hand-added `resource` processor survives a smart-add run in any order.
+
+### Recommended resource attributes
+
+Only `service.name` is mandatory; the rest sharpen the Helix dashboards and topology (see BMC's [Ingesting data from OpenTelemetry](https://docs.bmc.com/xwiki/bin/view/IT-Operations-Management/Operations-Management/BMC-Helix-AIOps/aiops261/Using-OpenTelemetry-to-identify-application-issues/Ingesting-data-from-OpenTelemetry/)):
+
+| Attribute | Status | Role |
+|---|---|---|
+| `service.name` | **Required** | Service identity = the *OTel Service* dimension. `OTEL_SERVICE_NAME` wins over a `service.name` set inside `OTEL_RESOURCE_ATTRIBUTES`. |
+| `service.namespace` | Recommended | The *OTel Namespace* dimension → Business Service binding. The per-app key above. |
+| `deployment.environment` | Recommended | Environment / tier (prod, staging, …). |
+| `host.name` | Recommended | Host correlation. In Kubernetes, derive from `k8s.node.name` via a `resource` processor. |
+| `service.version` | Optional | Version context. |
+| `service.instance.id` | Optional | Distinguishes instances of the same service. |
+| `k8s.*` (`cluster` / `namespace` / `pod` / `node`) | Recommended (k8s) | Topology CIs, via the `k8sattributes` processor — see the **Kubernetes Attribute Enrichment** template (*Load Template* in the Gateway Config editor). |
+
+### Bind the namespaces to a Business Service (in AIOps)
+
+Grouping namespaces under a Business Service is **AIOps console config, not the configurator**:
+
+1. In BMC Helix AIOps, go to **Services → Create New Service** (or edit an existing one) and name it.
+2. **Add Dynamic content → Default Blueprint for OTel Service**, then **select the OpenTelemetry namespace(s)** to include — a single Business Service can bind **several** namespaces.
+3. **Save.** The **CI Topology** tab then shows the instrumented apps grouped by namespace under that one service, and health and Situations roll up to it.
 
 ## Features
 
