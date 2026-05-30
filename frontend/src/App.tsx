@@ -1864,6 +1864,7 @@ ${logsData.logs || '(no logs available)'}
                   onFinish={finishOnboarding}
                   currentKey={envVars.BUSINESS_SERVICE_KEY}
                   onCaptured={(key) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: key })}
+                  onToast={showToastMsg}
                 />
               )}
 

@@ -26,11 +26,11 @@ export const LinkBusinessService: React.FC<Props> = ({ context, currentKey, onCa
   };
 
   const capture = async () => {
-    const ok = await bs.persistKey(paste);
-    if (ok) {
+    const savedKey = await bs.persistKey(paste);
+    if (savedKey !== null) {
       setPhase('done');
       onToast?.('Business Service key captured', 'success');
-      onCaptured?.(paste);
+      onCaptured?.(savedKey);
     } else {
       onToast?.(bs.error || 'Could not save key', 'error');
     }

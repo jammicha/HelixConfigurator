@@ -13,7 +13,7 @@ export type UseBusinessServiceLink = {
   error: string;
   loadNamespaces: () => Promise<void>;
   loadInstructions: (namespace: string) => Promise<void>;
-  persistKey: (input: string) => Promise<boolean>;
+  persistKey: (input: string) => Promise<string | null>;
   reset: () => void;
 };
 
@@ -48,8 +48,8 @@ export function useBusinessServiceLink(): UseBusinessServiceLink {
     finally { setLoadingInstructions(false); }
   }, []);
 
-  const persistKey = useCallback(async (input: string): Promise<boolean> => {
-    if (saving) return false;
+  const persistKey = useCallback(async (input: string): Promise<string | null> => {
+    if (saving) return null;
     setSaving(true); setError('');
     try {
       const res = await fetch('/api/business-service/persist-key', {
@@ -57,10 +57,10 @@ export function useBusinessServiceLink(): UseBusinessServiceLink {
         body: JSON.stringify({ key: input }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data.error || 'Could not save key'); return false; }
+      if (!res.ok) { setError(data.error || 'Could not save key'); return null; }
       setSavedKey(data.businessServiceKey || '');
-      return true;
-    } catch (e: any) { setError(e?.message || 'Network error'); return false; }
+      return data.businessServiceKey || '';
+    } catch (e: any) { setError(e?.message || 'Network error'); return null; }
     finally { setSaving(false); }
   }, [saving]);
 
