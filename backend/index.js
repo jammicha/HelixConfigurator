@@ -102,6 +102,7 @@ app.use('/api', requireAuth);
 
 require('./routes/traces').register(app, { otelStore, docker });
 require('./routes/situations').register(app, { otelStore });
+require('./routes/business-service').register(app, { otelStore });
 require('./routes/discovery').register(app, { docker });
 require('./routes/containers').register(app, { docker });
 require('./routes/lifecycle').register(app, { docker });
