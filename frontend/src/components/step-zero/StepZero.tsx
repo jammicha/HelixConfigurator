@@ -1,12 +1,89 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowRight, Boxes, ExternalLink } from 'lucide-react';
 import { Layer2Synthetic } from './Layer2Synthetic';
 import { Layer3Instrument } from './Layer3Instrument';
+import { NavAvatar } from '../NavAvatar';
+import { buildHelixBusinessServiceUrl, hasRealHelixEndpoint } from '../otel-data/utils';
+
+const HeaderUserMenu: React.FC = () => {
+  const [authStatus, setAuthStatus] = useState<{ required: boolean; authenticated: boolean } | null>(null);
+  const [externalApps, setExternalApps] = useState<{ otelDashboardUrl: string | null; aiopsServiceUrl: string | null; applicationUrl: string | null } | undefined>(undefined);
+  useEffect(() => {
+    fetch('/api/auth/status')
+      .then(r => r.json())
+      .then(d => setAuthStatus({ required: !!d.required, authenticated: !!d.authenticated }))
+      .catch(() => setAuthStatus({ required: false, authenticated: true }));
+  }, []);
+  useEffect(() => {
+    fetch('/api/env')
+      .then(r => r.ok ? r.json() : null)
+      .then(env => {
+        if (!env) return;
+        const tenantId = (env.HELIX_API_KEY || '').split('::')[0] || '';
+        const helixEnv = {
+          endpoint: env.HELIX_ENDPOINT || '',
+          tenantId,
+          source: env.X_SOURCE || '',
+          businessServiceKey: env.BUSINESS_SERVICE_KEY || '',
+        };
+        const base = (env.HELIX_ENDPOINT || '').replace(/\/+$/, '');
+        const src = env.X_SOURCE || '';
+        setExternalApps({
+          otelDashboardUrl: hasRealHelixEndpoint(helixEnv) && tenantId
+            ? `${base}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${tenantId}&var-BusinessService=${src}&var-OTelNamespace=${src}&from=now-3h&to=now&timezone=browser`
+            : null,
+          aiopsServiceUrl: buildHelixBusinessServiceUrl(helixEnv),
+          applicationUrl: env.APP_URL || null,
+        });
+      })
+      .catch(() => { /* env unset — links stay greyed */ });
+  }, []);
+  return (
+    <NavAvatar
+      authStatus={authStatus}
+      externalApps={externalApps}
+      onLogout={async () => {
+        try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+        window.location.href = '/';
+      }}
+    />
+  );
+};
 
 export const StepZero: React.FC = () => {
   return (
-    <div className="min-h-screen bg-gray-1000 text-gray-100">
-      <main className="max-w-5xl mx-auto p-6 space-y-6">
+    <div className="min-h-screen bg-gray-1000 text-gray-100 flex flex-col">
+      {/* Standard Header Nav */}
+      <header className="bg-helixNav flex items-center px-5 h-14 font-helix w-full flex-shrink-0 sticky top-0 z-40 border-b border-[#3a3f4a]">
+        <div className="flex items-center gap-4">
+          <a href="/" className="flex items-center" aria-label="Helix OTel Configurator home">
+            <img src="/bmc-logo.svg" alt="BMC" className="h-7 w-auto" />
+          </a>
+          <h1 className="text-white font-normal text-[1.1875rem] m-0 tracking-normal">
+            Helix OTel Configurator
+          </h1>
+        </div>
+        <nav className="flex items-center gap-7 text-sm text-[#cfd3da] ml-10">
+          <a href="/?view=onboarding" className="hover:text-white transition-colors">
+            Onboarding
+          </a>
+          <a href="/" className="hover:text-white transition-colors">
+            Gateway Dashboard
+          </a>
+          <a href="/otel-data" className="hover:text-white transition-colors">
+            View OTel Data
+          </a>
+          <span className="text-white font-semibold border-b-2 border-primary pb-0.5">
+            Start from zero
+          </span>
+        </nav>
+        <div className="ml-auto">
+          <HeaderUserMenu />
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-5xl w-full mx-auto p-6 space-y-6 flex-1 overflow-y-auto">
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold">Start from zero</h1>
           <p className="text-base text-gray-400 leading-relaxed">
