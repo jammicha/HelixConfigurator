@@ -351,10 +351,18 @@ describe('buildClassDefinition (enriched slots)', () => {
 });
 
 describe('buildCorrelationPolicy (enriched title)', () => {
-  it('interpolates the cause into the aggregated Situation message', () => {
+  it('leads the Situation message with slots populated for status-only errors', () => {
+    // error_type and anomaly_factor are empty for the common status-only error
+    // (ERROR status, no exception event) — leading with them rendered
+    // "[Invalid Slot] in [Invalid Slot]" in BHOM. The title must lead with slots
+    // that are reliably populated: the cause operation, the error message, and
+    // the affected-component count.
     const m = buildCorrelationPolicy().configurations[0].definition.children[0].newEvent.msg;
-    expect(m).toContain('%error_type%');
     expect(m).toContain('%probable_cause_operation%');
+    expect(m).toContain('%error_message%');
+    expect(m).toContain('%component_count%');
+    expect(m).not.toContain('%error_type%');
+    expect(m).not.toContain('%anomaly_factor%');
   });
   it('still selects with NO parens and keeps empty-string brackets', () => {
     const p = buildCorrelationPolicy();

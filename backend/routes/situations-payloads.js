@@ -306,7 +306,13 @@ function buildCorrelationPolicy() {
             priority: 'PRIORITY_2',
             status: 'OPEN',
             location: '',
-            msg: 'OTel anomaly on %service_name% / %service_namespace%: %error_type% in %probable_cause_operation% (%anomaly_factor%× p95). Latest trace: %helix_trace_id% — investigate correlated traces.',
+            // Lead with slots that are reliably populated. error_type and
+            // anomaly_factor are empty for status-only errors (ERROR status, no
+            // exception event — the common OTel-demo case), and leading with
+            // them rendered "[Invalid Slot] in [Invalid Slot]" in BHOM.
+            // probable_cause_operation, error_message and component_count are
+            // always set when an error span is found.
+            msg: 'OTel anomaly on %service_name% / %service_namespace%: %error_message% in %probable_cause_operation% (%component_count% services affected). Latest trace: %helix_trace_id% — investigate correlated traces.',
           },
         }],
       },
