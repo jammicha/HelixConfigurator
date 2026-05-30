@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTrace } from '../routes/step-zero/synthetic-scenario.js';
+import { generateTrace, buildSpan, buildExceptionEvent } from '../routes/step-zero/synthetic-scenario.js';
 
 const sample = (n, fn) => Array.from({ length: n }, fn);
 
@@ -316,5 +316,33 @@ describe('generateTrace', () => {
       expect(typeof attrMap['db.statement']?.stringValue).toBe('string');
       expect(attrMap['db.statement'].stringValue).toMatch(/^SELECT /);
     }
+  });
+});
+
+describe('buildExceptionEvent', () => {
+  it('builds an OTLP exception event with type/message/stacktrace', () => {
+    const ev = buildExceptionEvent({ type: 'psycopg2.OperationalError', message: 'boom', stacktrace: 'Traceback…', timeMs: 5 });
+    expect(ev.name).toBe('exception');
+    expect(typeof ev.timeUnixNano).toBe('string');
+    const a = Object.fromEntries(ev.attributes.map(x => [x.key, x.value.stringValue]));
+    expect(a['exception.type']).toBe('psycopg2.OperationalError');
+    expect(a['exception.message']).toBe('boom');
+    expect(a['exception.stacktrace']).toBe('Traceback…');
+  });
+  it('omits the stacktrace attribute when none is given', () => {
+    const ev = buildExceptionEvent({ type: 'X', message: 'm', timeMs: 1 });
+    expect(ev.attributes.find(x => x.key === 'exception.stacktrace')).toBeUndefined();
+  });
+});
+
+describe('buildSpan events seam', () => {
+  it('attaches events when provided', () => {
+    const ev = buildExceptionEvent({ type: 'X', message: 'm', timeMs: 1 });
+    const span = buildSpan({ traceId: 't', spanId: 's1', name: 'n', startMs: 0, durationMs: 1, events: [ev] });
+    expect(span.events).toEqual([ev]);
+  });
+  it('omits events when none provided', () => {
+    const span = buildSpan({ traceId: 't', spanId: 's1', name: 'n', startMs: 0, durationMs: 1 });
+    expect(span).not.toHaveProperty('events');
   });
 });

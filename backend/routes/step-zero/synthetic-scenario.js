@@ -74,7 +74,7 @@ const COLD_START_TARGETS = ['checkout-web', 'cart-api', 'payment-service', 'noti
 
 const randomHex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 
-const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, errored, errorMessage, statusCode, attributes, kind }) => {
+const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, errored, errorMessage, statusCode, attributes, kind, events }) => {
   const startNs = String(BigInt(Math.round(startMs)) * 1_000_000n);
   const endNs = String(BigInt(Math.round(startMs + durationMs)) * 1_000_000n);
   // Allow explicit statusCode override (used by retry storm so we can mark
@@ -95,8 +95,23 @@ const buildSpan = ({ traceId, spanId, parentSpanId, name, startMs, durationMs, e
   if (parentSpanId) span.parentSpanId = parentSpanId;
   if (code === 2 && errorMessage) span.status.message = errorMessage;
   if (attributes && attributes.length) span.attributes = attributes;
+  if (events && events.length) span.events = events;
   return span;
 };
+
+// OTel `exception` span event. otelStore reads exception.type/message/stacktrace off
+// these (preferring them over the span.error fallback); deriveProbableCause then sets
+// error_type/error_message from them. `code_location` comes separately from the span's
+// own code.* attributes. timeMs = when the exception was recorded (span end is fine).
+const buildExceptionEvent = ({ type, message, stacktrace, timeMs }) => ({
+  name: 'exception',
+  timeUnixNano: String(BigInt(Math.round(timeMs)) * 1_000_000n),
+  attributes: [
+    { key: 'exception.type', value: { stringValue: type } },
+    { key: 'exception.message', value: { stringValue: message } },
+    ...(stacktrace ? [{ key: 'exception.stacktrace', value: { stringValue: stacktrace } }] : []),
+  ],
+});
 
 const resourceForService = (serviceName) => ({
   attributes: [
@@ -480,4 +495,4 @@ const generateTrace = () => {
   };
 };
 
-module.exports = { generateTrace };
+module.exports = { generateTrace, buildSpan, buildExceptionEvent };
