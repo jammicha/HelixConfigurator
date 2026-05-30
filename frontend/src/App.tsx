@@ -21,6 +21,7 @@ import { parseHelixKeyBundle } from './utils/helixKey';
 import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
 import { PipelineStatusBanner } from './components/dashboard/PipelineStatusBanner';
 import { QuickActions } from './components/dashboard/QuickActions';
+import { BusinessServiceCard } from './components/dashboard/BusinessServiceCard';
 import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConnectionSettingsDrawer';
 import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/SetPasswordModal';
 import { NavAvatar } from './components/NavAvatar';
@@ -1908,6 +1909,11 @@ ${logsData.logs || '(no logs available)'}
                 isTogglingDiag={isTogglingDiag}
                 isDiagnosticEnabled={isDiagnosticEnabled}
                 isServicesOpen={isServicesOpen}
+              />
+              <BusinessServiceCard
+                currentKey={envVars.BUSINESS_SERVICE_KEY}
+                onCaptured={(key) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: key })}
+                onToast={showToastMsg}
               />
 
               {/* Trace injection status surface (preserved from the old
