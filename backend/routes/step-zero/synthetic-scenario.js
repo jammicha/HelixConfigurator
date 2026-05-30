@@ -123,6 +123,21 @@ const INVENTORY_DB_TRACEBACK = [
   'psycopg2.OperationalError: connection refused: inventory-db unreachable',
 ].join('\n');
 
+// Stripe client code location (the payment-service call site that raised/handled the error).
+const STRIPE_CLIENT_CODE_ATTRS = [
+  { key: 'code.filepath', value: { stringValue: 'services/payment/clients/stripe_client.py' } },
+  { key: 'code.function', value: { stringValue: 'charge' } },
+  { key: 'code.lineno', value: { intValue: 88 } },
+];
+const stripeTraceback = (type, message) => [
+  'Traceback (most recent call last):',
+  '  File "services/payment/clients/stripe_client.py", line 88, in charge',
+  '    resp = self._session.post(_STRIPE_CHARGES_URL, json=payload, timeout=5)',
+  `${type}: ${message}`,
+].join('\n');
+const STRIPE_TIMEOUT_MSG = "HTTPSConnectionPool(host='api.stripe.com', port=443): Read timed out. (read timeout=5)";
+const STRIPE_503_MSG = '503 Server Error: Service Unavailable for url: /v1/charges';
+
 const resourceForService = (serviceName) => ({
   attributes: [
     { key: 'service.name', value: { stringValue: serviceName } },
@@ -165,13 +180,23 @@ const buildRetryStormStripeSpans = ({ traceId, paymentSpanId, stripeStartMs, suc
       traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
       name: 'POST /v1/charges', startMs: t1Start, durationMs: attempt1,
       statusCode: 2, errorMessage: 'timeout',
-      attributes: [{ key: 'retry.attempt', value: { intValue: 1 } }],
+      attributes: [{ key: 'retry.attempt', value: { intValue: 1 } }, ...STRIPE_CLIENT_CODE_ATTRS],
+      events: [buildExceptionEvent({
+        type: 'requests.exceptions.ReadTimeout', message: STRIPE_TIMEOUT_MSG,
+        stacktrace: stripeTraceback('requests.exceptions.ReadTimeout', STRIPE_TIMEOUT_MSG),
+        timeMs: t1Start + attempt1,
+      })],
     }),
     buildSpan({
       traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
       name: 'POST /v1/charges', startMs: t2Start, durationMs: attempt2,
       statusCode: 2, errorMessage: 'service_unavailable',
-      attributes: [{ key: 'retry.attempt', value: { intValue: 2 } }],
+      attributes: [{ key: 'retry.attempt', value: { intValue: 2 } }, ...STRIPE_CLIENT_CODE_ATTRS],
+      events: [buildExceptionEvent({
+        type: 'requests.exceptions.HTTPError', message: STRIPE_503_MSG,
+        stacktrace: stripeTraceback('requests.exceptions.HTTPError', STRIPE_503_MSG),
+        timeMs: t2Start + attempt2,
+      })],
     }),
     buildSpan({
       traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,

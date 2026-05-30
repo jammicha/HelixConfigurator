@@ -367,3 +367,23 @@ describe('inventory-db error RCA enrichment', () => {
     expect(checked).toBeGreaterThan(20); // ~3% of 2000 ≈ 60
   });
 });
+
+describe('stripe retry-storm error RCA enrichment', () => {
+  const flat = (arr) => Object.fromEntries((arr || []).map(a => [a.key, a.value.stringValue ?? a.value.intValue]));
+  it('failed stripe attempts carry requests exception events + code.* (sample 2000)', () => {
+    let checked = 0;
+    for (let i = 0; i < 2000; i++) {
+      const t = generateTrace();
+      const failed = spansForService(t, 'stripe-mock').filter(s => s.status && s.status.code === 2);
+      if (failed.length === 0) continue; // only the retry storm errors stripe spans
+      checked++;
+      for (const f of failed) {
+        const exc = (f.events || []).find(e => e.name === 'exception');
+        expect(exc, 'failed stripe attempt should have an exception event').toBeTruthy();
+        expect(flat(exc.attributes)['exception.type']).toMatch(/^requests\.exceptions\./);
+        expect(flat(f.attributes)['code.filepath']).toBe('services/payment/clients/stripe_client.py');
+      }
+    }
+    expect(checked).toBeGreaterThan(5); // ~2% of 2000 ≈ 40
+  });
+});
