@@ -11,14 +11,14 @@ export const Layer2Synthetic: React.FC = () => {
   const showPostRun = !isRunning && haveRun && (status?.sent_traces ?? 0) > 0;
 
   return (
-    <section className="rounded-lg border border-gray-800 bg-gray-1000 p-5 md:p-6">
+    <section className="rounded-lg border border-gray-800 bg-gray-1000 p-5">
       <div className="flex items-baseline gap-2 mb-1">
         <span className="text-tiny uppercase tracking-wider text-blue-300 font-semibold">Demo</span>
       </div>
       <h2 className="text-xl font-semibold text-gray-100 mb-1">
         {showPostRun ? 'Scenario complete' : isRunning ? 'Running scenario' : 'See Helix populated'}
       </h2>
-      <p className="text-sm text-gray-400 mb-4 leading-relaxed">
+      <p className="text-sm text-gray-400 mb-3 leading-relaxed">
         {showPostRun ? (
           <>{status!.sent_traces} traces sent &middot; {status!.sent_with_errors} with errors. Eight diagnostic patterns to hunt for: stripe-mock latency tail (~8%), inventory cascade errors (~3%), N+1 inventory queries (~5%), cart-api cache misses (~5%), inventory pool waits (~4%), notification render slow (~2%), retry storms (~2%), and cold-start spikes (~2%, visible as outlier badges in /otel-data).</>
         ) : isRunning ? (
@@ -31,7 +31,7 @@ export const Layer2Synthetic: React.FC = () => {
       </p>
 
       {!isRunning && !showPostRun && (
-        <div className="font-mono text-tiny text-gray-300 bg-gray-900 border border-gray-800 rounded p-3 mb-4 whitespace-pre">
+        <div className="font-mono text-tiny text-gray-300 bg-gray-900 border border-gray-800 rounded p-3 mb-3 whitespace-pre">
 {`checkout-web → cart-api → inventory-db
       ↳ payment-svc → stripe-mock
       ↳ notification-svc`}

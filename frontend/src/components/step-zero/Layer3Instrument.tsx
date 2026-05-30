@@ -44,7 +44,7 @@ export const Layer3Instrument: React.FC = () => {
   return (
     <section className="rounded-lg border border-gray-800 bg-gray-1000">
       <header
-        className="flex items-center justify-between px-6 py-5 cursor-pointer select-none"
+        className="flex items-center justify-between px-6 py-4 cursor-pointer select-none"
         onClick={toggle}
         role="button"
         aria-expanded={!collapsed}

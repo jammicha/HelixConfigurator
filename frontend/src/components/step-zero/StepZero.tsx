@@ -83,8 +83,8 @@ export const StepZero: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-5xl w-full mx-auto p-6 space-y-5 flex-1 overflow-y-auto">
-        <header className="space-y-2">
+      <main className="max-w-5xl w-full mx-auto px-6 py-4 space-y-4 flex-1 overflow-y-auto">
+        <header className="space-y-1">
           <h1 className="text-2xl font-semibold">Start from zero</h1>
           <p className="text-base text-gray-400 leading-relaxed">
             Three ways to see Helix without instrumenting your own apps first: a 60-second
@@ -98,7 +98,7 @@ export const StepZero: React.FC = () => {
         <Layer3Instrument />
 
         {/* Pointer to the upstream OTel Demo. Static content; no backend wiring. */}
-        <section className="rounded-lg border border-gray-800 bg-gray-1000 p-5 md:p-6">
+        <section className="rounded-lg border border-gray-800 bg-gray-1000 p-5">
           <div className="flex items-start gap-4">
             <div className="flex-shrink-0 w-10 h-10 rounded bg-gray-900 border border-gray-800 flex items-center justify-center">
               <Boxes className="w-5 h-5 text-blue-300" aria-hidden="true" />
