@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertTriangle, Hexagon, Loader2, X } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Hexagon, Loader2, X, ArrowRight } from 'lucide-react';
 import type { BridgeStatus, DetectedCollector } from './Step3';
 import type { EnvVars } from './Step1';
 
@@ -330,8 +330,8 @@ export const Step4: React.FC<Props> = ({
           onClick={onLaunchDashboard}
           disabled={!traceVerifyResult}
           title={!traceVerifyResult ? 'Run Verify gateway → Helix first so we know your pipeline is wired up before you leave onboarding.' : 'Open the gateway dashboard'}
-          className="flex-1 bg-success hover:bg-success-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-        >Launch dashboard</button>
+          className="flex-1 bg-success hover:bg-success-hover text-white px-6 py-3 rounded font-semibold transition-all text-sm disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >Next: Link your service <ArrowRight className="w-4 h-4" /></button>
       </div>
 
       <div className="mt-6 pt-4 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">

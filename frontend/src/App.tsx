@@ -15,6 +15,7 @@ import { Step2 } from './components/wizard/Step2';
 import { Step3 } from './components/wizard/Step3';
 import type { DetectedCollector } from './components/wizard/Step3';
 import { Step4 } from './components/wizard/Step4';
+import { Step5 } from './components/wizard/Step5';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle } from './utils/helixKey';
 import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
@@ -36,7 +37,7 @@ const App = () => {
   const [setupStep, setSetupStep] = useLocalStorageState<number>(
     'helix-configurator.setupStep',
     1,
-    (v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 4,
+    (v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 5,
   );
   const [isVerifying, setIsVerifying] = useState(false);
   const [setupError, setSetupError] = useState('');
@@ -1283,6 +1284,15 @@ const App = () => {
     }
   };
 
+  const finishOnboarding = () => {
+    localStorage.setItem('helix-configurator.onboarded', '1');
+    localStorage.removeItem('helix-configurator.setupStep');
+    setIsSetupComplete(true);
+    if (window.location.pathname !== '/' || window.location.search) {
+      window.history.replaceState(null, '', '/');
+    }
+  };
+
   const handleQuickVerifyTelemetry = async () => {
     showToastMsg('Verifying telemetry flow...');
     try {
@@ -1843,22 +1853,16 @@ ${logsData.logs || '(no logs available)'}
                   envVars={envVars}
                   onJumpToStep={setSetupStep}
                   onVerifyTelemetry={handleVerifyTelemetry}
-                  onLaunchDashboard={() => {
-                    localStorage.setItem('helix-configurator.onboarded', '1');
-                    // Drop the in-progress step so a future "Start onboarding
-                    // again" from the nav lands on Step 1, not the last step
-                    // the user happened to be on when they launched.
-                    localStorage.removeItem('helix-configurator.setupStep');
-                    setIsSetupComplete(true);
-                    // Clean the URL — the user may have arrived from
-                    // /onboarding (typed manually, or via the dev server's
-                    // SPA fallback) or from /?view=onboarding (the nav link).
-                    // Either way the dashboard's canonical URL is /, and
-                    // leaving the wizard URL in the bar misleads on refresh.
-                    if (window.location.pathname !== '/' || window.location.search) {
-                      window.history.replaceState(null, '', '/');
-                    }
-                  }}
+                  onLaunchDashboard={() => setSetupStep(5)}
+                />
+              )}
+
+              {setupStep === 5 && (
+                <Step5
+                  onBack={() => setSetupStep(4)}
+                  onFinish={finishOnboarding}
+                  currentKey={envVars.BUSINESS_SERVICE_KEY}
+                  onCaptured={(key) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: key })}
                 />
               )}
 

@@ -6,6 +6,7 @@ const STEPS = [
   { n: 2, label: 'Exporter' },
   { n: 3, label: 'Connect' },
   { n: 4, label: 'Verify' },
+  { n: 5, label: 'Link Service' },
 ];
 
 type Props = {
