@@ -19,10 +19,10 @@ export const LinkBusinessService: React.FC<Props> = ({ context, currentKey, onCa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const pick = async (ns: string) => {
+  const pick = (ns: string) => {
     setSelectedNs(ns);
-    await bs.loadInstructions(ns);
     setPhase('guide');
+    bs.loadInstructions(ns);
   };
 
   const capture = async () => {
