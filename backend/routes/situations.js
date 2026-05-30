@@ -157,12 +157,17 @@ function register(app, { otelStore }) {
       // class is in the desired state from the caller's perspective.
       const body = JSON.stringify(response.data || '').toLowerCase();
       if (response.status === 409 || body.includes('already exist') || body.includes('duplicate')) {
-        // Class already exists — try to add any newly-introduced slots so older
-        // tenants pick up service_name/service_namespace/trace_url. (The exact
-        // update verb is being confirmed against a live tenant in Task 1; PUT of
-        // the full definition is the working assumption. Degrade gracefully if
-        // the update is rejected so an existing class is never left broken.)
-        const updateUrl = `${url}/${OTEL_TRACE_ANOMALY_CLASS}`;
+        // Class already exists — add any newly-introduced slots so the class
+        // picks up the RCA-enrichment attributes. Two live-validated quirks:
+        //   • idType=name: the path segment is parsed as a UUID by default, so
+        //     PUT .../classes/OTEL_TRACE_ANOMALY 500s with "Invalid UUID string".
+        //     ?idType=name tells the API to resolve by class name instead.
+        //   • body is buildClassUpdateBody() (attributes only) — the update
+        //     endpoint rejects name/parentClassName (additionalProperties). The
+        //     attribute list is the class's complete OWN set; inherited EVENT
+        //     slots live on the parent and are unaffected, so this is additive.
+        // Degrade gracefully if rejected so an existing class is never left broken.
+        const updateUrl = `${url}/${OTEL_TRACE_ANOMALY_CLASS}?idType=name`;
         const upd = await axios.put(updateUrl, buildClassUpdateBody(), {
           headers: bmcHeaders(bearer),
           timeout: 15_000,
