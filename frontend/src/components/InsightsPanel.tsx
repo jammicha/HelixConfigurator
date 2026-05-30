@@ -1,5 +1,7 @@
 import React from 'react';
 import { Sparkles, AlertTriangle, Activity, CheckCircle2 } from 'lucide-react';
+import type { HelixEnv } from './otel-data/types';
+import { hasRealHelixEndpoint } from './otel-data/utils';
 
 export type InsightFinding = {
   severity: 'info' | 'warning' | 'danger';
@@ -9,11 +11,13 @@ export type InsightFinding = {
    *  with reduced visual weight so a persisting anomaly looks settled rather
    *  than alarmingly-fresh on every poll. */
   ongoing?: boolean;
+  service?: string; // Sourced from backend
 };
 
 type Props = {
   findings: InsightFinding[];
   loading?: boolean;
+  helixEnv?: HelixEnv | null;
 };
 
 /**
@@ -26,7 +30,7 @@ type Props = {
  * text stays neutral — the surface signals "AI-flavored content here" via
  * structure, not gratuitous color throughout.
  */
-export const InsightsPanel: React.FC<Props> = ({ findings, loading }) => {
+export const InsightsPanel: React.FC<Props> = ({ findings, loading, helixEnv }) => {
   // Never hide the card outright. An empty findings list rendered as
   // "nothing here" looks broken; rendering a positive "no anomalies" finding
   // tells the user the rules ran and had nothing to flag.
@@ -60,6 +64,23 @@ export const InsightsPanel: React.FC<Props> = ({ findings, loading }) => {
               f.severity === 'danger' ? '#b2001e' :
               f.severity === 'warning' ? '#d9ae00' :
               '#8c8fa1';
+
+            const showLink = !isPositive && f.service && helixEnv && hasRealHelixEndpoint(helixEnv);
+            const linkUrl = showLink ? (() => {
+              const base = helixEnv!.endpoint.replace(/\/+$/, '');
+              const params = new URLSearchParams({
+                orgId: helixEnv!.tenantId,
+                'var-BusinessService': helixEnv!.source || '',
+                'var-OTelNamespace': helixEnv!.source || '',
+                'var-OTelService': f.service!,
+                'var-status': 'STATUS_CODE_UNSET',
+                from: 'now-3h',
+                to: 'now',
+                timezone: 'browser',
+              });
+              return `${base}/dashboards/d/OTelServiceOverview/otel-service-overview?${params.toString()}`;
+            })() : null;
+
             return (
               <li key={i} className={`flex items-start gap-2.5 ${f.ongoing ? 'opacity-60' : ''}`}>
                 <Icon className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: iconColor }} />
@@ -73,6 +94,19 @@ export const InsightsPanel: React.FC<Props> = ({ findings, loading }) => {
                     )}
                   </div>
                   <p className="text-tiny text-gray-400 leading-relaxed mt-0.5">{f.body}</p>
+                  {showLink && linkUrl && (
+                    <div className="mt-1">
+                      <a
+                        href={linkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-link hover:underline hover:text-white"
+                        style={{ color: '#8ca1f3' }}
+                      >
+                        Investigate {f.service} in Helix AIOps →
+                      </a>
+                    </div>
+                  )}
                 </div>
               </li>
             );

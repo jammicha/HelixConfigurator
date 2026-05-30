@@ -1434,34 +1434,55 @@ OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace,
   const fmtMult = (x) => `${x.toFixed(1)}×`;
   const fmtDur = (ms) => ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
 
-  // Rule 1: p95 latency jump.
   const p95 = overview.stats.p95LatencyMs;
-  if (p95.value > 100 && p95.prev > 0 && p95.value / p95.prev >= 1.5) {
-    findings.push({
-      severity: 'warning',
-      title: `p95 latency rose ${fmtMult(p95.value / p95.prev)}`,
-      body: `Now ${fmtDur(p95.value)}, up from ${fmtDur(p95.prev)} in the prior window. Top contributors: ${overview.topServices.slice(0, 2).map(s => s.name).join(', ') || 'no services in window'}.`,
-    });
-  }
-
-  // Rule 2: error-rate climb.
   const err = overview.stats.errorRate;
-  if (err.value >= 0.01 && err.prev >= 0 && err.value - err.prev >= 0.01) {
-    findings.push({
-      severity: err.value >= 0.05 ? 'danger' : 'warning',
-      title: `Error rate at ${fmtPct(err.value)}`,
-      body: `Up from ${fmtPct(err.prev)} in the prior window. ${overview.topErrors[0] ? `Most frequent: ${overview.topErrors[0].exceptionType} on ${overview.topErrors[0].serviceName || 'unknown'} (${overview.topErrors[0].count} occurrences).` : ''}`.trim(),
-    });
-  }
-
-  // Rule 3: throughput dip (could indicate upstream issue or downtime).
   const tput = overview.stats.throughputPerMin;
-  if (tput.prev > 1 && tput.value / Math.max(0.0001, tput.prev) <= 0.5) {
+
+  const hasLatencyJump = p95.value > 100 && p95.prev > 0 && p95.value / p95.prev >= 1.5;
+  const hasErrorClimb = err.value >= 0.01 && err.prev >= 0 && err.value - err.prev >= 0.01;
+  const hasThroughputDip = tput.prev > 1 && tput.value / Math.max(0.0001, tput.prev) <= 0.5;
+
+  const topService = service || (overview.topServices[0] && overview.topServices[0].name) || null;
+  const topErrorService = (overview.topErrors[0] && overview.topErrors[0].serviceName) || topService;
+
+  // Rule: Simultaneity (Combined Anomaly)
+  if (hasLatencyJump && hasErrorClimb && hasThroughputDip) {
     findings.push({
-      severity: 'info',
-      title: `Throughput dropped ${fmtPct(1 - tput.value / tput.prev)}`,
-      body: `Now ${tput.value.toFixed(1)} traces/min, down from ${tput.prev.toFixed(1)}. Could indicate an upstream pause, a redeploy, or sampling change.`,
+      severity: 'danger',
+      title: `Possible incident on ${topService || 'primary services'}`,
+      body: `Simultaneous p95 latency spike (${fmtMult(p95.value / p95.prev)}), error rate climb (${fmtPct(err.value)}), and throughput dip (${fmtPct(1 - tput.value / tput.prev)}) detected in this window. This suggests a major service disruption or cascading failure.`,
+      service: topService,
     });
+  } else {
+    // Rule 1: p95 latency jump.
+    if (hasLatencyJump) {
+      findings.push({
+        severity: 'warning',
+        title: `p95 latency rose ${fmtMult(p95.value / p95.prev)}`,
+        body: `Now ${fmtDur(p95.value)}, up from ${fmtDur(p95.prev)} in the prior window. Top contributors: ${overview.topServices.slice(0, 2).map(s => s.name).join(', ') || 'no services in window'}.`,
+        service: topService,
+      });
+    }
+
+    // Rule 2: error-rate climb.
+    if (hasErrorClimb) {
+      findings.push({
+        severity: err.value >= 0.05 ? 'danger' : 'warning',
+        title: `Error rate at ${fmtPct(err.value)}`,
+        body: `Up from ${fmtPct(err.prev)} in the prior window. ${overview.topErrors[0] ? `Most frequent: ${overview.topErrors[0].exceptionType} on ${overview.topErrors[0].serviceName || 'unknown'} (${overview.topErrors[0].count} occurrences).` : ''}`.trim(),
+        service: topErrorService,
+      });
+    }
+
+    // Rule 3: throughput dip (could indicate upstream issue or downtime).
+    if (hasThroughputDip) {
+      findings.push({
+        severity: 'info',
+        title: `Throughput dropped ${fmtPct(1 - tput.value / tput.prev)}`,
+        body: `Now ${tput.value.toFixed(1)} traces/min, down from ${tput.prev.toFixed(1)}. Could indicate an upstream pause, a redeploy, or sampling change.`,
+        service: topService,
+      });
+    }
   }
 
   // Rule 4: a single service dominates errors.
@@ -1472,6 +1493,7 @@ OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace,
         severity: top.errorRate >= 0.2 ? 'danger' : 'warning',
         title: `${top.name} is producing ${fmtPct(top.errorRate)} errors`,
         body: `${top.errorCount} of ${top.count} traces in this window failed. Other top services error rates: ${overview.topServices.slice(1, 4).map(s => `${s.name} ${fmtPct(s.errorRate)}`).join(', ') || 'all healthy'}.`,
+        service: top.name,
       });
     }
   }

@@ -11,10 +11,11 @@
     "test:watch": "TZ=America/Chicago vitest"
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.6.0",
+    "@monaco-editor/react": "^4.7.0",
     "axios": "^1.6.0",
+    "dompurify": "^3.4.7",
     "js-yaml": "^4.1.1",
-    "lucide-react": "^0.292.0",
+    "lucide-react": "^1.17.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
@@ -22,12 +23,15 @@
     "@types/js-yaml": "^4.0.9",
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
-    "@vitejs/plugin-react": "^4.2.0",
+    "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.5",
-    "typescript": "^5.2.2",
-    "vite": "^5.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14",
     "vitest": "^4.1.6"
+  },
+  "overrides": {
+    "dompurify": "^3.4.7"
   }
 }
