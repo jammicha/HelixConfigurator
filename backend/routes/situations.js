@@ -7,7 +7,7 @@
 const axios = require('axios');
 const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
-  buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
+  buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
 } = require('./situations-payloads');
 
 // Derive the events-service base URL. Prefer an explicit HELIX_EVENTS_ENDPOINT
@@ -163,7 +163,7 @@ function register(app, { otelStore }) {
         // the full definition is the working assumption. Degrade gracefully if
         // the update is rejected so an existing class is never left broken.)
         const updateUrl = `${url}/${OTEL_TRACE_ANOMALY_CLASS}`;
-        const upd = await axios.put(updateUrl, classDef, {
+        const upd = await axios.put(updateUrl, buildClassUpdateBody(), {
           headers: bmcHeaders(bearer),
           timeout: 15_000,
           validateStatus: () => true,

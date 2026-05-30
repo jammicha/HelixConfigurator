@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
-  buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
+  buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary,
 } = require('../routes/situations-payloads');
@@ -383,5 +383,22 @@ describe('buildAnomalyEventPayload (status-only error headline)', () => {
     const spans = [ span({ serviceName:'stripe-mock', name:'POST /v1/charges', statusCode:2, statusMessage:'service_unavailable' }) ];
     const [e] = buildAnomalyEventPayload({ summary: sum, p95Ms: 400, spans });
     expect(e.msg).not.toContain('× p95');
+  });
+});
+
+describe('buildClassUpdateBody', () => {
+  it('omits name and parentClassName (the update endpoint forbids them) but keeps all attributes', () => {
+    const body = buildClassUpdateBody();
+    expect(body).not.toHaveProperty('name');
+    expect(body).not.toHaveProperty('parentClassName');
+    const names = body.attributes.map(a => a.name);
+    // the same slots the full class declares, including the RCA-enrichment ones
+    for (const s of ['helix_trace_id','probable_cause_operation','error_message','anomaly_factor','component_count','trace_url']) {
+      expect(names).toContain(s);
+    }
+  });
+  it('preserves the helix_trace_id dedup facet', () => {
+    const slot = buildClassUpdateBody().attributes.find(a => a.name === 'helix_trace_id');
+    expect(slot.allFacet).toEqual(expect.arrayContaining([{ name: 'dup_detect', value: 'true' }]));
   });
 });

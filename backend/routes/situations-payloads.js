@@ -38,6 +38,16 @@ function buildClassDefinition() {
   };
 }
 
+// The events-service UPDATE endpoint (PUT /events/classes/<name>) validates with
+// additionalProperties:false and rejects `name`/`parentClassName` (you address the
+// class by name in the URL). Posting the full buildClassDefinition() to it 400s
+// with "properties which are not allowed: [name, parentClassName]" — which is why
+// an existing class never picked up new slots. Send just the attributes.
+function buildClassUpdateBody() {
+  const { name, parentClassName, ...rest } = buildClassDefinition();
+  return rest;
+}
+
 const ADDED_SLOTS = ['service_name', 'service_namespace'];
 
 // HELIX_API_KEY is `TenantID::AccessKey::SecretKey`. The events-service REST API
@@ -307,7 +317,7 @@ function buildCorrelationPolicy() {
 
 module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
-  buildClassDefinition, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
+  buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary,
 };
