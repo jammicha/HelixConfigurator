@@ -551,6 +551,21 @@ class OtelStore {
     return rawLogs.length;
   }
 
+  // Distinct OTel namespaces seen in stored traces, with trace counts and the
+  // most-recent receipt time. Null namespace = un-namespaced traces (the route
+  // maps those to X_SOURCE). Ordered newest-seen first for the Detect UI.
+  listNamespaces() {
+    const rows = this.db.prepare(`
+      SELECT service_namespace AS namespace,
+             COUNT(*)          AS traceCount,
+             MAX(received_at)  AS lastSeen
+      FROM traces
+      GROUP BY service_namespace
+      ORDER BY lastSeen DESC, namespace ASC
+    `).all();
+    return rows.map((r) => ({ namespace: r.namespace == null ? null : String(r.namespace), traceCount: r.traceCount, lastSeen: r.lastSeen }));
+  }
+
   // Item 10: compute and broadcast fresh rollup counts for a trace. Cheap
   // (three indexed-by-trace_id COUNT queries), but skip when the trace
   // doesn't exist yet — the 'trace' event itself triggers the initial row.
