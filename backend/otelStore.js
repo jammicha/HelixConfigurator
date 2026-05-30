@@ -1364,10 +1364,26 @@ OtelStore.prototype.latencyHeatmap = function ({ sinceMs, untilMs, timeBuckets, 
 // the window) + edges (inter-service parent→child calls). Layout is computed
 // client-side; backend only returns the graph structure plus per-node and
 // per-edge stats.
-OtelStore.prototype.serviceMap = function ({ sinceMs, untilMs } = {}) {
+OtelStore.prototype.serviceMap = function ({ sinceMs, untilMs, service, namespace, container } = {}) {
   const now = Date.now();
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
   const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : end - 60 * 60 * 1000;
+
+  const params = [start, end];
+  const filterClauses = [];
+  if (service) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
+    params.push(service);
+  }
+  if (namespace) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
+    params.push(namespace);
+  }
+  if (container) {
+    filterClauses.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
+    params.push(container);
+  }
+  const filterClause = filterClauses.length ? 'AND ' + filterClauses.join(' AND ') : '';
 
   // Per-service rollup over the window. Joining via trace_id keeps the
   // service set consistent with the trace listing UI.
@@ -1381,8 +1397,9 @@ OtelStore.prototype.serviceMap = function ({ sinceMs, untilMs } = {}) {
      JOIN traces t ON t.trace_id = s.trace_id
      WHERE t.received_at >= ? AND t.received_at <= ?
        AND s.service_name IS NOT NULL
+       ${filterClause}
      GROUP BY s.service_name`,
-  ).all(start, end);
+  ).all(...params);
 
   // Edges: parent→child span pairs whose service_names differ. Aggregated
   // by (source, target).
@@ -1398,8 +1415,9 @@ OtelStore.prototype.serviceMap = function ({ sinceMs, untilMs } = {}) {
        AND p.service_name IS NOT NULL
        AND c.service_name IS NOT NULL
        AND p.service_name != c.service_name
+       ${filterClause}
      GROUP BY p.service_name, c.service_name`,
-  ).all(start, end);
+  ).all(...params);
 
   const nodes = nodeRows.map(n => ({
     name: n.name,

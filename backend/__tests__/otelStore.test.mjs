@@ -232,6 +232,48 @@ describe('OtelStore', () => {
     });
   });
 
+  describe('serviceMap', () => {
+    const seedMapSpans = () => {
+      store.ingestSpans([
+        { ...makeSpan({ traceId: 'tprod', spanId: 'root-p', serviceName: 'frontend' }), serviceNamespace: 'prod', containerName: 'fe-container' },
+        { ...makeSpan({ traceId: 'tprod', spanId: 'child-p', parentSpanId: 'root-p', serviceName: 'backend' }), serviceNamespace: 'prod', containerName: 'be-container' },
+        { ...makeSpan({ traceId: 'tstage', spanId: 'root-s', serviceName: 'frontend' }), serviceNamespace: 'staging', containerName: 'fe-container' },
+        { ...makeSpan({ traceId: 'tstage', spanId: 'child-s', parentSpanId: 'root-s', serviceName: 'backend' }), serviceNamespace: 'staging', containerName: 'be-container' },
+      ]);
+    };
+
+    it('returns nodes and edges without filtering', () => {
+      seedMapSpans();
+      const map = store.serviceMap();
+      expect(map.nodes.map(n => n.name).sort()).toEqual(['backend', 'frontend']);
+      expect(map.edges).toHaveLength(1);
+      expect(map.edges[0]).toMatchObject({ source: 'frontend', target: 'backend', callCount: 2 });
+    });
+
+    it('honors the namespace filter', () => {
+      seedMapSpans();
+      const map = store.serviceMap({ namespace: 'prod' });
+      expect(map.nodes.find(n => n.name === 'frontend').traceCount).toBe(1);
+      expect(map.edges[0]).toMatchObject({ source: 'frontend', target: 'backend', callCount: 1 });
+    });
+
+    it('honors the container filter', () => {
+      seedMapSpans();
+      const map = store.serviceMap({ container: 'fe-container' });
+      expect(map.nodes.map(n => n.name).sort()).toEqual(['backend', 'frontend']);
+      // Both traces include 'fe-container' (on frontend span)
+      expect(map.edges[0].callCount).toBe(2);
+    });
+
+    it('honors the service filter', () => {
+      seedMapSpans();
+      // Only traces that participate in 'backend' service
+      const map = store.serviceMap({ service: 'backend' });
+      expect(map.nodes.map(n => n.name).sort()).toEqual(['backend', 'frontend']);
+      expect(map.edges[0].callCount).toBe(2);
+    });
+  });
+
 });
 
 const buildSpans = (n, traceId) => Array.from({ length: n }, (_, i) => makeSpan({

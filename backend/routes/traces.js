@@ -246,7 +246,7 @@ function register(app, { otelStore, docker }) {
       ...filters,
     });
     const insights = otelStore.insights({ sinceMs: since, untilMs: until, ...filters });
-    const serviceMap = otelStore.serviceMap({ sinceMs: since, untilMs: until });
+    const serviceMap = otelStore.serviceMap({ sinceMs: since, untilMs: until, ...filters });
 
     const annotations = await buildGatewayRestartAnnotations(overview.windowMs);
 
@@ -265,9 +265,13 @@ function register(app, { otelStore, docker }) {
   // (parent→child inter-service calls). Layout computed client-side.
   app.get('/api/service-map', (req, res) => {
     const { sinceMs, untilMs } = req.query;
+    const { service, namespace, container } = readResourceFilters(req.query);
     res.json(otelStore.serviceMap({
       sinceMs: sinceMs ? Number(sinceMs) : undefined,
       untilMs: untilMs ? Number(untilMs) : undefined,
+      service,
+      namespace,
+      container,
     }));
   });
 
