@@ -346,3 +346,24 @@ describe('buildSpan events seam', () => {
     expect(span).not.toHaveProperty('events');
   });
 });
+
+describe('inventory-db error RCA enrichment', () => {
+  const flat = (arr) => Object.fromEntries((arr || []).map(a => [a.key, a.value.stringValue ?? a.value.intValue]));
+  it('errored inventory-db spans carry a psycopg2 exception event + code.* attrs (sample 2000)', () => {
+    let checked = 0;
+    for (let i = 0; i < 2000; i++) {
+      const t = generateTrace();
+      const invErr = spansForService(t, 'inventory-db').find(s => s.status && s.status.code === 2);
+      if (!invErr) continue;
+      checked++;
+      const exc = (invErr.events || []).find(e => e.name === 'exception');
+      expect(exc, 'inventory error span should have an exception event').toBeTruthy();
+      expect(flat(exc.attributes)['exception.type']).toBe('psycopg2.OperationalError');
+      const sa = flat(invErr.attributes);
+      expect(sa['code.filepath']).toBe('services/inventory/repositories/stock_repository.py');
+      expect(sa['code.function']).toBe('get_stock');
+      expect(String(sa['code.lineno'])).toBe('142');
+    }
+    expect(checked).toBeGreaterThan(20); // ~3% of 2000 ≈ 60
+  });
+});

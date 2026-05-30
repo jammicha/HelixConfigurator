@@ -113,6 +113,16 @@ const buildExceptionEvent = ({ type, message, stacktrace, timeMs }) => ({
   ],
 });
 
+// Short, believable Python traceback for the inventory connection failure.
+const INVENTORY_DB_TRACEBACK = [
+  'Traceback (most recent call last):',
+  '  File "services/inventory/repositories/stock_repository.py", line 142, in get_stock',
+  '    cur.execute(_STOCK_QUERY, (item_id,))',
+  '  File "/usr/local/lib/python3.11/site-packages/psycopg2/__init__.py", line 122, in connect',
+  '    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)',
+  'psycopg2.OperationalError: connection refused: inventory-db unreachable',
+].join('\n');
+
 const resourceForService = (serviceName) => ({
   attributes: [
     { key: 'service.name', value: { stringValue: serviceName } },
@@ -343,6 +353,15 @@ const generateTrace = () => {
     if (injectInvPoolWait) {
       attrs.push({ key: 'db.pool.wait_ms', value: { intValue: 10 } });
     }
+    // In the error case, carry the code location of the failing query so the
+    // Situation's code_location resolves to file:method:line.
+    if (injectInventoryError) {
+      attrs.push(
+        { key: 'code.filepath', value: { stringValue: 'services/inventory/repositories/stock_repository.py' } },
+        { key: 'code.function', value: { stringValue: 'get_stock' } },
+        { key: 'code.lineno', value: { intValue: 142 } },
+      );
+    }
     return attrs;
   };
 
@@ -403,6 +422,12 @@ const generateTrace = () => {
           errorMessage: invErrMsg,
           attributes: buildInvDbAttributes(i),
           kind: 3, // SPAN_KIND_CLIENT
+          events: injectInventoryError ? [buildExceptionEvent({
+            type: 'psycopg2.OperationalError',
+            message: invErrMsg,
+            stacktrace: INVENTORY_DB_TRACEBACK,
+            timeMs: invStartMsList[i] + dur,
+          })] : undefined,
         })),
       }],
     },
