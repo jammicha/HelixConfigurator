@@ -321,9 +321,23 @@ function buildCorrelationPolicy() {
   };
 }
 
+// Addressing for the non-destructive slot update on an existing class. The events
+// path segment is parsed as a UUID by default, so `?idType=name` is required to
+// resolve a class by name on GET. That flag does NOT carry over to PUT (PUT-by-name
+// still 500s "Invalid UUID string"), so the slot-adding PUT must target the UUID —
+// resolve the id with buildClassByNameUrl, then PUT to buildClassByIdUrl.
+const classesBase = (base) => `${String(base).replace(/\/+$/, '')}/events-service/api/v1.0/events/classes`;
+function buildClassByNameUrl(base, className) {
+  return `${classesBase(base)}/${encodeURIComponent(className)}?idType=name`;
+}
+function buildClassByIdUrl(base, id) {
+  return `${classesBase(base)}/${encodeURIComponent(id)}`;
+}
+
 module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary,
+  buildClassByNameUrl, buildClassByIdUrl,
 };

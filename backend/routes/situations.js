@@ -8,6 +8,7 @@ const axios = require('axios');
 const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
+  buildClassByNameUrl, buildClassByIdUrl,
 } = require('./situations-payloads');
 
 // Derive the events-service base URL. Prefer an explicit HELIX_EVENTS_ENDPOINT
@@ -157,26 +158,29 @@ function register(app, { otelStore }) {
       // class is in the desired state from the caller's perspective.
       const body = JSON.stringify(response.data || '').toLowerCase();
       if (response.status === 409 || body.includes('already exist') || body.includes('duplicate')) {
-        // Class already exists — add any newly-introduced slots so the class
-        // picks up the RCA-enrichment attributes. Two live-validated quirks:
-        //   • idType=name: the path segment is parsed as a UUID by default, so
-        //     PUT .../classes/OTEL_TRACE_ANOMALY 500s with "Invalid UUID string".
-        //     ?idType=name tells the API to resolve by class name instead.
-        //   • body is buildClassUpdateBody() (attributes only) — the update
-        //     endpoint rejects name/parentClassName (additionalProperties). The
-        //     attribute list is the class's complete OWN set; inherited EVENT
-        //     slots live on the parent and are unaffected, so this is additive.
-        // Degrade gracefully if rejected so an existing class is never left broken.
-        const updateUrl = `${url}/${OTEL_TRACE_ANOMALY_CLASS}?idType=name`;
-        const upd = await axios.put(updateUrl, buildClassUpdateBody(), {
-          headers: bmcHeaders(bearer),
-          timeout: 15_000,
-          validateStatus: () => true,
+        // Class already exists — add any newly-introduced slots so it picks up the
+        // RCA-enrichment attributes. The update endpoint is addressed by the class
+        // UUID, NOT the name: PUT .../classes/OTEL_TRACE_ANOMALY 500s "Invalid UUID
+        // string" (the path is parsed as a UUID, and unlike GET, ?idType=name does
+        // NOT fix PUT). So resolve the id by name, then PUT by id. The body is
+        // buildClassUpdateBody() (attributes only — the endpoint rejects
+        // name/parentClassName via additionalProperties); sending the full OWN
+        // attribute set is additive (inherited EVENT slots live on the parent).
+        // Degrade gracefully on any failure so an existing class is never left broken.
+        const idRes = await axios.get(buildClassByNameUrl(baseUrl, OTEL_TRACE_ANOMALY_CLASS), {
+          headers: bmcHeaders(bearer), timeout: 15_000, validateStatus: () => true,
+        });
+        const classId = ((idRes.data && (idRes.data.eventClass || idRes.data)) || {}).id;
+        if (!classId) {
+          return res.json({ ok: true, className: OTEL_TRACE_ANOMALY_CLASS, alreadyExists: true, slotUpdate: `skipped (could not resolve class id, GET ${idRes.status})`, upstream: idRes.data });
+        }
+        const upd = await axios.put(buildClassByIdUrl(baseUrl, classId), buildClassUpdateBody(), {
+          headers: bmcHeaders(bearer), timeout: 15_000, validateStatus: () => true,
         });
         if (upd.status >= 200 && upd.status < 300) {
-          return res.json({ ok: true, className: OTEL_TRACE_ANOMALY_CLASS, updated: true, addedSlots: ADDED_SLOTS, upstream: upd.data });
+          return res.json({ ok: true, className: OTEL_TRACE_ANOMALY_CLASS, updated: true, classId, addedSlots: ADDED_SLOTS, upstream: upd.data });
         }
-        return res.json({ ok: true, className: OTEL_TRACE_ANOMALY_CLASS, alreadyExists: true, slotUpdate: `failed (${upd.status})`, upstream: upd.data });
+        return res.json({ ok: true, className: OTEL_TRACE_ANOMALY_CLASS, alreadyExists: true, classId, slotUpdate: `failed (${upd.status})`, upstream: upd.data });
       }
       return res.status(502).json({
         error: `Helix event-classes API returned ${response.status}`,

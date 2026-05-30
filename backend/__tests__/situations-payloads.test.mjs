@@ -410,3 +410,25 @@ describe('buildClassUpdateBody', () => {
     expect(slot.allFacet).toEqual(expect.arrayContaining([{ name: 'dup_detect', value: 'true' }]));
   });
 });
+
+// Non-destructive slot update addresses the class two different ways, both live-
+// validated: GET resolves by name (?idType=name), but the slot-adding PUT must
+// target the UUID — ?idType=name fixes GET yet PUT-by-name still 500s
+// "Invalid UUID string", so we resolve the id first then PUT by id.
+const { buildClassByNameUrl, buildClassByIdUrl } = require('../routes/situations-payloads');
+
+describe('class URL builders (non-destructive slot update)', () => {
+  const base = 'https://t.onbmc.com';
+  it('resolves a class by name with idType=name (GET)', () => {
+    expect(buildClassByNameUrl(base, 'OTEL_TRACE_ANOMALY'))
+      .toBe('https://t.onbmc.com/events-service/api/v1.0/events/classes/OTEL_TRACE_ANOMALY?idType=name');
+  });
+  it('addresses a class by UUID with no idType (PUT target)', () => {
+    expect(buildClassByIdUrl(base, '0376ea69-5af8-11f1-a087-5b3c44d5e1b3'))
+      .toBe('https://t.onbmc.com/events-service/api/v1.0/events/classes/0376ea69-5af8-11f1-a087-5b3c44d5e1b3');
+  });
+  it('strips a trailing slash from the base', () => {
+    expect(buildClassByIdUrl('https://t.onbmc.com/', 'abc'))
+      .toBe('https://t.onbmc.com/events-service/api/v1.0/events/classes/abc');
+  });
+});
