@@ -395,15 +395,19 @@ describe('buildAnomalyEventPayload (status-only error headline)', () => {
 });
 
 describe('buildClassUpdateBody', () => {
-  it('omits name and parentClassName (the update endpoint forbids them) but keeps all attributes', () => {
+  it('omits name/parentClassName and the built-in priority attr, but keeps every custom slot', () => {
     const body = buildClassUpdateBody();
     expect(body).not.toHaveProperty('name');
     expect(body).not.toHaveProperty('parentClassName');
     const names = body.attributes.map(a => a.name);
-    // the same slots the full class declares, including the RCA-enrichment ones
-    for (const s of ['helix_trace_id','probable_cause_operation','error_message','anomaly_factor','component_count','trace_url']) {
+    // every custom RCA slot must be in the update body...
+    for (const s of ['helix_trace_id','probable_cause_service','probable_cause_operation','error_type','error_message','code_location','anomaly_factor','affected_services','component_count','trace_url']) {
       expect(names).toContain(s);
     }
+    // ...but `priority` is a built-in EVENT attribute (non-STRING). Re-declaring it
+    // on update fails ATTR_EXIST_WITH_DIFF_TYPE and aborts the whole slot-add, so
+    // built-ins are excluded from the update body.
+    expect(names).not.toContain('priority');
   });
   it('preserves the helix_trace_id dedup facet', () => {
     const slot = buildClassUpdateBody().attributes.find(a => a.name === 'helix_trace_id');

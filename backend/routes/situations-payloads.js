@@ -38,14 +38,18 @@ function buildClassDefinition() {
   };
 }
 
-// The events-service UPDATE endpoint (PUT /events/classes/<name>) validates with
-// additionalProperties:false and rejects `name`/`parentClassName` (you address the
-// class by name in the URL). Posting the full buildClassDefinition() to it 400s
-// with "properties which are not allowed: [name, parentClassName]" — which is why
-// an existing class never picked up new slots. Send just the attributes.
+// Body for the slot-adding PUT on an existing class. Two live-validated rules:
+//   • Drop `name`/`parentClassName` — the update endpoint addresses the class by id
+//     in the URL and rejects them via additionalProperties ("properties which are
+//     not allowed: [name, parentClassName]").
+//   • Drop built-in EVENT attributes. `priority` is the PRIORITY_1..5 enum inherited
+//     from EVENT, not a custom STRING slot; re-declaring it fails
+//     ATTR_EXIST_WITH_DIFF_TYPE, and that one bad attribute aborts the entire
+//     slot-add. We only need our own custom slots registered.
+const BUILTIN_CLASS_ATTRS = new Set(['priority']);
 function buildClassUpdateBody() {
-  const { name, parentClassName, ...rest } = buildClassDefinition();
-  return rest;
+  const { name, parentClassName, attributes, ...rest } = buildClassDefinition();
+  return { ...rest, attributes: attributes.filter((a) => !BUILTIN_CLASS_ATTRS.has(a.name)) };
 }
 
 const ADDED_SLOTS = ['service_name', 'service_namespace'];
