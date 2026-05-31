@@ -10,6 +10,7 @@ import {
   detectNPlusOne,
   serviceTraceView,
   buildOperationP95Map,
+  failingOperationView,
 } from './utils';
 
 // This suite runs under TZ=America/Chicago (see the "test" script in
@@ -27,6 +28,40 @@ const realEnv: HelixEnv = {
   source: 'JM_OTEL',
   businessServiceKey: 'svc-abc123',
 };
+
+describe('failingOperationView', () => {
+  const errored = (overrides: Partial<TraceSummary> = {}): TraceSummary => ({
+    trace_id: 't1', service_name: 'mysql', root_operation: 'Request Ride',
+    start_time_ns: 0, end_time_ns: 0, duration_ms: 0, span_count: 4,
+    has_error: 1, received_at: 0,
+    failing_operation: 'SELECT drivers', failing_service: 'mysql',
+    ...overrides,
+  });
+
+  it('returns the failing operation and service in the unfiltered error view', () => {
+    expect(failingOperationView(errored(), '')).toEqual({ operation: 'SELECT drivers', service: 'mysql' });
+  });
+
+  it('returns null under an active service filter', () => {
+    expect(failingOperationView(errored(), 'mysql')).toBeNull();
+  });
+
+  it('returns null when the trace has no error', () => {
+    expect(failingOperationView(errored({ has_error: 0 }), '')).toBeNull();
+  });
+
+  it('returns null when there is no failing operation', () => {
+    expect(failingOperationView(errored({ failing_operation: null }), '')).toBeNull();
+  });
+
+  it('returns null when the failing operation equals the root operation', () => {
+    expect(failingOperationView(errored({ failing_operation: 'Request Ride' }), '')).toBeNull();
+  });
+
+  it('returns a null service when failing_service is absent', () => {
+    expect(failingOperationView(errored({ failing_service: null }), '')).toEqual({ operation: 'SELECT drivers', service: null });
+  });
+});
 
 describe('formatHelixTimestamp', () => {
   it('formats in UTC regardless of host timezone', () => {

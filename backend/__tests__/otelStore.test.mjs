@@ -274,6 +274,62 @@ describe('OtelStore', () => {
     });
   });
 
+  describe('failing operation (listTraces)', () => {
+    // start_time offset helper (ns from a fixed base) so "latest started" is
+    // unambiguous across spans within a trace.
+    const ns = (ms) => 1_000_000_000 + ms * 1_000_000;
+    const excEvent = (type, atMs) => ({
+      name: 'exception',
+      timeUnixNano: String(ns(atMs)),
+      attributes: { 'exception.type': type, 'exception.message': `${type} boom` },
+    });
+
+    it('names the latest-started exception-bearing span as the failing operation', () => {
+      // OK root → status-only error (cascade) → deeper exception-bearing error,
+      // started latest. deriveProbableCause picks the exception span; so do we.
+      store.ingestSpans([
+        makeSpan({ traceId: 't1', spanId: 'root', parentSpanId: '', serviceName: 'frontend', name: 'Request Ride', startTimeNs: ns(0), endTimeNs: ns(300), statusCode: 0 }),
+        makeSpan({ traceId: 't1', spanId: 'mid', parentSpanId: 'root', serviceName: 'driver-svc', name: 'GET /dispatch', startTimeNs: ns(10), endTimeNs: ns(280), statusCode: 2, statusMessage: 'downstream error' }),
+        makeSpan({ traceId: 't1', spanId: 'deep', parentSpanId: 'mid', serviceName: 'mysql', name: 'SELECT drivers', startTimeNs: ns(20), endTimeNs: ns(260), statusCode: 2, events: [excEvent('psycopg2.OperationalError', 260)] }),
+      ]);
+      const [row] = store.listTraces({});
+      expect(row.failing_operation).toBe('SELECT drivers');
+      expect(row.failing_service).toBe('mysql');
+    });
+
+    it('falls back to the latest-started error span when no exception events exist', () => {
+      store.ingestSpans([
+        makeSpan({ traceId: 't2', spanId: 'root', parentSpanId: '', serviceName: 'frontend', name: 'Request Ride', startTimeNs: ns(0), endTimeNs: ns(300), statusCode: 0 }),
+        makeSpan({ traceId: 't2', spanId: 'early', parentSpanId: 'root', serviceName: 'driver-svc', name: 'GET /dispatch', startTimeNs: ns(10), endTimeNs: ns(120), statusCode: 2, statusMessage: 'err' }),
+        makeSpan({ traceId: 't2', spanId: 'late', parentSpanId: 'root', serviceName: 'customer', name: 'SELECT customer', startTimeNs: ns(50), endTimeNs: ns(200), statusCode: 2, statusMessage: 'err' }),
+      ]);
+      const [row] = store.listTraces({});
+      expect(row.failing_operation).toBe('SELECT customer');
+      expect(row.failing_service).toBe('customer');
+    });
+
+    it('prefers the exception-bearing span even when a status-only error starts later', () => {
+      store.ingestSpans([
+        makeSpan({ traceId: 't4', spanId: 'root', parentSpanId: '', serviceName: 'frontend', name: 'Request Ride', startTimeNs: ns(0), endTimeNs: ns(300), statusCode: 0 }),
+        makeSpan({ traceId: 't4', spanId: 'exc', parentSpanId: 'root', serviceName: 'mysql', name: 'SELECT drivers', startTimeNs: ns(20), endTimeNs: ns(100), statusCode: 2, events: [excEvent('psycopg2.OperationalError', 100)] }),
+        makeSpan({ traceId: 't4', spanId: 'cascade', parentSpanId: 'root', serviceName: 'cart-api', name: 'POST /cart', startTimeNs: ns(200), endTimeNs: ns(260), statusCode: 2, statusMessage: 'cascade' }),
+      ]);
+      const [row] = store.listTraces({});
+      expect(row.failing_operation).toBe('SELECT drivers');
+      expect(row.failing_service).toBe('mysql');
+    });
+
+    it('leaves failing_operation/service null when the trace has no errors', () => {
+      store.ingestSpans([
+        makeSpan({ traceId: 't3', spanId: 'root', parentSpanId: '', serviceName: 'frontend', name: 'Request Ride', statusCode: 0 }),
+        makeSpan({ traceId: 't3', spanId: 'child', parentSpanId: 'root', serviceName: 'mysql', name: 'SELECT drivers', statusCode: 0 }),
+      ]);
+      const [row] = store.listTraces({});
+      expect(row.failing_operation).toBeNull();
+      expect(row.failing_service).toBeNull();
+    });
+  });
+
 });
 
 const buildSpans = (n, traceId) => Array.from({ length: n }, (_, i) => makeSpan({

@@ -843,7 +843,25 @@ class OtelStore {
         t.*,
         COALESCE(lc.c, 0) AS log_count,
         COALESCE(ec.c, 0) AS error_count,
-        COALESCE(dc.c, 0) AS db_call_count${svcSelect}
+        COALESCE(dc.c, 0) AS db_call_count,
+        COALESCE(
+          (SELECT s.name FROM span_errors e
+             JOIN spans s ON s.trace_id = e.trace_id AND s.span_id = e.span_id
+            WHERE e.trace_id = t.trace_id AND e.exception_type <> 'span.error'
+            ORDER BY s.start_time_ns DESC, s.span_id DESC LIMIT 1),
+          (SELECT s.name FROM spans s
+            WHERE s.trace_id = t.trace_id AND s.status_code >= 2
+            ORDER BY s.start_time_ns DESC, s.span_id DESC LIMIT 1)
+        ) AS failing_operation,
+        COALESCE(
+          (SELECT s.service_name FROM span_errors e
+             JOIN spans s ON s.trace_id = e.trace_id AND s.span_id = e.span_id
+            WHERE e.trace_id = t.trace_id AND e.exception_type <> 'span.error'
+            ORDER BY s.start_time_ns DESC, s.span_id DESC LIMIT 1),
+          (SELECT s.service_name FROM spans s
+            WHERE s.trace_id = t.trace_id AND s.status_code >= 2
+            ORDER BY s.start_time_ns DESC, s.span_id DESC LIMIT 1)
+        ) AS failing_service${svcSelect}
       FROM traces t
       LEFT JOIN lc ON lc.trace_id = t.trace_id
       LEFT JOIN ec ON ec.trace_id = t.trace_id

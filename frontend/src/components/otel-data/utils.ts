@@ -53,6 +53,24 @@ export const serviceTraceView = (
   return { service, operation, durationMs, startNs, status };
 };
 
+// The failing operation to surface as a subline under the Service cell. Only in
+// the unfiltered, trace-level view (under a service filter the row already
+// renders that service's own entry span), only for error traces, and only when
+// it adds information beyond the Root Operation column. Returns null otherwise,
+// so the caller renders the subline iff this is non-null. `service` is the
+// failing span's service (may differ from the row's root service) for a tooltip.
+export const failingOperationView = (
+  trace: TraceSummary,
+  serviceFilter: string,
+): { operation: string; service: string | null } | null => {
+  if (serviceFilter) return null;
+  if (!trace.has_error) return null;
+  const op = trace.failing_operation;
+  if (!op) return null;
+  if (op === trace.root_operation) return null;
+  return { operation: op, service: trace.failing_service ?? null };
+};
+
 // The `service|operation` → p95 map the Outlier filter and row badge look up.
 // The source switches with the active view, mirroring serviceTraceView: with a
 // service filter the row shows that service's entry-span operation, whose

@@ -5,7 +5,7 @@ import { BmcChevron } from './BmcChevron';
 import { StatusPill } from './StatusPill';
 import { MIN_DURATION_PRESETS } from './constants';
 import { useSlowThreshold } from './SlowThresholdContext';
-import { buildHelixTraceUrl, formatDuration, formatRelative, hasRealHelixEndpoint, serviceTraceView } from './utils';
+import { buildHelixTraceUrl, failingOperationView, formatDuration, formatRelative, hasRealHelixEndpoint, serviceTraceView } from './utils';
 import { useSyntheticRun } from '../../hooks/useSyntheticRun';
 import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
 
@@ -305,6 +305,24 @@ export const TracesTab: React.FC<{
                         </span>
                       )}
                     </span>
+                    {(() => {
+                      // Failing operation as a subline under the service — the
+                      // originating error span's name, so the list names *what*
+                      // failed, not just which service. Null (no subline) under
+                      // a service filter, for error-free traces, or when it
+                      // would just echo the Root Operation column.
+                      const fail = failingOperationView(t, serviceFilter);
+                      if (!fail) return null;
+                      return (
+                        <div
+                          className="mt-0.5 flex items-center gap-1 text-tiny text-danger-text/80 font-normal"
+                          title={fail.service ? `Failing operation in ${fail.service}: ${fail.operation}` : `Failing operation: ${fail.operation}`}
+                        >
+                          <span className="text-gray-600" aria-hidden="true">└</span>
+                          <span className="font-mono truncate max-w-[16rem]">{fail.operation}</span>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-2 text-gray-300 text-tiny">
                     <button

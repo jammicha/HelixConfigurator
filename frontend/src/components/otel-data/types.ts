@@ -32,6 +32,12 @@ export type TraceSummary = {
   log_count?: number;
   error_count?: number;
   db_call_count?: number;
+  // The originating error span's operation + service (mirrors
+  // deriveProbableCause) — the trace's "failing operation". Computed by the
+  // trace list query; null for error-free traces. Drives the Service-cell
+  // subline in the unfiltered Traces table.
+  failing_operation?: string | null;
+  failing_service?: string | null;
   // Populated only when the list is filtered by a service: the selected
   // service's entry span within the trace (its top-level operation). Lets the
   // Traces table render each row from that service's perspective, mirroring
