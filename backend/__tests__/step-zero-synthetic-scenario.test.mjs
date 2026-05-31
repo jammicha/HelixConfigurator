@@ -188,10 +188,10 @@ describe('generateTrace', () => {
     expect(slow).toBeLessThan(60);
   });
 
-  it('retry storm fires on ~2% of traces with 3 sequential stripe-mock spans (sample of 2000)', () => {
+  it('retry storm fires on ~2% of traces with 3 sequential stripe-mock spans (sample of 5000)', () => {
     let retries = 0;
     let sample;
-    for (let i = 0; i < 2000; i++) {
+    for (let i = 0; i < 5000; i++) {
       const t = generateTrace();
       const stripeSpans = spansForService(t, 'stripe-mock');
       if (stripeSpans.length > 1) {
@@ -199,9 +199,12 @@ describe('generateTrace', () => {
         if (!sample) sample = stripeSpans;
       }
     }
-    // 2% over 2000 ~ 40. Generous bounds.
-    expect(retries).toBeGreaterThan(25);
-    expect(retries).toBeLessThan(75);
+    // 2% over 5000 ~ 100. σ ≈ √(5000·0.02·0.98) ≈ 9.9. Bounds at -4σ / +5σ
+    // catch a regression of >40% in either direction while keeping the
+    // false-positive rate well below one-in-a-million. (Matches the cold-start
+    // test below; the old n=2000 `> 25` lower bound sat at ~2.4σ and flaked.)
+    expect(retries).toBeGreaterThan(60);
+    expect(retries).toBeLessThan(150);
     // Spot-check shape on a captured sample: 3 spans, first two errored, last
     // succeeds (UNSET, per OTel idiom — Helix's default Status Filter is
     // STATUS_CODE_UNSET, so the successful retry must not be marked OK).
