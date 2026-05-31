@@ -303,7 +303,9 @@ export const Step4: React.FC<Props> = ({
               Common fixes: confirm the collector shares a network with <code className="font-mono text-gray-300">helix-gateway</code>, the exporter endpoint is <code className="font-mono text-gray-300">http://helix-gateway:4318</code> (not gRPC :4317), and the API key is correct.
             </div>
           </div>
-        ) : clearedOnly ? (
+        ) : (clearedOnly && verdict.tone !== 'good') ? (
+          // Only when the green verdict banner isn't already saying it (avoids
+          // a duplicate "retries cleared" message in the common flowing case).
           <div className="mt-3 text-tiny text-gray-500">
             Your collector logged a few export retries earlier; they've since cleared.
           </div>
