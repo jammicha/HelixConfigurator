@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const { PassThrough } = require('stream');
 const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse } = require('../util');
 const errorLog = require('../errorLog');
+const { analyzeCollectorErrorLog } = require('../exportErrorScan');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 
@@ -868,23 +869,6 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   // for entirely unrelated reasons (their own DB, internal gRPC, etc.) —
   // surfacing those here was noisy and misleading, so they're excluded.
   app.get('/api/diagnostics/app-export-errors', async (req, res) => {
-    // Lines containing any of these substrings — lower-cased match — are
-    // the ones we care about.
-    const errorSignals = [
-      'no children to pick from',
-      'connection refused',
-      'no such host',
-      'context deadline exceeded',
-      'permanent error',
-      'exporter failed',
-      'exporting failed',
-      'failed to send',
-      'rpc error',
-      'tls handshake',
-      'unauthorized',
-      'invalid api key',
-    ];
-
     try {
       const targetContainer = TARGET_CONTAINER();
       let gatewayNetworks;
@@ -928,24 +912,10 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
             stderr: true,
             follow: false,
             tail: 200,
-            timestamps: false,
+            timestamps: true,
           });
-          const matches = demuxLogBuffer(buf)
-            .split('\n')
-            .filter(l => {
-              const lower = l.toLowerCase();
-              // Two-part match: the line must mention `helix` AND a known
-              // error signal. The `helix` substring narrows scope to the
-              // helix-bound exporter (component.id contains helix_sidecar,
-              // endpoint contains helix-gateway). Without this, unrelated
-              // receiver/processor failures with overlapping vocabulary
-              // (e.g. kafkametrics "connection refused" against a Kafka
-              // broker) leak in as false positives.
-              if (!lower.includes('helix')) return false;
-              return errorSignals.some(sig => lower.includes(sig));
-            })
-            .slice(-5); // most recent 5 matching lines per container
-          return matches.length ? { container: name, lines: matches } : null;
+          const analysis = analyzeCollectorErrorLog(demuxLogBuffer(buf), Date.now());
+          return analysis ? { container: name, ...analysis } : null;
         } catch { return null; /* container unreadable, skip */ }
       }))).filter(Boolean);
 
