@@ -14,6 +14,11 @@ export const LinkBusinessService: React.FC<Props> = ({ context, currentKey, onCa
   const [phase, setPhase] = useState<'detect' | 'guide' | 'done'>('detect');
   const [selectedNs, setSelectedNs] = useState('');
   const [paste, setPaste] = useState('');
+  // Namespaces linked during this session — Detect badges them so the user sees
+  // what's done after "Link another namespace." Session-local: the backend can't
+  // report per-namespace link status (one global BUSINESS_SERVICE_KEY), so this
+  // resets on reload, which is fine for the in-flow "link another" experience.
+  const [linked, setLinked] = useState<Set<string>>(new Set());
 
   useEffect(() => { bs.loadNamespaces(); // on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -29,6 +34,7 @@ export const LinkBusinessService: React.FC<Props> = ({ context, currentKey, onCa
     const savedKey = await bs.persistKey(paste);
     if (savedKey !== null) {
       setPhase('done');
+      setLinked((prev) => new Set(prev).add(selectedNs));
       onToast?.('Business Service key captured', 'success');
       onCaptured?.(savedKey);
     } else {
@@ -51,18 +57,25 @@ export const LinkBusinessService: React.FC<Props> = ({ context, currentKey, onCa
             <a href="/step-zero" className="text-link hover:underline">Start from zero</a>, then come back.
           </div>
         )}
-        {bs.namespaces.map((n: NamespaceRow) => (
-          <div key={n.namespace} className="bg-gray-1000 border border-gray-800 rounded p-3 flex items-center gap-3">
-            <Boxes className="w-4 h-4 text-blue-300 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-gray-100 font-medium truncate">{n.namespace}{n.fallback && <span className="ml-2 text-tiny text-gray-500">(via X-Source)</span>}</div>
-              <div className="text-tiny text-gray-500">{n.traceCount} trace{n.traceCount === 1 ? '' : 's'} seen</div>
+        {bs.namespaces.map((n: NamespaceRow) => {
+          const isLinked = linked.has(n.namespace);
+          return (
+            <div key={n.namespace} className="bg-gray-1000 border border-gray-800 rounded p-3 flex items-center gap-3">
+              <Boxes className="w-4 h-4 text-blue-300 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-gray-100 font-medium flex items-center gap-2">
+                  <span className="truncate">{n.namespace}</span>
+                  {n.fallback && <span className="text-tiny text-gray-500 flex-shrink-0">(via X-Source)</span>}
+                  {isLinked && <span className="inline-flex items-center gap-1 text-tiny text-success flex-shrink-0"><CheckCircle2 className="w-3 h-3" /> Linked</span>}
+                </div>
+                <div className="text-tiny text-gray-500">{n.traceCount} trace{n.traceCount === 1 ? '' : 's'} seen</div>
+              </div>
+              <button onClick={() => pick(n.namespace)} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-3 py-1.5 rounded font-semibold text-sm flex items-center gap-1.5 flex-shrink-0">
+                {isLinked ? 'Re-link' : <>Link <ArrowRight className="w-3.5 h-3.5" /></>}
+              </button>
             </div>
-            <button onClick={() => pick(n.namespace)} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-3 py-1.5 rounded font-semibold text-sm flex items-center gap-1.5">
-              Link <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ))}
+          );
+        })}
         {bs.error && <div className="flex items-center gap-2 text-sm text-[#ff8a8a]"><AlertTriangle className="w-4 h-4" /> {bs.error}</div>}
       </div>
     );
