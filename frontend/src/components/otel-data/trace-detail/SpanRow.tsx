@@ -3,6 +3,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Database, FileText } from 'lu
 import type { LogRecord, SpanDetail } from '../types';
 import { useSlowThreshold } from '../SlowThresholdContext';
 import { formatDuration } from '../utils';
+import { colorForService } from './palette';
 import { LogLine } from './LogLine';
 
 export const SpanRow: React.FC<{
@@ -64,17 +65,15 @@ export const SpanRow: React.FC<{
   }, [span.attributes, dbSystem]);
   const isSlowDb = !!dbSystem && span.durationMs > slowThresholdMs;
 
-  // Off-path spans dim so the critical-path chain reads as a band of more-
-  // saturated bars connecting through the waterfall (the Elastic / Lightstep
-  // pattern: emphasis by recession, not by overlay or border). Static class
-  // names so Tailwind's content scanner generates them at build time.
-  const barColor = isError
-    ? (isOnCriticalPath ? 'bg-danger/80' : 'bg-danger/30')
-    : isSlow
-      ? (isOnCriticalPath ? 'bg-warning/80' : 'bg-warning/30')
-      : dbSystem
-        ? (isOnCriticalPath ? 'bg-active/80' : 'bg-active/30')
-        : (isOnCriticalPath ? 'bg-primary/80' : 'bg-primary/30');
+  // Bar hue encodes the SERVICE — matching the Service-breakdown legend and the
+  // flame view, which both color via colorForService. Status (error/slow) is
+  // NOT folded into the hue: the service palette already contains reds/ambers
+  // that would be indistinguishable from a hue-encoded status, so status lives
+  // on a separate channel (the ring/wash overlay below + the badges by the
+  // name). Critical-path emphasis is opacity: on-path bars show full service
+  // color (== the breakdown segment), off-path recede (the Elastic / Lightstep
+  // pattern: emphasis by recession), mirroring the flame view's opacity dim.
+  const serviceColor = colorForService(span.serviceName);
 
   const exceptions = span.events.filter(e => e.name === 'exception');
 
@@ -149,7 +148,11 @@ export const SpanRow: React.FC<{
               )}
             </div>
             <div className="text-tiny text-gray-500 truncate">
-              <span>{span.serviceName}</span>
+              <span
+                className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle"
+                style={{ backgroundColor: serviceColor }}
+              />
+              <span className="align-middle">{span.serviceName}</span>
               {dbStatement && (
                 <>
                   {' · '}
@@ -164,10 +167,30 @@ export const SpanRow: React.FC<{
         </div>
         <div className="flex-1 relative h-5 bg-gray-1000 rounded-sm border border-gray-800 overflow-hidden">
           <div
-            className={`absolute top-0 bottom-0 ${barColor}`}
-            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-            title={`${formatDuration(span.durationMs)} @ +${formatDuration(offsetNs / 1e6)}${isOnCriticalPath ? ' • on critical path' : ''}`}
+            className="absolute top-0 bottom-0"
+            style={{
+              left: `${leftPct}%`,
+              width: `${widthPct}%`,
+              backgroundColor: serviceColor,
+              opacity: isOnCriticalPath ? 1 : 0.5,
+            }}
+            title={`${span.serviceName} • ${formatDuration(span.durationMs)} @ +${formatDuration(offsetNs / 1e6)}${isOnCriticalPath ? ' • on critical path' : ''}`}
           />
+          {/* Status accent — its own layer so the critical-path opacity above
+              never weakens it. Error = bold red ring + faint red wash; slow =
+              thinner amber ring (error outranks slow). The service hue still
+              shows through, so the bar reads as "this service, but flagged". */}
+          {(isError || isSlow) && (
+            <div
+              className="absolute top-0 bottom-0 pointer-events-none"
+              style={{
+                left: `${leftPct}%`,
+                width: `${widthPct}%`,
+                boxShadow: isError ? 'inset 0 0 0 2px #b2001e' : 'inset 0 0 0 1.5px #ffd200',
+                backgroundColor: isError ? 'rgba(178,0,30,0.30)' : undefined,
+              }}
+            />
+          )}
           {criticalInterval && (() => {
             // Darker inner overlay for the actual blocking portion of the span
             // (CRISP). For leaf spans on the path that's the whole bar; for
