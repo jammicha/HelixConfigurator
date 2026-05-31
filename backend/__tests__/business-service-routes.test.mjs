@@ -27,6 +27,16 @@ describe('GET /api/business-service/namespaces', () => {
       { namespace: 'fallback-src', traceCount: 1, lastSeen: 1, fallback: true },
     ]);
   });
+
+  it('merges the fallback bucket into a matching namespace when X_SOURCE equals it (no duplicate row)', async () => {
+    const otelStore = { listNamespaces: () => [{ namespace: 'hotrod', traceCount: 496, lastSeen: 10 }, { namespace: null, traceCount: 4, lastSeen: 20 }] };
+    const env = { ...ENV, X_SOURCE: 'hotrod' };
+    const res = await request(makeApp({ otelStore, env })).get('/api/business-service/namespaces');
+    expect(res.status).toBe(200);
+    expect(res.body.namespaces).toEqual([
+      { namespace: 'hotrod', traceCount: 500, lastSeen: 20, fallback: false },
+    ]);
+  });
 });
 
 describe('GET /api/business-service/bind-instructions', () => {

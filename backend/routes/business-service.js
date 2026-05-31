@@ -3,7 +3,7 @@
 // Helix calls — it reads local telemetry, builds a guided checklist + deep-links,
 // and persists BUSINESS_SERVICE_KEY to its own .env. Collaborators injectable.
 const path = require('path');
-const { buildBindInstructions, extractServiceKey } = require('../business-service-payloads');
+const { buildBindInstructions, extractServiceKey, collapseNamespaces } = require('../business-service-payloads');
 const { upsertEnvVar } = require('../envFile');
 
 function register(app, {
@@ -13,13 +13,11 @@ function register(app, {
 } = {}) {
   const tenantId = () => String((env.HELIX_API_KEY || '').split('::')[0] || '').trim();
 
-  // OTel namespaces currently arriving (local otelStore). null → X_SOURCE.
+  // OTel namespaces currently arriving (local otelStore). The un-namespaced
+  // bucket maps to X_SOURCE, and collapses into a matching namespace so an
+  // X_SOURCE that equals a real namespace doesn't show as a duplicate row.
   app.get('/api/business-service/namespaces', (req, res) => {
-    const fallback = (env.X_SOURCE || '').trim();
-    const namespaces = (otelStore.listNamespaces() || []).map((n) => (n.namespace
-      ? { ...n, fallback: false }
-      : { ...n, namespace: fallback, fallback: true }));
-    res.json({ namespaces });
+    res.json({ namespaces: collapseNamespaces(otelStore.listNamespaces() || [], env.X_SOURCE || '') });
   });
 
   // Guided-bind checklist + deep-links (pure; no write).

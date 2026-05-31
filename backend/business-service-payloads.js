@@ -35,6 +35,40 @@ function buildBindInstructions({ endpoint, namespace, xSource = '', tenantId = '
   return { namespace: ns, steps, aiopsUrl, dashboardUrl };
 }
 
+// Collapse the otelStore namespace list for the Link UI. The un-namespaced
+// bucket (spans with no service.namespace) is exactly what Helix falls back to
+// the X-Source header for, so those traces roll into the OTel Namespace named by
+// X_SOURCE. When that equals a namespace already present, they ARE that
+// namespace — fold them in (sum counts, keep the newer lastSeen) instead of
+// showing a confusing duplicate "<name> (via X-Source)" row. With no match, keep
+// the fallback row. Sorted lastSeen desc, namespace asc (mirrors listNamespaces).
+function collapseNamespaces(rows, xSource) {
+  const fallback = String(xSource || '').trim();
+  const out = [];
+  const byNs = new Map();
+  let bucket = null;
+  for (const n of rows || []) {
+    if (n.namespace) {
+      const row = { namespace: String(n.namespace), traceCount: n.traceCount, lastSeen: n.lastSeen, fallback: false };
+      byNs.set(row.namespace, row);
+      out.push(row);
+    } else {
+      bucket = n; // at most one un-namespaced bucket per list (GROUP BY null)
+    }
+  }
+  if (bucket) {
+    const match = byNs.get(fallback);
+    if (match) {
+      match.traceCount += bucket.traceCount;
+      match.lastSeen = Math.max(match.lastSeen, bucket.lastSeen);
+    } else {
+      out.push({ namespace: fallback, traceCount: bucket.traceCount, lastSeen: bucket.lastSeen, fallback: true });
+    }
+  }
+  out.sort((a, b) => b.lastSeen - a.lastSeen || a.namespace.localeCompare(b.namespace));
+  return out;
+}
+
 // Accept a bare key, a URL fragment, or a full AIOps URL → the opaque key.
 // Mirrors frontend extractServiceKey (otel-data/utils.ts) so paste-back is robust.
 function extractServiceKey(input) {
@@ -45,4 +79,4 @@ function extractServiceKey(input) {
   return trimmed.split(/[?#\s]/)[0];
 }
 
-module.exports = { buildBindInstructions, extractServiceKey };
+module.exports = { buildBindInstructions, extractServiceKey, collapseNamespaces };

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { buildBindInstructions, extractServiceKey } = require('../business-service-payloads');
+const { buildBindInstructions, extractServiceKey, collapseNamespaces } = require('../business-service-payloads');
 
 describe('buildBindInstructions', () => {
   it('builds the AIOps link, namespace-overview dashboard URL, and a 5-step checklist', () => {
@@ -26,6 +26,69 @@ describe('buildBindInstructions', () => {
     expect(r.aiopsUrl).toBe('');
     expect(r.dashboardUrl).toBe('');
     expect(r.steps).toHaveLength(5);
+  });
+});
+
+describe('collapseNamespaces', () => {
+  it('merges the X-Source fallback bucket into a matching namespace, summing counts and taking the newer lastSeen', () => {
+    const rows = [
+      { namespace: 'hotrod', traceCount: 496, lastSeen: 10 },
+      { namespace: null, traceCount: 4, lastSeen: 20 },
+    ];
+    expect(collapseNamespaces(rows, 'hotrod')).toEqual([
+      { namespace: 'hotrod', traceCount: 500, lastSeen: 20, fallback: false },
+    ]);
+  });
+
+  it('keeps the fallback row when X-Source matches no existing namespace', () => {
+    const rows = [
+      { namespace: 'shop', traceCount: 3, lastSeen: 2 },
+      { namespace: null, traceCount: 1, lastSeen: 1 },
+    ];
+    expect(collapseNamespaces(rows, 'fallback-src')).toEqual([
+      { namespace: 'shop', traceCount: 3, lastSeen: 2, fallback: false },
+      { namespace: 'fallback-src', traceCount: 1, lastSeen: 1, fallback: true },
+    ]);
+  });
+
+  it('passes explicit namespaces through untouched when there is no un-namespaced bucket', () => {
+    const rows = [{ namespace: 'a', traceCount: 5, lastSeen: 3 }];
+    expect(collapseNamespaces(rows, 'hotrod')).toEqual([
+      { namespace: 'a', traceCount: 5, lastSeen: 3, fallback: false },
+    ]);
+  });
+
+  it('re-sorts by lastSeen desc after merging (merged count, newer lastSeen wins position)', () => {
+    const rows = [
+      { namespace: 'hotrod', traceCount: 496, lastSeen: 5 },
+      { namespace: 'payments', traceCount: 200, lastSeen: 9 },
+      { namespace: null, traceCount: 4, lastSeen: 7 },
+    ];
+    expect(collapseNamespaces(rows, 'hotrod')).toEqual([
+      { namespace: 'payments', traceCount: 200, lastSeen: 9, fallback: false },
+      { namespace: 'hotrod', traceCount: 500, lastSeen: 7, fallback: false },
+    ]);
+  });
+
+  it('trims X-Source before matching', () => {
+    const rows = [
+      { namespace: 'hotrod', traceCount: 496, lastSeen: 10 },
+      { namespace: null, traceCount: 4, lastSeen: 20 },
+    ];
+    expect(collapseNamespaces(rows, '  hotrod  ')).toEqual([
+      { namespace: 'hotrod', traceCount: 500, lastSeen: 20, fallback: false },
+    ]);
+  });
+
+  it('leaves the un-namespaced bucket as an empty-named fallback row when X-Source is unset (out of scope, no merge)', () => {
+    const rows = [
+      { namespace: 'a', traceCount: 5, lastSeen: 3 },
+      { namespace: null, traceCount: 2, lastSeen: 1 },
+    ];
+    expect(collapseNamespaces(rows, '')).toEqual([
+      { namespace: 'a', traceCount: 5, lastSeen: 3, fallback: false },
+      { namespace: '', traceCount: 2, lastSeen: 1, fallback: true },
+    ]);
   });
 });
 
