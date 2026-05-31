@@ -126,7 +126,7 @@ const App = () => {
   const [receiverBaseline, setReceiverBaseline] = useState<ReceiverCounters | null>(null);
   const [receiverNow, setReceiverNow] = useState<ReceiverCounters | null>(null);
   const [receiverError, setReceiverError] = useState('');
-  const [appExportErrors, setAppExportErrors] = useState<{ container: string; lines: string[] }[]>([]);
+  const [appExportErrors, setAppExportErrors] = useState<{ container: string; lines: string[]; ongoing?: boolean; lastErrorAgeSec?: number | null }[]>([]);
   // gatewayStatus is the same shared state polled by the dashboard at the top
   // of the file. On Step 4 we add a faster 2s parallel poll (alongside the
   // receiver counters) so the wizard's "Gateway not running" affordance reacts

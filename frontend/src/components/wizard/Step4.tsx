@@ -28,7 +28,7 @@ type Props = {
   receiverNow: ReceiverCounters | null;
   receiverBaseline: ReceiverCounters | null;
   receiverError: string;
-  appExportErrors: { container: string; lines: string[] }[];
+  appExportErrors: { container: string; lines: string[]; ongoing?: boolean; lastErrorAgeSec?: number | null }[];
   gatewayStatus: string;
   restartingGateway: boolean;
   onRestartGateway: () => void;
@@ -173,10 +173,62 @@ export const Step4: React.FC<Props> = ({
     </div>
   );
 
+  // Single top-line verdict for "am I good or bad?", synthesized from the live
+  // counters, the synthetic gateway→Helix check, and whether the collector has
+  // ONGOING (recent) export errors. Flow wins over stale retries: if telemetry
+  // is arriving now, we say so even if the collector logged startup retries
+  // that have since cleared.
+  const flowing = dSpans > 0 || dMetrics > 0 || dLogs > 0;
+  const syntheticOk = traceVerifyResult?.status === 'exported';
+  const syntheticFailed = !!traceVerifyResult && traceVerifyResult.status !== 'exported';
+  const ongoingErrors = appExportErrors.some(e => e.ongoing);
+  const clearedOnly = appExportErrors.length > 0 && !ongoingErrors;
+
+  let verdict: { tone: 'good' | 'warn' | 'bad' | 'idle'; title: string; detail: string; step?: number };
+  if (gatewayNotRunning) {
+    verdict = { tone: 'warn', title: "Helix gateway isn't running", detail: "Telemetry can't flow until it's back up — restart it below." };
+  } else if (syntheticFailed) {
+    verdict = { tone: 'bad', title: "Gateway can't reach Helix", detail: traceVerifyResult?.remediation || 'Check your endpoint and API key in Step 1.', step: 1 };
+  } else if (ongoingErrors && !flowing) {
+    verdict = { tone: 'warn', title: "Your collector can't reach the gateway yet", detail: "Bridge it to helix-gateway in Step 3. If you just started or restarted, give it a few seconds — these retries often clear on their own.", step: 3 };
+  } else if (flowing || syntheticOk) {
+    verdict = {
+      tone: 'good',
+      title: 'Telemetry is flowing to Helix',
+      detail: clearedOnly
+        ? 'A few startup retries showed up earlier and have since cleared on their own.'
+        : flowing
+          ? 'Your telemetry is reaching the gateway and on to Helix.'
+          : 'The gateway can reach Helix. Send some app telemetry to see your spans here.',
+    };
+  } else {
+    verdict = { tone: 'idle', title: 'Waiting for telemetry…', detail: 'Start your app or collector, or run the Gateway → Helix check below.' };
+  }
+  const verdictTone = {
+    good: 'bg-success/10 border-success/40',
+    warn: 'bg-warning/10 border-warning/40',
+    bad: 'bg-danger/10 border-danger/40',
+    idle: 'bg-gray-1000 border-gray-800',
+  }[verdict.tone];
+  const VerdictIcon = { good: CheckCircle2, warn: AlertTriangle, bad: X, idle: Hexagon }[verdict.tone];
+
   return (
     <div className="adapt-card">
       <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
       <p className="text-sm text-gray-400 mb-4">If you just changed config, restart your app or collector before verifying.</p>
+
+      <div className={`mb-4 flex items-start gap-3 p-3 rounded border ${verdictTone}`}>
+        <VerdictIcon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${verdict.tone === 'good' ? 'text-success-text' : verdict.tone === 'warn' ? 'text-warning' : verdict.tone === 'bad' ? 'text-danger-text' : 'text-gray-400'}`} aria-hidden="true" />
+        <div className="flex-1">
+          <div className="text-sm font-semibold text-gray-100">{verdict.title}</div>
+          <div className="text-tiny text-gray-300 mt-0.5">
+            {verdict.detail}
+            {verdict.step != null && (
+              <> <button onClick={() => onJumpToStep(verdict.step!)} className="text-link hover:underline font-semibold">Go to Step {verdict.step}</button></>
+            )}
+          </div>
+        </div>
+      </div>
 
       {!someoneAttached && detectedCollectors.length > 0 && (
         // Collectors were detected on this host but none of them are bridged
@@ -238,7 +290,7 @@ export const Step4: React.FC<Props> = ({
           <CounterCard label="Log records" value={dLogs} />
         </div>
         {receiverError && <div className="mt-2 text-tiny text-warning">⚠ {receiverError}</div>}
-        {appExportErrors.length > 0 && (
+        {ongoingErrors ? (
           <div className="mt-3 p-2.5 rounded border border-warning/40 bg-warning/10">
             <div className="text-tiny text-warning font-semibold uppercase tracking-wider mb-1">⚠ Errors detected in your collector</div>
             {appExportErrors.map(err => (
@@ -251,7 +303,11 @@ export const Step4: React.FC<Props> = ({
               Common fixes: confirm the collector shares a network with <code className="font-mono text-gray-300">helix-gateway</code>, the exporter endpoint is <code className="font-mono text-gray-300">http://helix-gateway:4318</code> (not gRPC :4317), and the API key is correct.
             </div>
           </div>
-        )}
+        ) : clearedOnly ? (
+          <div className="mt-3 text-tiny text-gray-500">
+            Your collector logged a few export retries earlier; they've since cleared.
+          </div>
+        ) : null}
       </div>
 
       {k8sDetected && (
