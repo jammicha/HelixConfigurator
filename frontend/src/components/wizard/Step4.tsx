@@ -339,7 +339,7 @@ export const Step4: React.FC<Props> = ({
         <ul className="mt-2 space-y-1 list-disc list-inside">
           <li>Run a <span className="text-gray-300">Diagnostic Health Check</span> to validate config, API key, and tenant reachability.</li>
           <li>Use <span className="text-gray-300">Load Template</span> in the YAML editor to switch to a tail-sampling, Prometheus, or Kubernetes-attribute starter.</li>
-          <li>Add an <span className="text-gray-300">AIOps Business Service Key</span> from Settings to enable the deep-link button.</li>
+          <li>Use the dashboard's <span className="text-gray-300">Business Service</span> card to link a Business Service and enable the AIOps deep-link.</li>
         </ul>
       </div>
     </div>

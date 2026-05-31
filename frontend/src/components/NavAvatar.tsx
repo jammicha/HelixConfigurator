@@ -167,7 +167,7 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
             ) : (
               <span
                 aria-disabled="true"
-                title="Set the AIOps Business Service Key in Step 1 to enable this link."
+                title="Link a Business Service (wizard Step 5 or the dashboard's Business Service card) to enable this link."
                 className={`${extItemBase} ${extItemDisabled}`}
               >
                 <ExternalLink className="w-4 h-4 text-gray-600" />

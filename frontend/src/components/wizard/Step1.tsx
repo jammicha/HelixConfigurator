@@ -1,7 +1,6 @@
 import React from 'react';
 import { Check, X, Loader2, AlertTriangle } from 'lucide-react';
 import { parseHelixKeyBundle } from '../../utils/helixKey';
-import { extractServiceKey } from '../otel-data/utils';
 
 export type EnvVars = {
   HELIX_ENDPOINT: string;
@@ -199,32 +198,6 @@ export const Step1: React.FC<Props> = ({
           {envVars.APP_URL && errors.APP_URL && (
             <p id="helix-app-url-error" className="text-tiny text-danger-text">{errors.APP_URL}</p>
           )}
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="helix-business-service-key" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
-            <span>AIOps Business Service Key</span>
-            <span className="normal-case tracking-normal text-gray-500 font-normal">· optional</span>
-          </label>
-          <input
-            id="helix-business-service-key"
-            type="text"
-            name="helix-business-service-key"
-            autoComplete="off"
-            spellCheck={false}
-            data-1p-ignore
-            data-lpignore="true"
-            value={envVars.BUSINESS_SERVICE_KEY}
-            // Accept the bare opaque key, a URL fragment, or the full AIOps
-            // service URL. extractServiceKey normalizes all three to the
-            // opaque key the backend stores — saves the user a paste-trim-
-            // copy round trip when they grab the URL from their browser bar.
-            onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
-            className="w-full bg-gray-1000 border border-gray-800 focus:border-link rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
-            placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
-          />
-          <p className="text-tiny text-gray-500">
-            Grab the key from the URL of your business service in AIOps. Controls the "AIOps Business Service" dashboard link and "Open in AIOps" / "Send to AIOps" links in View OTel Data.
-          </p>
         </div>
       </div>
 
