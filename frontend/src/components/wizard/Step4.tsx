@@ -195,11 +195,13 @@ export const Step4: React.FC<Props> = ({
     verdict = {
       tone: 'good',
       title: 'Telemetry is flowing to Helix',
-      detail: clearedOnly
-        ? 'A few startup retries showed up earlier and have since cleared on their own.'
+      detail: (flowing && appExportErrors.length > 0)
+        ? 'Your telemetry is reaching Helix — a few startup connection retries are clearing on their own as the collector catches up.'
         : flowing
           ? 'Your telemetry is reaching the gateway and on to Helix.'
-          : 'The gateway can reach Helix. Send some app telemetry to see your spans here.',
+          : clearedOnly
+            ? 'A few startup retries showed up earlier and have since cleared on their own.'
+            : 'The gateway can reach Helix. Send some app telemetry to see your spans here.',
     };
   } else {
     verdict = { tone: 'idle', title: 'Waiting for telemetry…', detail: 'Start your app or collector, or run the Gateway → Helix check below.' };
@@ -290,7 +292,11 @@ export const Step4: React.FC<Props> = ({
           <CounterCard label="Log records" value={dLogs} />
         </div>
         {receiverError && <div className="mt-2 text-tiny text-warning">⚠ {receiverError}</div>}
-        {ongoingErrors ? (
+        {/* Only alarm when errors are ongoing AND nothing is arriving. If
+            telemetry is flowing, the collector is delivering via its retry
+            queue (catching up) — the retry log lines are noise, not a failure,
+            so we suppress the panel and let the green verdict stand. */}
+        {(ongoingErrors && !flowing) ? (
           <div className="mt-3 p-2.5 rounded border border-warning/40 bg-warning/10">
             <div className="text-tiny text-warning font-semibold uppercase tracking-wider mb-1">⚠ Errors detected in your collector</div>
             {appExportErrors.map(err => (
