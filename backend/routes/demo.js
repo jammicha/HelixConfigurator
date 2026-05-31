@@ -95,7 +95,6 @@ const renderEnvFile = ({ endpoint, apiKey, xSource }) => {
 HELIX_ENDPOINT=${endpoint}
 HELIX_API_KEY=${apiKey}
 X_SOURCE=${xSource}
-APP_URL=
 BUSINESS_SERVICE_KEY=
 `;
 

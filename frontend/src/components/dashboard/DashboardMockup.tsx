@@ -335,8 +335,6 @@ const OpenInHelix: React.FC = () => (
       <a href="#" className="inline-flex items-center gap-1.5 text-link hover:underline">OTel dashboard <ExternalLink className="w-3.5 h-3.5" /></a>
       <span className="text-gray-700">·</span>
       <a href="#" className="inline-flex items-center gap-1.5 text-link hover:underline">AIOps service <ExternalLink className="w-3.5 h-3.5" /></a>
-      <span className="text-gray-700">·</span>
-      <a href="#" className="inline-flex items-center gap-1.5 text-link hover:underline">Application UI <ExternalLink className="w-3.5 h-3.5" /></a>
     </div>
   </div>
 );

@@ -53,9 +53,7 @@ type Props = {
   onApplyK8sTemplate: () => void;
   onBack: () => void;
   onNext: () => void;
-  // Jump straight to Step 1 — used by the "Edit APP_URL" affordance in the
-  // auto-bridge skip banner. Without this, the user reads "skipped because
-  // APP_URL …" and has no direct path to fix the underlying setting.
+  // Jump straight to a specific step number.
   onJumpToStep: (step: number) => void;
 };
 

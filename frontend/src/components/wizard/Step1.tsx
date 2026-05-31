@@ -6,7 +6,6 @@ export type EnvVars = {
   HELIX_ENDPOINT: string;
   HELIX_API_KEY: string;
   X_SOURCE: string;
-  APP_URL: string;
   BUSINESS_SERVICE_KEY: string;
 };
 
@@ -47,11 +46,6 @@ const validateXSource = (value: string): string | null => {
   if (/[\x00-\x1f\x7f]/.test(value)) return 'Cannot contain control characters';
   return null;
 };
-const validateAppUrl = (value: string): string | null => {
-  if (!value) return null;
-  try { new URL(value); } catch { return 'Not a valid URL'; }
-  return null;
-};
 
 export const Step1: React.FC<Props> = ({
   envVars,
@@ -69,7 +63,6 @@ export const Step1: React.FC<Props> = ({
     HELIX_ENDPOINT: validateEndpoint(envVars.HELIX_ENDPOINT),
     HELIX_API_KEY: validateApiKey(envVars.HELIX_API_KEY),
     X_SOURCE: validateXSource(envVars.X_SOURCE),
-    APP_URL: validateAppUrl(envVars.APP_URL),
   };
   const canSubmit = Object.values(errors).every(e => e === null);
 
@@ -170,33 +163,6 @@ export const Step1: React.FC<Props> = ({
           />
           {envVars.X_SOURCE && errors.X_SOURCE && (
             <p id="helix-x-source-error" className="text-tiny text-danger-text">{errors.X_SOURCE}</p>
-          )}
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="helix-app-url" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2">
-            <span>App URL</span>
-            <span className="normal-case tracking-normal text-gray-500 font-normal">· optional</span>
-          </label>
-          <input
-            id="helix-app-url"
-            type="url"
-            name="helix-app-url"
-            autoComplete="off"
-            spellCheck={false}
-            data-1p-ignore
-            data-lpignore="true"
-            value={envVars.APP_URL}
-            onChange={(e) => setEnvVars({ ...envVars, APP_URL: e.target.value })}
-            aria-invalid={!!(envVars.APP_URL && errors.APP_URL)}
-            aria-describedby={envVars.APP_URL && errors.APP_URL ? 'helix-app-url-error' : undefined}
-            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm ${envVars.APP_URL && errors.APP_URL ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-link'}`}
-            placeholder="https://example.com or http://localhost:8080"
-          />
-          <p className="text-tiny text-gray-500">
-            Controls the "Application UI" dashboard link.
-          </p>
-          {envVars.APP_URL && errors.APP_URL && (
-            <p id="helix-app-url-error" className="text-tiny text-danger-text">{errors.APP_URL}</p>
           )}
         </div>
       </div>

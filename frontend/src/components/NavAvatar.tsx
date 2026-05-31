@@ -34,7 +34,6 @@ interface NavAvatarProps {
   externalApps?: {
     otelDashboardUrl?: string | null;
     aiopsServiceUrl?: string | null;
-    applicationUrl?: string | null;
   };
 }
 
@@ -44,9 +43,9 @@ interface NavAvatarProps {
 // chrome now that the standalone Logout link is gone.
 export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, currentPage, onJumpToOnboarding, onJumpToDashboard, onOpenSetPassword, onRemovePassword, externalApps }) => {
   const ext = externalApps || {};
-  // AIOps Business Service and Application UI render persistently (greyed
-  // when their values aren't set); OTel dashboard is still gated on a real
-  // Helix endpoint. The section is therefore always visible.
+  // AIOps Business Service renders persistently (greyed when not set); OTel
+  // dashboard is still gated on a real Helix endpoint. The section is
+  // therefore always visible.
   const extItemBase = 'flex items-center gap-2 px-3 py-2 text-sm transition-colors';
   const extItemActive = 'text-gray-200 hover:bg-gray-900 hover:text-white';
   const extItemDisabled = 'text-gray-500 opacity-60 cursor-not-allowed';
@@ -172,27 +171,6 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
               >
                 <ExternalLink className="w-4 h-4 text-gray-600" />
                 AIOps Business Service
-              </span>
-            )}
-            {ext.applicationUrl ? (
-              <a
-                href={ext.applicationUrl}
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => setOpenMenu(null)}
-                className={`${extItemBase} ${extItemActive}`}
-              >
-                <ExternalLink className="w-4 h-4 text-gray-400" />
-                Application UI
-              </a>
-            ) : (
-              <span
-                aria-disabled="true"
-                title="Set the App URL in Step 1 to enable this link."
-                className={`${extItemBase} ${extItemDisabled}`}
-              >
-                <ExternalLink className="w-4 h-4 text-gray-600" />
-                Application UI
               </span>
             )}
           </div>

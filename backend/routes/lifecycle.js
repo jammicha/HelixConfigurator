@@ -1,7 +1,7 @@
 // Gateway lifecycle: start / stop / restart the configured target container,
-// plus network bridge orchestration (auto-bridge to APP_URL's container,
-// manual attach to an arbitrary network, restart an arbitrary OTel
-// collector). One status read-side route, six write-side.
+// plus network bridge orchestration (manual attach to an arbitrary network,
+// restart an arbitrary OTel collector). One status read-side route, six
+// write-side.
 //
 // Auth: all gated by the /api/* requireAuth middleware in index.js.
 
@@ -259,12 +259,7 @@ function register(app, { docker }) {
   //
   // Network attachment is *not* this route's job — Step 3 owns wiring
   // helix-gateway to the customer's collector network via the
-  // /bridge-network and /unbridge-network routes. The pre-1.0.6 behavior
-  // here also did an APP_URL-driven auto-bridge, but tying network logic
-  // to a URL field that doubles as a dashboard deep-link conflated two
-  // unrelated concerns and confused users about what APP_URL controls.
-  // APP_URL is now strictly metadata for the dashboard "Open application"
-  // link; this endpoint ignores it.
+  // /bridge-network and /unbridge-network routes.
   app.post('/api/lifecycle/bridge', async (req, res) => {
     const sidecarName = TARGET_CONTAINER();
 
@@ -381,7 +376,7 @@ function register(app, { docker }) {
   // dashboard if they need a clean data slate too).
   app.post('/api/lifecycle/reset-onboarding', async (req, res) => {
     const sidecarName = TARGET_CONTAINER();
-    const WIZARD_KEYS = ['HELIX_ENDPOINT', 'HELIX_API_KEY', 'X_SOURCE', 'APP_URL', 'BUSINESS_SERVICE_KEY', 'HELIX_EVENTS_ENDPOINT'];
+    const WIZARD_KEYS = ['HELIX_ENDPOINT', 'HELIX_API_KEY', 'X_SOURCE', 'BUSINESS_SERVICE_KEY', 'HELIX_EVENTS_ENDPOINT'];
 
     // 0. Halt any in-flight Step 0 Layer 2 synthetic run and wipe its record
     //    so the panel returns to its idle pre-run state after the reset.

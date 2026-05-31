@@ -7,7 +7,7 @@ import { buildHelixBusinessServiceUrl, hasRealHelixEndpoint } from '../otel-data
 
 const HeaderUserMenu: React.FC = () => {
   const [authStatus, setAuthStatus] = useState<{ required: boolean; authenticated: boolean } | null>(null);
-  const [externalApps, setExternalApps] = useState<{ otelDashboardUrl: string | null; aiopsServiceUrl: string | null; applicationUrl: string | null } | undefined>(undefined);
+  const [externalApps, setExternalApps] = useState<{ otelDashboardUrl: string | null; aiopsServiceUrl: string | null } | undefined>(undefined);
   useEffect(() => {
     fetch('/api/auth/status')
       .then(r => r.json())
@@ -33,7 +33,6 @@ const HeaderUserMenu: React.FC = () => {
             ? `${base}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${tenantId}&var-BusinessService=${src}&var-OTelNamespace=${src}&from=now-3h&to=now&timezone=browser`
             : null,
           aiopsServiceUrl: buildHelixBusinessServiceUrl(helixEnv),
-          applicationUrl: env.APP_URL || null,
         });
       })
       .catch(() => { /* env unset — links stay greyed */ });

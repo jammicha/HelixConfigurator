@@ -5,7 +5,6 @@ type EnvVars = {
   HELIX_ENDPOINT: string;
   HELIX_API_KEY: string;
   X_SOURCE: string;
-  APP_URL: string;
   BUSINESS_SERVICE_KEY: string;
   [key: string]: string;
 };
@@ -148,18 +147,6 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
               onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
               className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
               placeholder="Source Name"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label htmlFor="conn-app-url" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">App URL (optional)</label>
-            <input
-              id="conn-app-url"
-              type="text"
-              value={envVars.APP_URL}
-              onChange={(e) => setEnvVars({ ...envVars, APP_URL: e.target.value })}
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
-              placeholder="http://localhost:8080"
             />
           </div>
 

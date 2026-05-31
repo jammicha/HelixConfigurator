@@ -148,7 +148,6 @@ const App = () => {
     HELIX_ENDPOINT: '',
     HELIX_API_KEY: '',
     X_SOURCE: '',
-    APP_URL: '',
     BUSINESS_SERVICE_KEY: ''
   });
 
@@ -1124,7 +1123,7 @@ const App = () => {
     if (resetting) return;
     setConfirmDialog({
       title: 'Reset onboarding and start over?',
-      message: 'This clears your Helix endpoint, API key, X-Source, App URL, and Business Service key from .env, drops any bridged networks the gateway is on, and recreates the gateway with empty values. The OTel trace store and your gateway YAML config are left alone. You\'ll land back on Step 1.',
+      message: 'This clears your Helix endpoint, API key, X-Source, and Business Service key from .env, drops any bridged networks the gateway is on, and recreates the gateway with empty values. The OTel trace store and your gateway YAML config are left alone. You\'ll land back on Step 1.',
       confirmLabel: 'Reset',
       onConfirm: async () => {
         setResetting(true);
@@ -1140,7 +1139,7 @@ const App = () => {
         // Clear UI state regardless of backend outcome — the user explicitly
         // asked to start over, so a backend partial failure shouldn't strand
         // them on a half-cleared page.
-        setEnvVars({ HELIX_ENDPOINT: '', HELIX_API_KEY: '', X_SOURCE: '', APP_URL: '', BUSINESS_SERVICE_KEY: '' });
+        setEnvVars({ HELIX_ENDPOINT: '', HELIX_API_KEY: '', X_SOURCE: '', BUSINESS_SERVICE_KEY: '' });
         setBridgeStatus(null);
         setAttachResult(null);
         // The backend just dropped the gateway's bridged networks. Clear the
@@ -1357,7 +1356,6 @@ Generated: ${new Date().toISOString()}
 HELIX_ENDPOINT: ${envVars.HELIX_ENDPOINT || '(unset)'}
 HELIX_API_KEY: ${redactKey(envVars.HELIX_API_KEY)}
 X_SOURCE: ${envVars.X_SOURCE || '(unset)'}
-APP_URL: ${envVars.APP_URL || '(unset)'}
 BUSINESS_SERVICE_KEY: ${envVars.BUSINESS_SERVICE_KEY ? '(set)' : '(unset)'}
 
 [Gateway Status]
@@ -1749,7 +1747,6 @@ ${logsData.logs || '(no logs available)'}
                 aiopsServiceUrl: hasRealHelixEndpoint && helixConfig.businessServiceKey
                   ? `${helixConfig.baseUrl}/aiops/#/entities/service/${extractServiceKey(helixConfig.businessServiceKey)}?type=key`
                   : null,
-                applicationUrl: envVars.APP_URL || null,
               }}
             />
           </div>

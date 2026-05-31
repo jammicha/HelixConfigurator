@@ -32,7 +32,6 @@ function register(app) {
         HELIX_ENDPOINT: vars.HELIX_ENDPOINT || '',
         HELIX_API_KEY: vars.HELIX_API_KEY || '',
         X_SOURCE: vars.X_SOURCE || '',
-        APP_URL: vars.APP_URL || '',
         BUSINESS_SERVICE_KEY: vars.BUSINESS_SERVICE_KEY || '',
         HELIX_EVENTS_ENDPOINT: vars.HELIX_EVENTS_ENDPOINT || ''
       });
@@ -42,7 +41,7 @@ function register(app) {
   });
 
   app.post('/api/env', async (req, res) => {
-    const { HELIX_ENDPOINT, HELIX_API_KEY, X_SOURCE, APP_URL, BUSINESS_SERVICE_KEY, HELIX_EVENTS_ENDPOINT } = req.body;
+    const { HELIX_ENDPOINT, HELIX_API_KEY, X_SOURCE, BUSINESS_SERVICE_KEY, HELIX_EVENTS_ENDPOINT } = req.body;
     try {
       await withEnvWriteLock(async () => {
         const envContent = await fs.readFile(ENV_PATH, 'utf8');
@@ -53,7 +52,6 @@ function register(app) {
           HELIX_ENDPOINT: trim(HELIX_ENDPOINT),
           HELIX_API_KEY: trim(HELIX_API_KEY),
           X_SOURCE: trim(X_SOURCE),
-          APP_URL: trim(APP_URL),
           BUSINESS_SERVICE_KEY: trim(BUSINESS_SERVICE_KEY),
           HELIX_EVENTS_ENDPOINT: trim(HELIX_EVENTS_ENDPOINT),
         };
@@ -91,7 +89,6 @@ function register(app) {
       process.env.HELIX_ENDPOINT = HELIX_ENDPOINT;
       process.env.HELIX_API_KEY = HELIX_API_KEY;
       process.env.X_SOURCE = X_SOURCE;
-      process.env.APP_URL = APP_URL;
       process.env.BUSINESS_SERVICE_KEY = BUSINESS_SERVICE_KEY || '';
       process.env.HELIX_EVENTS_ENDPOINT = HELIX_EVENTS_ENDPOINT || '';
 

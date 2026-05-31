@@ -27,13 +27,6 @@ HELIX_ENDPOINT=https://your-tenant.onbmc.com
 HELIX_API_KEY=TenantID::AccessKey::SecretKey
 X_SOURCE=your-business-service-name
 
-# Optional — used for the "Open application" deep-link on the dashboard, and
-# (when its hostname is a Docker container name on this host) to auto-bridge
-# helix-gateway to your app's compose network. localhost / IP / public URL is
-# fine — auto-bridge just skips and you wire the network from the Step 2
-# onboarding controls instead.
-APP_URL=http://localhost:8080
-
 # Optional: deep-link to AIOps Business Service. Paste the opaque key from
 # https://<tenant>/aiops/#/entities/service/<KEY>?type=key — you can also paste
 # the full URL and the UI will extract the key. Also used as the topology
@@ -90,7 +83,7 @@ This builds the configurator image, starts the OpenTelemetry Collector (`helix-g
 
 On first run, the UI walks you through a four-step onboarding wizard:
 
-1. **Configure** — capture credentials (endpoint, API key, X-Source, optional App URL) and save + restart the gateway. The wizard validates each field as you type and auto-rebuilds the canonical `tenant::seg1::seg2` key from a pasted Helix-portal bundle.
+1. **Configure** — capture credentials (endpoint, API key, X-Source) and save + restart the gateway. The wizard validates each field as you type and auto-rebuilds the canonical `tenant::seg1::seg2` key from a pasted Helix-portal bundle.
 2. **Exporter** — paste-ready snippets for adding `helix-gateway` as an `otlphttp` exporter to your existing collector's pipelines. When a single OTel collector is detected on the host, **Smart-add** offers to read its config, compute the merge, preview the diff, and apply it for you (with a `.helix-bak` and an automatic container restart). See [Smart-add](#smart-add) below.
 3. **Connect** — ensures `helix-gateway` shares a Docker network with your collector. Surfaces the result of the auto-bridge attempt from Step 1 and offers one-click attach to any detected collector network, with a manual fallback. Detects Kubernetes-based collectors and offers a one-click apply of the K8s Attribute Enrichment template.
 4. **Verify** — live span/metric/log counters since the step opened, a synthetic `Gateway → Helix` round-trip check, app-side OTel export error detection, and a launch button for the dashboard.
@@ -170,7 +163,6 @@ After onboarding, the dashboard provides:
   - **Copy Support Bundle** — copies a sanitized snapshot (env with API key redacted, container status, diagnostic check results, live metrics, last 5 log lines) to the clipboard for support tickets.
   - **Helix OTel Dashboard** — deep-link to the namespace overview dashboard.
   - **AIOps Business Service** — deep-link to the configured business service in AIOps (requires `BUSINESS_SERVICE_KEY`).
-  - **Application UI** — opens `APP_URL`.
 - **Helix Connection Settings** — edit env vars in-place; saving triggers a gateway restart so changes take effect immediately. The Settings card also displays whether the UI is open access or password-required.
 - **Gateway Config (YAML)** — Monaco-based editor with syntax highlighting, save-time validation (line-precise parse errors plus structural-lint warnings for typos like `recievers`, undefined pipeline references, missing `service` block), and `Cmd+S` / `Ctrl+S` to save.
   - **Load Template** — picker modal with built-in starting points: Default Sidecar, Prometheus Scrape, Tail Sampling for High-Volume Tracing, and Kubernetes Attribute Enrichment. Selecting a template loads its content into the editor with current env vars substituted; click Save Config to apply.
