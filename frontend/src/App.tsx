@@ -4,8 +4,9 @@ import { Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unl
 import { useEscClose } from './hooks/useEscClose';
 import { useLocalStorageState } from './hooks/useLocalStorageState';
 import { useSmartAdd } from './hooks/useSmartAdd';
+import { useToasts } from './hooks/useToasts';
 import { LoginScreen } from './components/LoginScreen';
-import { ToastStack, Toast } from './components/ToastStack';
+import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
 import { TemplatesModal, Template } from './components/TemplatesModal';
 import { RawMetricsModal } from './components/RawMetricsModal';
@@ -48,12 +49,8 @@ const App = () => {
   const [gatewayStatus, setGatewayStatus] = useState('unknown'); // running, exited, restarting, error
   const [actionLoading, setActionLoading] = useState<'start' | 'stop' | 'restart' | null>(null);
   const [isConfigSaving, setIsConfigSaving] = useState(false);
-  // Stack of up to 3 toasts. Older toasts evict on overflow so a burst of
-  // errors doesn't clobber earlier context.
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const toastIdRef = useRef(0);
-  const toastTimersRef = useRef(new Map<number, any>());
-  const TOAST_MAX = 3;
+  // Toast stack (state, eviction, and auto-dismiss timers live in the hook).
+  const { toasts, showToast: showToastMsg } = useToasts();
   const [logs, setLogs] = useState<string[]>([]);
   const [logFilter, setLogFilter] = useState<'helix' | 'all'>('helix');
   const [isRawMetricsOpen, setIsRawMetricsOpen] = useState(false);
@@ -307,8 +304,6 @@ const App = () => {
       if (eventSourceRef.current) eventSourceRef.current.close();
       if ((eventSourceRef as any).currentApp) (eventSourceRef as any).currentApp.close();
       if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
-      toastTimersRef.current.forEach(t => clearTimeout(t));
-      toastTimersRef.current.clear();
       if (telemetryTimerRef.current) clearTimeout(telemetryTimerRef.current);
       if (diagAlertTimerRef.current) clearTimeout(diagAlertTimerRef.current);
     };
@@ -755,26 +750,6 @@ const App = () => {
     const match = trimmed.match(/\/entities\/service\/([^/?#\s]+)/);
     if (match) return match[1];
     return trimmed.split(/[?#\s]/)[0];
-  };
-
-  const showToastMsg = (message: string, type: 'success' | 'error' = 'success') => {
-    const id = ++toastIdRef.current;
-    setToasts(prev => {
-      const next = [...prev, { id, message, type }];
-      // FIFO eviction when full — drop oldest.
-      if (next.length > TOAST_MAX) {
-        const evicted = next[0];
-        const t = toastTimersRef.current.get(evicted.id);
-        if (t) { clearTimeout(t); toastTimersRef.current.delete(evicted.id); }
-        return next.slice(-TOAST_MAX);
-      }
-      return next;
-    });
-    const timer = setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-      toastTimersRef.current.delete(id);
-    }, 3000);
-    toastTimersRef.current.set(id, timer);
   };
 
   const clearEditorMarkers = () => {
