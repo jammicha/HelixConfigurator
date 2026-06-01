@@ -18,7 +18,9 @@ import type { DetectedCollector } from './components/wizard/Step3';
 import { Step4 } from './components/wizard/Step4';
 import { Step5 } from './components/wizard/Step5';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
-import { parseHelixKeyBundle } from './utils/helixKey';
+import { parseHelixKeyBundle, extractServiceKey } from './utils/helixKey';
+import { isHelixRelevant } from './utils/logFilter';
+import { waitForGatewayRunning } from './utils/gateway';
 import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
 import { PipelineStatusBanner } from './components/dashboard/PipelineStatusBanner';
 import { QuickActions } from './components/dashboard/QuickActions';
@@ -663,17 +665,6 @@ const App = () => {
     }
   }, [connectedApp, showDiagnostics, sseAttempt]);
 
-  const HELIX_LOG_KEYWORDS = [
-    'bmchelix', 'otlphttp', 'exporter', 'sending queue',
-    'unauthenticated', 'unauthorized', 'forbidden',
-    'connection refused', 'deadline exceeded', 'exporting failed',
-    'critical otel drop', 'permanent error', 'not retryable',
-    'x-api-key', 'x-source', 'helix-gateway',
-  ];
-  const isHelixRelevant = (line: string): boolean => {
-    const lower = line.toLowerCase();
-    return HELIX_LOG_KEYWORDS.some(kw => lower.includes(kw));
-  };
   const visibleLogs = logFilter === 'helix' ? logs.filter(isHelixRelevant) : logs;
 
   const handleOpenTemplates = async () => {
@@ -730,27 +721,6 @@ const App = () => {
 
   // Poll /api/lifecycle/status until the gateway reports 'running', or give up
   // after timeoutMs. Replaces blind sleeps that broke on slow hosts.
-  const waitForGatewayRunning = async (timeoutMs = 15000): Promise<boolean> => {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch('/api/lifecycle/status');
-        const data = await res.json();
-        if (data.status === 'running') return true;
-      } catch { /* network blip — keep trying */ }
-      await new Promise(r => setTimeout(r, 500));
-    }
-    return false;
-  };
-
-  // Accept bare key, URL path fragment, or full AIOps URL — extract just the opaque key.
-  const extractServiceKey = (input: string): string => {
-    if (!input) return '';
-    const trimmed = input.trim();
-    const match = trimmed.match(/\/entities\/service\/([^/?#\s]+)/);
-    if (match) return match[1];
-    return trimmed.split(/[?#\s]/)[0];
-  };
 
   const clearEditorMarkers = () => {
     if (monaco && editorRef.current) {
