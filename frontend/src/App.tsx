@@ -30,6 +30,7 @@ import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConne
 import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/SetPasswordModal';
 import { NavAvatar } from './components/NavAvatar';
 import { ContainerCard } from './components/dashboard/ContainerCard';
+import { LiveMetricsCards } from './components/dashboard/LiveMetricsCards';
 
 const App = () => {
   const monaco = useMonaco();
@@ -1811,73 +1812,11 @@ const App = () => {
                           </span>
                         )}
                       </div>
-                      <div className="flex gap-2">
-                        {(() => {
-                          const ratesFor = (key: 'received' | 'sent' | 'failed') => {
-                            if (metricsHistory.length < 2) return [] as number[];
-                            const out: number[] = [];
-                            for (let i = 1; i < metricsHistory.length; i++) {
-                              out.push(Math.max(0, metricsHistory[i][key] - metricsHistory[i - 1][key]));
-                            }
-                            return out;
-                          };
-                          const renderSpark = (data: number[], stroke: string) => {
-                            if (data.length < 2) return <div style={{ height: 14 }} />;
-                            const max = Math.max(...data, 1);
-                            const w = 72, h = 14;
-                            const pts = data.map((v, i) => {
-                              const x = (i / (data.length - 1)) * w;
-                              const y = h - (v / max) * h;
-                              return `${x.toFixed(1)},${y.toFixed(1)}`;
-                            }).join(' ');
-                            return (
-                              <svg width={w} height={h} className="mt-1">
-                                <polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.2} />
-                              </svg>
-                            );
-                          };
-                          return (
-                            <>
-                              <div className="bg-gray-800 border-l-2 border-info px-3 py-1.5 rounded-r min-w-[88px]">
-                                <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Received</div>
-                                <div className="text-xl font-semibold text-info leading-none tabular-nums">{liveMetrics.received}</div>
-                                {renderSpark(ratesFor('received'), '#3759d8')}
-                              </div>
-                              <div className="bg-gray-800 border-l-2 border-success px-3 py-1.5 rounded-r min-w-[88px]">
-                                <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Sent</div>
-                                <div className="text-xl font-semibold text-success-text leading-none tabular-nums">{liveMetrics.sent}</div>
-                                {renderSpark(ratesFor('sent'), '#11845b')}
-                              </div>
-                              {(() => {
-                                // The "DROPPED" card needs to reflect both
-                                // gateway-side send failures (otelcol_exporter_
-                                // send_failed_*) and log-pattern alerts
-                                // captured from the streamed container. Show
-                                // the larger of the two so users don't see "0"
-                                // while a 196-event alert is screaming. Hover
-                                // breaks down where it came from.
-                                const droppedHeadline = Math.max(liveMetrics.failed, diagAlertCount);
-                                const breakdown = `Gateway send-failures (otelcol_exporter_send_failed_*): ${liveMetrics.failed}\nDrop events in streamed logs: ${diagAlertCount}`;
-                                return (
-                                  <div
-                                    className="bg-gray-800 border-l-2 border-danger px-3 py-1.5 rounded-r min-w-[88px]"
-                                    title={breakdown}
-                                  >
-                                    <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Dropped</div>
-                                    <div className="text-xl font-semibold text-danger-text leading-none tabular-nums">{droppedHeadline}</div>
-                                    {liveMetrics.failed !== diagAlertCount && (
-                                      <div className="text-[9px] text-gray-500 leading-tight">
-                                        {diagAlertCount} log · {liveMetrics.failed} metric
-                                      </div>
-                                    )}
-                                    {renderSpark(ratesFor('failed'), '#b2001e')}
-                                  </div>
-                                );
-                              })()}
-                            </>
-                          );
-                        })()}
-                      </div>
+                      <LiveMetricsCards
+                        liveMetrics={liveMetrics}
+                        metricsHistory={metricsHistory}
+                        diagAlertCount={diagAlertCount}
+                      />
                     </div>
                     {timeline.length > 0 && (
                       <div className="mb-3 pt-3 pb-2 border-t border-gray-800">
