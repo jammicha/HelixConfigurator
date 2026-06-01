@@ -5,6 +5,7 @@ import { useEscClose } from './hooks/useEscClose';
 import { useLocalStorageState } from './hooks/useLocalStorageState';
 import { useSmartAdd } from './hooks/useSmartAdd';
 import { useToasts } from './hooks/useToasts';
+import { usePolledFetch } from './hooks/usePolledFetch';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
@@ -358,59 +359,15 @@ const App = () => {
       });
   }, [authStatus]);
 
-  // Poll for Gateway Status
-  useEffect(() => {
-    const controller = new AbortController();
-    let cancelled = false;
-    const checkGateway = () => {
-      // Skip while the tab is in the background. visibilitychange below
-      // re-fires this immediately on return so the UI snaps current.
-      if (document.visibilityState === 'hidden') return;
-      fetch('/api/lifecycle/status', { signal: controller.signal })
-        .then(res => res.json())
-        .then(data => { if (!cancelled) setGatewayStatus(data.status); })
-        .catch((err) => {
-          if (cancelled || err.name === 'AbortError') return;
-          setGatewayStatus('error');
-        });
-    };
-    checkGateway();
-    const interval = setInterval(checkGateway, 5000);
-    const onVis = () => { if (document.visibilityState === 'visible') checkGateway(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, []);
+  // Poll for Gateway Status (always on — owns the dashboard's status pill).
+  usePolledFetch('/api/lifecycle/status', 5000,
+    data => setGatewayStatus(data.status),
+    () => setGatewayStatus('error'));
 
   // Poll for Deep Collector Diagnostics
-  useEffect(() => {
-    const controller = new AbortController();
-    let cancelled = false;
-    const checkCollectorDiag = () => {
-      if (document.visibilityState === 'hidden') return;
-      fetch('/api/diagnostics/collector', { signal: controller.signal })
-        .then(res => res.json())
-        .then(data => { if (!cancelled) setCollectorDiag(data); })
-        .catch((err) => {
-          if (cancelled || err.name === 'AbortError') return;
-          setCollectorDiag({ status: 'FAIL', error: 'API unreachable', remediation: '' });
-        });
-    };
-    checkCollectorDiag();
-    const interval = setInterval(checkCollectorDiag, 10000);
-    const onVis = () => { if (document.visibilityState === 'visible') checkCollectorDiag(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, []);
+  usePolledFetch('/api/diagnostics/collector', 10000,
+    data => setCollectorDiag(data),
+    () => setCollectorDiag({ status: 'FAIL', error: 'API unreachable', remediation: '' }));
 
   // Auto-close remediation if a check passes
   useEffect(() => {
@@ -448,30 +405,9 @@ const App = () => {
   }, [envVars.HELIX_ENDPOINT, envVars.HELIX_API_KEY]);
 
   // Poll for API Key Diagnostics
-  useEffect(() => {
-    const controller = new AbortController();
-    let cancelled = false;
-    const checkApiKeyDiag = () => {
-      if (document.visibilityState === 'hidden') return;
-      fetch('/api/diagnostics/apikey', { signal: controller.signal })
-        .then(res => res.json())
-        .then(data => { if (!cancelled) setApiKeyDiag(data); })
-        .catch((err) => {
-          if (cancelled || err.name === 'AbortError') return;
-          setApiKeyDiag({ status: 'FAIL', error: 'API unreachable', remediation: '' });
-        });
-    };
-    checkApiKeyDiag();
-    const interval = setInterval(checkApiKeyDiag, 10000);
-    const onVis = () => { if (document.visibilityState === 'visible') checkApiKeyDiag(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, []);
+  usePolledFetch('/api/diagnostics/apikey', 10000,
+    data => setApiKeyDiag(data),
+    () => setApiKeyDiag({ status: 'FAIL', error: 'API unreachable', remediation: '' }));
 
   // Poll the gateway's receiver counters while Step 4 is showing (the
   // verify step in the redesigned wizard). Sets a baseline on entry; the
@@ -562,33 +498,11 @@ const App = () => {
     return () => clearInterval(id);
   }, [setupStep, isSetupComplete]);
 
-  useEffect(() => {
-    if (!isSetupComplete) return;
-
-    const controller = new AbortController();
-    let cancelled = false;
-    const checkStatus = () => {
-      if (document.visibilityState === 'hidden') return;
-      fetch('/api/diagnostics/network', { signal: controller.signal })
-        .then(res => res.json())
-        .then(data => { if (!cancelled) setNetworkDiag(data); })
-        .catch((err) => {
-          if (cancelled || err.name === 'AbortError') return;
-          setNetworkDiag({ status: 'Failed', error: 'API unreachable', remediation: '' });
-        });
-    };
-
-    checkStatus();
-    const interval = setInterval(checkStatus, 15000); // Check every 15 seconds
-    const onVis = () => { if (document.visibilityState === 'visible') checkStatus(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, [isSetupComplete]);
+  // Poll for Network Diagnostics — only once onboarding is complete.
+  usePolledFetch('/api/diagnostics/network', 15000,
+    data => setNetworkDiag(data),
+    () => setNetworkDiag({ status: 'Failed', error: 'API unreachable', remediation: '' }),
+    { enabled: isSetupComplete });
 
   useEffect(() => {
     if (!isSetupComplete) return;
