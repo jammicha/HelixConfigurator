@@ -7,6 +7,7 @@ import { useSmartAdd } from './hooks/useSmartAdd';
 import { useToasts } from './hooks/useToasts';
 import { usePolledFetch } from './hooks/usePolledFetch';
 import { useGatewayActions } from './hooks/useGatewayActions';
+import { useTimeline } from './hooks/useTimeline';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
@@ -79,17 +80,8 @@ const App = () => {
   const diagAlertTimerRef = useRef<any>(null);
 
   // Lightweight in-memory event timeline shown above the log pane during a
-  // diagnostic session. Helps answer "what changed?" without scraping logs.
-  type TimelineKind = 'config-saved' | 'restart' | 'attach' | 'error-spike' | 'verify';
-  type TimelineEvent = { ts: number; kind: TimelineKind; message: string };
-  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
-  const TIMELINE_MAX = 30;
-  const pushTimelineEvent = (kind: TimelineKind, message: string) => {
-    setTimeline(prev => {
-      const next = [...prev, { ts: Date.now(), kind, message }];
-      return next.length > TIMELINE_MAX ? next.slice(-TIMELINE_MAX) : next;
-    });
-  };
+  // diagnostic session (state + append/clear live in the hook).
+  const { timeline, pushTimelineEvent, clearTimeline } = useTimeline();
 
   // Discovered Services State
   const [isServicesOpen, setIsServicesOpen] = useState(false);
@@ -1194,7 +1186,7 @@ const App = () => {
         setShowDiagnostics(true);
         setDiagAlert(false);
         setDiagAlertCount(0);
-        setTimeline([]);
+        clearTimeline();
         pushTimelineEvent('verify', `Diagnostic session started${connectedApp ? ` (${connectedApp})` : ''}`);
         setLogs([`Initializing diagnostic session${connectedApp ? ` for ${connectedApp}` : ''} (5-min session)...`]);
         setTraceInjectionStatus('injecting');
