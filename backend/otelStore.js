@@ -654,11 +654,21 @@ class OtelStore {
           durations: [],
           error_count: 0,
           slow_count: 0,
+          satisfied_count: 0,
+          tolerating_count: 0,
         };
         groups.set(key, g);
       }
       g.durations.push(r.duration_ms);
-      if (r.has_error) g.error_count += 1;
+      if (r.has_error) {
+        g.error_count += 1;
+      } else {
+        if (r.duration_ms <= SLOW_MS) {
+          g.satisfied_count += 1;
+        } else if (r.duration_ms <= 4 * SLOW_MS) {
+          g.tolerating_count += 1;
+        }
+      }
       if (r.duration_ms > SLOW_MS) g.slow_count += 1;
     }
     const percentile = (sorted, p) => {
@@ -669,6 +679,9 @@ class OtelStore {
     return Array.from(groups.values()).map(g => {
       const sorted = g.durations.slice().sort((a, b) => a - b);
       const sum = sorted.reduce((acc, v) => acc + v, 0);
+      const satisfied = g.satisfied_count;
+      const tolerating = g.tolerating_count;
+      const apdex = sorted.length ? (satisfied + 0.5 * tolerating) / sorted.length : 1.0;
       return {
         service_name: g.service_name,
         root_operation: g.root_operation,
@@ -680,6 +693,7 @@ class OtelStore {
         p95_ms: percentile(sorted, 0.95),
         error_count: g.error_count,
         slow_count: g.slow_count,
+        apdex,
       };
     }).sort((a, b) => b.trace_count - a.trace_count);
   }

@@ -96,6 +96,7 @@ export type OperationStat = {
   p95_ms: number;
   error_count: number;
   slow_count: number;
+  apdex: number;
 };
 
 // Per-(service, operation) span-latency percentiles from /api/operations/

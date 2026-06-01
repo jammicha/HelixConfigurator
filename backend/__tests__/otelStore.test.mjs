@@ -200,6 +200,25 @@ describe('OtelStore', () => {
       const ops500 = store.listOperations({ slowThresholdMs: 500 });
       expect(ops500[0].slow_count).toBe(2);
     });
+
+    it('listOperations computes Apdex score per operation by slowThresholdMs', () => {
+      // SLOW_MS = 1000
+      // 1. Satisfied: duration <= 1000 (e.g. 800ms) and no error
+      store.ingestSpans([makeSpan({ traceId: 't_sat', spanId: 'a', serviceName: 'app', name: 'op', startTimeNs: 1_000_000_000, endTimeNs: 1_800_000_000 })]); // 800ms
+      // 2. Tolerating: 1000 < duration <= 4000 (e.g. 1500ms) and no error
+      store.ingestSpans([makeSpan({ traceId: 't_tol', spanId: 'b', serviceName: 'app', name: 'op', startTimeNs: 1_000_000_000, endTimeNs: 2_500_000_000 })]); // 1500ms
+      // 3. Frustrated: duration > 4000 (e.g. 4500ms) and no error
+      store.ingestSpans([makeSpan({ traceId: 't_frust_slow', spanId: 'c', serviceName: 'app', name: 'op', startTimeNs: 1_000_000_000, endTimeNs: 5_500_000_000 })]); // 4500ms
+      // 4. Frustrated: has error regardless of duration (e.g. 500ms, has error)
+      store.ingestSpans([makeSpan({ traceId: 't_frust_err', spanId: 'd', serviceName: 'app', name: 'op', startTimeNs: 1_000_000_000, endTimeNs: 1_500_000_000, statusCode: 2 })]); // 500ms, errored
+
+      const ops = store.listOperations({ slowThresholdMs: 1000 });
+      const op = ops.find(o => o.service_name === 'app' && o.root_operation === 'op');
+      expect(op).toBeDefined();
+      expect(op.trace_count).toBe(4);
+      // Apdex = (Satisfied + 0.5 * Tolerating) / Total = (1 + 0.5 * 1) / 4 = 1.5 / 4 = 0.375
+      expect(op.apdex).toBe(0.375);
+    });
   });
 
   describe('listOperationLatencies', () => {

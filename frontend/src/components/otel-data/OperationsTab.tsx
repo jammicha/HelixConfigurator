@@ -10,7 +10,7 @@ export const OperationsTab: React.FC<{
   onJumpToOperation: (op: string) => void;
 }> = ({ operations, loading, onJumpToOperation }) => {
   const slowThresholdMs = useSlowThreshold();
-  const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'max' | 'count' | 'errors' | 'slow' | 'service'>('p95');
+  const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'max' | 'count' | 'errors' | 'slow' | 'service' | 'apdex'>('p95');
   const sorted = useMemo(() => {
     const arr = operations.slice();
     switch (sortBy) {
@@ -21,6 +21,7 @@ export const OperationsTab: React.FC<{
       case 'errors': arr.sort((a, b) => (b.error_count / Math.max(1, b.trace_count)) - (a.error_count / Math.max(1, a.trace_count))); break;
       case 'slow': arr.sort((a, b) => (b.slow_count / Math.max(1, b.trace_count)) - (a.slow_count / Math.max(1, a.trace_count))); break;
       case 'service': arr.sort((a, b) => a.service_name.localeCompare(b.service_name) || a.root_operation.localeCompare(b.root_operation)); break;
+      case 'apdex': arr.sort((a, b) => a.apdex - b.apdex); break; // ascending — worst first
     }
     return arr;
   }, [operations, sortBy]);
@@ -44,6 +45,16 @@ export const OperationsTab: React.FC<{
     if (pct < 5) return 'bg-warning/5 text-warning';
     if (pct < 25) return 'bg-warning/15 text-warning';
     return 'bg-danger/15 text-[#ff8a8a]';
+  };
+
+  // Apdex grade helpers — ADAPT Design System compliant muted tones.
+  // Standard five-tier performance rating.
+  const apdexStyle = (score: number): { bg: string; text: string; label: string } => {
+    if (score >= 0.94) return { bg: 'rgba(17,132,91,0.12)', text: '#17b27b', label: 'Excellent' };
+    if (score >= 0.85) return { bg: 'rgba(17,132,91,0.08)', text: '#5ec9a0', label: 'Good' };
+    if (score >= 0.70) return { bg: 'rgba(255,210,0,0.10)', text: '#ffd200', label: 'Fair' };
+    if (score >= 0.50) return { bg: 'rgba(249,115,22,0.12)', text: '#f97316', label: 'Poor' };
+    return                    { bg: 'rgba(178,0,30,0.15)',   text: '#ff8a8a', label: 'Unacceptable' };
   };
 
   const Sortable: React.FC<{ id: typeof sortBy; align?: 'left' | 'right'; children: React.ReactNode }> = ({ id, align = 'right', children }) => (
@@ -86,6 +97,7 @@ export const OperationsTab: React.FC<{
                     Service · Transaction
                   </Sortable>
                 </th>
+                <th className="px-4 py-2 w-28"><Sortable id="apdex">Apdex</Sortable></th>
                 <th className="px-4 py-2 w-20"><Sortable id="count">Count</Sortable></th>
                 <th className="px-4 py-2 w-24"><Sortable id="p50">p50</Sortable></th>
                 <th className="px-4 py-2 w-24"><Sortable id="p95">p95</Sortable></th>
@@ -110,6 +122,21 @@ export const OperationsTab: React.FC<{
                         <span className="text-gray-500"> · </span>
                         <span className="text-gray-300 text-tiny">{op.root_operation}</span>
                       </button>
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {(() => {
+                        const s = apdexStyle(op.apdex);
+                        return (
+                          <span
+                            className="inline-flex items-center gap-1.5 tabular-nums text-tiny font-semibold rounded-full px-2 py-0.5"
+                            style={{ backgroundColor: s.bg, color: s.text }}
+                            title={`${s.label} — ${op.apdex.toFixed(2)}`}
+                          >
+                            {op.apdex.toFixed(2)}
+                            <span className="font-normal opacity-80 text-[10px] tracking-wide uppercase">{s.label}</span>
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-gray-300">{op.trace_count}</td>
                     <td className={`px-4 py-2 text-right tabular-nums ${latencyTone(op.p50_ms)}`}>{formatDuration(op.p50_ms)}</td>
