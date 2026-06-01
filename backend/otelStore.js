@@ -475,22 +475,30 @@ class OtelStore {
     this.recomputeTrace = this.db.prepare(`
       INSERT INTO traces (trace_id, service_name, service_namespace, root_operation, start_time_ns, end_time_ns,
                           duration_ms, span_count, has_error, received_at)
+      WITH root_span AS (
+        -- The trace's root span: the earliest span with no parent inside this
+        -- trace — either truly parentless, or one whose parent_span_id dangles
+        -- (the real root was never ingested). Resolved once so service /
+        -- namespace / operation stay mutually consistent — three independent
+        -- LIMIT-1 subqueries could otherwise pull each column from a different
+        -- span on a multi-root or rootless trace — and so root detection matches
+        -- the frontend waterfall, which also treats a missing-parent span as a
+        -- root. Falls back to the earliest span of all for a fully rootless trace.
+        SELECT service_name, service_namespace, name FROM spans s
+        WHERE trace_id = @traceId
+          AND (parent_span_id IS NULL
+               OR parent_span_id = ''
+               OR NOT EXISTS (SELECT 1 FROM spans p WHERE p.trace_id = s.trace_id AND p.span_id = s.parent_span_id))
+        ORDER BY start_time_ns ASC LIMIT 1
+      )
       SELECT
         @traceId,
-        COALESCE((SELECT service_name FROM spans WHERE trace_id = @traceId
-                   AND (parent_span_id IS NULL OR parent_span_id = '') LIMIT 1),
-                 (SELECT service_name FROM spans WHERE trace_id = @traceId LIMIT 1)),
-        -- Namespace of the root span (same span we take service_name from), so
-        -- the deep-link's var-OTelNamespace matches var-OTelService. Falls back
-        -- to the earliest span's namespace for partial/rootless traces.
-        COALESCE((SELECT service_namespace FROM spans WHERE trace_id = @traceId
-                   AND (parent_span_id IS NULL OR parent_span_id = '') LIMIT 1),
-                 (SELECT service_namespace FROM spans WHERE trace_id = @traceId
-                   ORDER BY start_time_ns ASC LIMIT 1)),
-        COALESCE((SELECT name FROM spans WHERE trace_id = @traceId
-                   AND (parent_span_id IS NULL OR parent_span_id = '') LIMIT 1),
-                 (SELECT name FROM spans WHERE trace_id = @traceId
-                   ORDER BY start_time_ns ASC LIMIT 1)),
+        COALESCE((SELECT service_name FROM root_span),
+                 (SELECT service_name FROM spans WHERE trace_id = @traceId ORDER BY start_time_ns ASC LIMIT 1)),
+        COALESCE((SELECT service_namespace FROM root_span),
+                 (SELECT service_namespace FROM spans WHERE trace_id = @traceId ORDER BY start_time_ns ASC LIMIT 1)),
+        COALESCE((SELECT name FROM root_span),
+                 (SELECT name FROM spans WHERE trace_id = @traceId ORDER BY start_time_ns ASC LIMIT 1)),
         (SELECT MIN(start_time_ns) FROM spans WHERE trace_id = @traceId),
         (SELECT MAX(end_time_ns) FROM spans WHERE trace_id = @traceId),
         (SELECT (MAX(end_time_ns) - MIN(start_time_ns)) / 1e6 FROM spans WHERE trace_id = @traceId),

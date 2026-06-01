@@ -118,6 +118,45 @@ describe('OtelStore', () => {
     });
   });
 
+  describe('recomputeTrace root resolution', () => {
+    it('picks the earliest root consistently on a multi-root trace', () => {
+      const t0 = 1_000_000_000;
+      store.ingestSpans([
+        // inserted first, but LATER start time
+        makeSpan({ traceId: 'multi', spanId: 'b', parentSpanId: '', serviceName: 'svc-b', name: 'op-b', startTimeNs: t0 + 5_000_000, endTimeNs: t0 + 8_000_000 }),
+        // inserted second, but EARLIER start time → the true root
+        makeSpan({ traceId: 'multi', spanId: 'a', parentSpanId: '', serviceName: 'svc-a', name: 'op-a', startTimeNs: t0, endTimeNs: t0 + 4_000_000 }),
+      ]);
+      const row = store.db.prepare('SELECT service_name, root_operation FROM traces WHERE trace_id = ?').get('multi');
+      expect(row.service_name).toBe('svc-a');   // earliest root...
+      expect(row.root_operation).toBe('op-a');  // ...and the SAME span (consistent, not mixed)
+    });
+
+    it('treats a dangling-parent span as the root even when a child starts earlier', () => {
+      const t0 = 1_000_000_000;
+      store.ingestSpans([
+        // the real root's parent was never ingested (dangling) — and it starts LAST
+        makeSpan({ traceId: 'orphan', spanId: 'root', parentSpanId: 'never-ingested', serviceName: 'svc-root', name: 'op-root', startTimeNs: t0 + 10_000_000, endTimeNs: t0 + 20_000_000 }),
+        // an in-trace child that starts EARLIER than the root
+        makeSpan({ traceId: 'orphan', spanId: 'child', parentSpanId: 'root', serviceName: 'svc-child', name: 'op-child', startTimeNs: t0, endTimeNs: t0 + 3_000_000 }),
+      ]);
+      const row = store.db.prepare('SELECT service_name, root_operation FROM traces WHERE trace_id = ?').get('orphan');
+      // The dangling-parent span is the root — not the earlier-starting child.
+      expect(row.service_name).toBe('svc-root');
+      expect(row.root_operation).toBe('op-root');
+    });
+
+    it('keeps has_error trace-wide — a downstream error flags an OK-root trace', () => {
+      const t0 = 1_000_000_000;
+      store.ingestSpans([
+        makeSpan({ traceId: 'dserr', spanId: 'root', parentSpanId: '', serviceName: 'svc', name: 'op', startTimeNs: t0, endTimeNs: t0 + 9_000_000, statusCode: 0 }),
+        makeSpan({ traceId: 'dserr', spanId: 'child', parentSpanId: 'root', serviceName: 'db', name: 'SELECT', startTimeNs: t0 + 1_000_000, endTimeNs: t0 + 4_000_000, statusCode: 2 }),
+      ]);
+      const row = store.db.prepare('SELECT has_error FROM traces WHERE trace_id = ?').get('dserr');
+      expect(row.has_error).toBe(1); // root is OK, but the child error must still flag the trace
+    });
+  });
+
   describe('incremental vacuum maintenance', () => {
     it('skips reclaim when ingest is recent (quiet-time gate)', () => {
       store.ingestSpans([makeSpan({ traceId: 'tq', spanId: 'sq' })]); // sets _lastIngestAt = now
