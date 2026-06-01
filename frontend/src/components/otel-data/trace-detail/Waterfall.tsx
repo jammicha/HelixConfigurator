@@ -94,7 +94,11 @@ const RollupPanel: React.FC<{
 const ServiceBreakdownPanel: React.FC<{
   breakdown: { name: string; totalMs: number }[];
   traceDurationMs: number;
-}> = ({ breakdown, traceDurationMs }) => {
+  hoveredService: string | null;
+  setHoveredService: (s: string | null) => void;
+  selectedService: string | null;
+  setSelectedService: (s: string | null) => void;
+}> = ({ breakdown, traceDurationMs, hoveredService, setHoveredService, selectedService, setSelectedService }) => {
   const total = breakdown.reduce((acc, b) => acc + b.totalMs, 0);
   // Use the larger of trace duration vs sum-of-services for the denominator
   // — a perfectly serial trace will sum to ~trace duration, but a heavily
@@ -106,31 +110,68 @@ const ServiceBreakdownPanel: React.FC<{
       <div className="flex items-center gap-2 mb-2">
         <Server className="w-3.5 h-3.5 text-link" />
         <span className="text-sm font-semibold text-gray-200">Service breakdown</span>
-        <span className="text-tiny text-gray-500 ml-auto">where the time went</span>
+        { (hoveredService || selectedService) && (
+          <button
+            onClick={() => { setHoveredService(null); setSelectedService(null); }}
+            className="text-[10px] text-gray-500 hover:text-gray-300 font-mono underline ml-2"
+          >
+            clear filter
+          </button>
+        )}
+        <span className="text-tiny text-gray-500 ml-auto">where the time went (click/hover to filter spans)</span>
       </div>
-      <div className="flex h-6 rounded overflow-hidden border border-gray-800 bg-gray-1000">
+      <div className="flex h-6 rounded overflow-hidden border border-gray-800 bg-gray-1000 flex-shrink-0">
         {breakdown.map(b => {
           const w = (b.totalMs / denom) * 100;
           if (w < 0.5) return null;
+          const isHovered = hoveredService === b.name;
+          const isSelected = selectedService === b.name;
           return (
-            <div
+            <button
               key={b.name}
+              type="button"
               style={{ width: `${w}%`, backgroundColor: colorForService(b.name) }}
               title={`${b.name}: ${formatDuration(b.totalMs)} (${(b.totalMs / denom * 100).toFixed(1)}%)`}
-              className="brightness-90 hover:brightness-110 transition-[filter]"
+              onMouseEnter={() => setHoveredService(b.name)}
+              onMouseLeave={() => setHoveredService(null)}
+              onClick={() => setSelectedService(selectedService === b.name ? null : b.name)}
+              className={`h-full border-r border-gray-900/40 transition-all cursor-pointer outline-none ${
+                isSelected 
+                  ? 'ring-1 ring-white z-10 scale-y-110 shadow-lg' 
+                  : isHovered 
+                    ? 'brightness-110 opacity-100' 
+                    : 'opacity-85'
+              }`}
             />
           );
         })}
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-tiny">
-        {breakdown.map(b => (
-          <div key={b.name} className="inline-flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: colorForService(b.name) }} />
-            <span className="text-gray-300">{b.name}</span>
-            <span className="text-gray-500 tabular-nums">{formatDuration(b.totalMs)}</span>
-            <span className="text-gray-600">({(b.totalMs / denom * 100).toFixed(0)}%)</span>
-          </div>
-        ))}
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-tiny">
+        {breakdown.map(b => {
+          const isHovered = hoveredService === b.name;
+          const isSelected = selectedService === b.name;
+          return (
+            <button
+              key={b.name}
+              type="button"
+              onMouseEnter={() => setHoveredService(b.name)}
+              onMouseLeave={() => setHoveredService(null)}
+              onClick={() => setSelectedService(selectedService === b.name ? null : b.name)}
+              className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded cursor-pointer transition-all duration-[150ms] border ${
+                isSelected 
+                  ? 'bg-primary/20 border-primary text-white font-semibold shadow' 
+                  : isHovered 
+                    ? 'bg-gray-800/60 border-gray-700 text-gray-200' 
+                    : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: colorForService(b.name) }} />
+              <span className="font-mono">{b.name}</span>
+              <span className="text-gray-500 font-normal tabular-nums">{formatDuration(b.totalMs)}</span>
+              <span className="text-gray-600 font-normal">({(b.totalMs / denom * 100).toFixed(0)}%)</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -141,6 +182,35 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
   const slowThresholdMs = useSlowThreshold();
   const [criticalPathOnly, setCriticalPathOnly] = useState(false);
   const [traceView, setTraceView] = useState<'waterfall' | 'flame'>('waterfall');
+  const [spanSearchQuery, setSpanSearchQuery] = useState('');
+  const [hoveredService, setHoveredService] = useState<string | null>(null);
+  const [selectedService, setSelectedService] = useState<string | null>(null);
+
+  const matchesSearch = (span: SpanDetail, query: string): boolean => {
+    if (!query) return false;
+    const q = query.toLowerCase();
+    if (span.name.toLowerCase().includes(q)) return true;
+    if (span.serviceName.toLowerCase().includes(q)) return true;
+    for (const val of Object.values(span.attributes)) {
+      if (val != null && String(val).toLowerCase().includes(q)) return true;
+    }
+    return false;
+  };
+
+  const isAnySearchOrFilterActive = !!spanSearchQuery || !!selectedService || !!hoveredService;
+
+  const isSpanHighlighted = (span: SpanDetail): boolean => {
+    if (spanSearchQuery && matchesSearch(span, spanSearchQuery)) return true;
+    const activeSvc = selectedService || hoveredService;
+    if (activeSvc && span.serviceName === activeSvc) return true;
+    return false;
+  };
+
+  const isSpanDimmed = (span: SpanDetail): boolean => {
+    if (!isAnySearchOrFilterActive) return false;
+    return !isSpanHighlighted(span);
+  };
+
   // SpanId → true means "this span's subtree is hidden in the waterfall".
   // Toggled only from the SpanRow chevron (parents only); leaf rows never
   // see a toggle callback so the chevron keeps its legacy detail-open meaning.
@@ -419,7 +489,14 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
       )}
 
       {serviceBreakdown.length > 0 && (
-        <ServiceBreakdownPanel breakdown={serviceBreakdown} traceDurationMs={serviceBreakdownDenom} />
+        <ServiceBreakdownPanel
+          breakdown={serviceBreakdown}
+          traceDurationMs={serviceBreakdownDenom}
+          hoveredService={hoveredService}
+          setHoveredService={setHoveredService}
+          selectedService={selectedService}
+          setSelectedService={setSelectedService}
+        />
       )}
 
       {(sqlRollup.length > 0 || httpRollup.length > 0) && (
@@ -439,7 +516,14 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
                   </span>,
                   String(b.count),
                   formatDuration(b.totalMs),
-                  <span className={b.maxMs > slowThresholdMs ? 'text-warning font-semibold' : ''}>{formatDuration(b.maxMs)}</span>,
+                  <div className="flex flex-col items-end">
+                    <span className={b.maxMs > slowThresholdMs ? 'text-warning font-semibold' : ''}>{formatDuration(b.maxMs)}</span>
+                    {b.maxMs > slowThresholdMs && (
+                      <span className="text-[9px] text-warning/70 select-none font-normal leading-none mt-0.5 pr-0.5">
+                        {`>${(b.maxMs / slowThresholdMs).toFixed(1)}x limit`}
+                      </span>
+                    )}
+                  </div>,
                 ],
               }))}
               footer={sqlRollup.length > 50 ? `+ ${sqlRollup.length - 50} more` : null}
@@ -459,7 +543,14 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
                     <span className="text-gray-500">{b.method || '?'} </span>{b.url || '(no url)'}
                   </span>,
                   String(b.count),
-                  formatDuration(b.totalMs),
+                  <div className="flex flex-col items-end">
+                    <span className={b.maxMs > slowThresholdMs ? 'text-warning font-semibold' : ''}>{formatDuration(b.totalMs)}</span>
+                    {b.maxMs > slowThresholdMs && (
+                      <span className="text-[9px] text-warning/70 select-none font-normal leading-none mt-0.5">
+                        {`max: ${formatDuration(b.maxMs)}`}
+                      </span>
+                    )}
+                  </div>,
                   <span className="inline-flex flex-wrap gap-1">
                     {Array.from(b.statuses.entries()).sort((a, b2) => a[0] - b2[0]).map(([code, n]) => (
                       <span
@@ -503,6 +594,26 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
               Critical path only
             </label>
           )}
+          {traceView === 'waterfall' && (
+            <div className="flex items-center gap-1.5 ml-4">
+              <input
+                type="text"
+                placeholder="Find in spans..."
+                value={spanSearchQuery}
+                onChange={(e) => setSpanSearchQuery(e.target.value)}
+                className="bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny text-gray-100 focus:outline-none focus:border-link max-w-[12rem] transition-colors"
+              />
+              {spanSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSpanSearchQuery('')}
+                  className="text-gray-500 hover:text-gray-300 text-tiny"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
           <span className="ml-auto text-tiny text-gray-500">
             {traceView === 'waterfall' ? (() => {
               const shown = visibleOrdered.filter(o => !criticalPathOnly || criticalPath.has(o.span.spanId)).length;
@@ -534,6 +645,8 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
                     descendantCount={descendantCount}
                     isCollapsed={collapsedIds.has(span.spanId)}
                     onToggleCollapsed={descendantCount > 0 ? () => toggleCollapsed(span.spanId) : null}
+                    isHighlighted={isSpanHighlighted(span)}
+                    isDimmed={isSpanDimmed(span)}
                   />
                 );
               })}
