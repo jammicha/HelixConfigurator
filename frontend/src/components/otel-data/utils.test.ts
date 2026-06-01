@@ -18,6 +18,8 @@ import {
   collapsibleSpanIds,
   nextFocusIndex,
   filterOperations,
+  isErrorSpan,
+  withAncestors,
 } from './utils';
 import type { OperationStat } from './types';
 
@@ -304,6 +306,40 @@ describe('filterOperations', () => {
 
   it('returns an empty list when nothing matches', () => {
     expect(filterOperations(ops, 'redis')).toEqual([]);
+  });
+});
+
+describe('isErrorSpan', () => {
+  const base = { spanId: 's', statusCode: 0, events: [] as any[] };
+  it('flags spans with OTel StatusCode=2 (ERROR)', () => {
+    expect(isErrorSpan({ ...base, statusCode: 2 } as unknown as SpanDetail)).toBe(true);
+  });
+  it('flags spans carrying an exception event regardless of status', () => {
+    expect(isErrorSpan({ ...base, events: [{ name: 'exception' }] } as unknown as SpanDetail)).toBe(true);
+  });
+  it('does not flag ok spans', () => {
+    expect(isErrorSpan({ ...base, statusCode: 1, events: [{ name: 'enqueue' }] } as unknown as SpanDetail)).toBe(false);
+  });
+});
+
+describe('withAncestors', () => {
+  const sp = (spanId: string, parentSpanId: string | null): SpanDetail =>
+    ({ spanId, parentSpanId, attributes: {}, events: [] }) as unknown as SpanDetail;
+
+  it('keeps each match plus its full ancestor chain to the root', () => {
+    // root → a → b, root → c. Error at b → keep b, a, root (not c).
+    const spans = [sp('root', null), sp('a', 'root'), sp('b', 'a'), sp('c', 'root')];
+    expect(withAncestors(spans, new Set(['b']))).toEqual(new Set(['b', 'a', 'root']));
+  });
+
+  it('merges overlapping ancestor paths without duplication', () => {
+    const spans = [sp('root', null), sp('a', 'root'), sp('b', 'a'), sp('d', 'a')];
+    expect(withAncestors(spans, new Set(['b', 'd']))).toEqual(new Set(['b', 'd', 'a', 'root']));
+  });
+
+  it('returns an empty set when there are no matches', () => {
+    const spans = [sp('root', null), sp('a', 'root')];
+    expect(withAncestors(spans, new Set())).toEqual(new Set());
   });
 });
 

@@ -231,6 +231,33 @@ export const filterOperations = (operations: OperationStat[], query: string): Op
   );
 };
 
+// Is this span a failure? Status ERROR (OTel StatusCode=2) or carries an
+// exception event. Single definition shared by the waterfall row styling and
+// the "Errors only" filter so they can't classify a span differently.
+export const isErrorSpan = (span: SpanDetail): boolean =>
+  span.statusCode === 2 || span.events.some(e => e.name === 'exception');
+
+// Expand a set of "matching" span ids to also include every ancestor up to the
+// root. Backs the "Errors only" waterfall filter: keeping the error spans alone
+// would orphan them from the tree, so we keep the path from each match back to
+// its root and the failure's context (which service called it, through what)
+// stays readable. Ancestors are resolved via parentSpanId; the walk stops at
+// the first already-kept node so shared prefixes aren't re-walked.
+export const withAncestors = (spans: SpanDetail[], matchIds: Set<string>): Set<string> => {
+  const keep = new Set<string>();
+  if (matchIds.size === 0) return keep;
+  const parentById = new Map<string, string | null>();
+  for (const s of spans) parentById.set(s.spanId, s.parentSpanId || null);
+  for (const id of matchIds) {
+    let cur: string | null = id;
+    while (cur && !keep.has(cur)) {
+      keep.add(cur);
+      cur = parentById.get(cur) ?? null;
+    }
+  }
+  return keep;
+};
+
 // Span ids in a trace that have at least one child span — i.e. the rows that
 // can be collapsed in the waterfall tree. Backs the "Collapse all" control
 // (collapse every parent → only roots remain visible). Parent ids that don't

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Activity, AlertTriangle, Clock, Database, Repeat, Server } from 'lucide-react';
 import type { LogRecord, SpanDetail, TraceDetail } from '../types';
 import { useSlowThreshold } from '../SlowThresholdContext';
-import { collapsibleSpanIds, countMatchingSpans, detectNPlusOne, formatDuration, spanMatchesQuery } from '../utils';
+import { collapsibleSpanIds, countMatchingSpans, detectNPlusOne, formatDuration, isErrorSpan, spanMatchesQuery, withAncestors } from '../utils';
 import { colorForService } from './palette';
 import { LogLine } from './LogLine';
 import { SpanRow } from './SpanRow';
@@ -181,6 +181,7 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
   const { spans, summary } = detail;
   const slowThresholdMs = useSlowThreshold();
   const [criticalPathOnly, setCriticalPathOnly] = useState(false);
+  const [errorsOnly, setErrorsOnly] = useState(false);
   const [traceView, setTraceView] = useState<'waterfall' | 'flame'>('waterfall');
   const [spanSearchQuery, setSpanSearchQuery] = useState('');
   const [hoveredService, setHoveredService] = useState<string | null>(null);
@@ -223,6 +224,21 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
   // "Expand all" disables when nothing is collapsed.
   const collapsibleIds = useMemo(() => collapsibleSpanIds(spans), [spans]);
   const allCollapsed = collapsibleIds.size > 0 && Array.from(collapsibleIds).every(id => collapsedIds.has(id));
+
+  // "Errors only" — error spans plus their ancestor chains, so the waterfall
+  // collapses to just the failing paths while keeping each failure's context
+  // (who called it, through what) visible. Null when the toggle is off so the
+  // render filter is a no-op. Off-state is forced when the trace has no error
+  // spans (the toggle hides), so errorSpanIds is also the gate for showing it.
+  const errorSpanIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const sp of spans) if (isErrorSpan(sp)) s.add(sp.spanId);
+    return s;
+  }, [spans]);
+  const errorsOnlyKeep = useMemo(
+    () => (errorsOnly ? withAncestors(spans, errorSpanIds) : null),
+    [errorsOnly, spans, errorSpanIds],
+  );
   const traceStartNs = useMemo(() => {
     let min = Infinity;
     for (const s of spans) if (s.startTimeNs < min) min = s.startTimeNs;
@@ -595,6 +611,20 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
               Critical path only
             </label>
           )}
+          {traceView === 'waterfall' && errorSpanIds.size > 0 && errorSpanIds.size < spans.length && (
+            <label className="ml-3 inline-flex items-center gap-1.5 text-tiny text-gray-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={errorsOnly}
+                onChange={(e) => setErrorsOnly(e.target.checked)}
+                className="accent-active"
+              />
+              Errors only
+              <span className="adapt-badge-danger" title={`${errorSpanIds.size} error span${errorSpanIds.size === 1 ? '' : 's'} in this trace`}>
+                {errorSpanIds.size}
+              </span>
+            </label>
+          )}
           {traceView === 'waterfall' && collapsibleIds.size > 0 && (
             <div className="ml-3 inline-flex items-center gap-1">
               <button
@@ -644,8 +674,10 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
           )}
           <span className="ml-auto text-tiny text-gray-500">
             {traceView === 'waterfall' ? (() => {
-              const shown = visibleOrdered.filter(o => !criticalPathOnly || criticalPath.has(o.span.spanId)).length;
-              const hidden = ordered.length - visibleOrdered.length;
+              const passesFilters = (spanId: string) =>
+                (!criticalPathOnly || criticalPath.has(spanId)) && (!errorsOnlyKeep || errorsOnlyKeep.has(spanId));
+              const shown = visibleOrdered.filter(o => passesFilters(o.span.spanId)).length;
+              const hidden = ordered.length - shown;
               return hidden > 0 ? `${shown} spans • ${hidden} hidden` : `${shown} spans`;
             })() : `${spans.length} spans • aggregated by depth`}
           </span>
@@ -658,7 +690,7 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
               <span className="w-20 text-right">Duration</span>
             </div>
             <div className="divide-y divide-gray-800">
-              {visibleOrdered.filter(o => !criticalPathOnly || criticalPath.has(o.span.spanId)).map(({ span, depth }) => {
+              {visibleOrdered.filter(o => (!criticalPathOnly || criticalPath.has(o.span.spanId)) && (!errorsOnlyKeep || errorsOnlyKeep.has(o.span.spanId))).map(({ span, depth }) => {
                 const descendantCount = descendantCountById.get(span.spanId) || 0;
                 return (
                   <SpanRow
