@@ -10,6 +10,7 @@ import { useGatewayActions } from './hooks/useGatewayActions';
 import { useTimeline } from './hooks/useTimeline';
 import { useRawMetrics } from './hooks/useRawMetrics';
 import { useTemplates } from './hooks/useTemplates';
+import { useTestConnection } from './hooks/useTestConnection';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
@@ -172,32 +173,8 @@ const App = () => {
     businessServiceKey: envVars.BUSINESS_SERVICE_KEY || '',
   }), [envVars.HELIX_ENDPOINT, envVars.HELIX_API_KEY, envVars.X_SOURCE, envVars.BUSINESS_SERVICE_KEY]);
 
-  const [testConnectionResult, setTestConnectionResult] = useState<{ status: string; message: string; remediation?: string; httpStatus?: number; latencyMs?: number } | null>(null);
-  const [testingConnection, setTestingConnection] = useState(false);
-  const handleTestConnection = async () => {
-    if (testingConnection) return;
-    setTestingConnection(true);
-    setTestConnectionResult(null);
-    try {
-      const res = await fetch('/api/diagnostics/test-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: envVars.HELIX_ENDPOINT, apiKey: envVars.HELIX_API_KEY }),
-      });
-      const data = await res.json();
-      setTestConnectionResult({
-        status: data.status || (res.ok ? 'unknown' : 'error'),
-        message: data.message || data.error || 'Test finished',
-        remediation: data.remediation,
-        httpStatus: data.httpStatus,
-        latencyMs: data.latencyMs,
-      });
-    } catch (e: any) {
-      setTestConnectionResult({ status: 'error', message: e?.message || 'Request failed' });
-    } finally {
-      setTestingConnection(false);
-    }
-  };
+  const { testConnectionResult, testingConnection, handleTestConnection } =
+    useTestConnection(envVars.HELIX_ENDPOINT, envVars.HELIX_API_KEY);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const metricsIntervalRef = useRef<any>(null);
@@ -407,13 +384,6 @@ const App = () => {
     if (setupError) setSetupError('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [envVars]);
-
-  // Clear stale test-connection result when the endpoint or key changes so
-  // a previous verdict doesn't mislead after the user edits either field.
-  useEffect(() => {
-    setTestConnectionResult(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [envVars.HELIX_ENDPOINT, envVars.HELIX_API_KEY]);
 
   // Poll for API Key Diagnostics
   usePolledFetch('/api/diagnostics/apikey', 10000,
