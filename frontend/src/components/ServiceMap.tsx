@@ -28,7 +28,6 @@ type Props = {
 
 const NODE_W = 168;
 const NODE_H = 44;
-const X_GAP = 60;
 const Y_GAP = 16;
 
 // Compute a layered DAG layout. Rank = longest distance from a root node (one

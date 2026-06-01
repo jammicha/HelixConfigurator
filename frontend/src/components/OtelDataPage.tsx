@@ -12,7 +12,6 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { TimelineChart, TIMELINE_COLORS } from './TimelineChart';
 import { OverviewTab } from './OverviewTab';
 import { useOverview } from '../hooks/useOverview';
 import { usePageRefresh } from '../hooks/usePageRefresh';
@@ -487,15 +486,6 @@ export const OtelDataPage: React.FC = () => {
     return {};
   };
 
-  // Window for the timeline chart itself. Stays at the broad `range` even when
-  // customRange is set — that way the chart shades the active selection rather
-  // than collapsing into it.
-  const resolveChartWindow = (): { sinceMs?: number; untilMs?: number } => {
-    const r = TIME_RANGES.find(x => x.value === range);
-    if (r?.ms) return { sinceMs: Date.now() - r.ms, untilMs: Date.now() };
-    return {};
-  };
-
   const refreshTraces = async () => {
     const params = new URLSearchParams();
     if (serviceFilter) params.set('service', serviceFilter);
@@ -534,8 +524,8 @@ export const OtelDataPage: React.FC = () => {
   // or chart window changes; refresh() below is what the page-wide refresh
   // interval calls to poll.
   //
-  // The window MUST be memoized — resolveChartWindow uses Date.now(), so
-  // computing it inline produces new sinceMs/untilMs on every render. That
+  // The window MUST be memoized — it uses Date.now(), so computing it
+  // inline produces new sinceMs/untilMs on every render. That
   // makes useOverview's deps unstable and causes a fetch-on-every-render
   // loop (observed at ~50 req/s, 22% CPU, 1.8 MB/s network). refreshNonce
   // is bumped on explicit refresh ticks so the window does advance when

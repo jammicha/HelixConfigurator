@@ -1,4 +1,4 @@
-import React, { createContext, useContext } from 'react';
+import { createContext, useContext } from 'react';
 import { SLOW_THRESHOLD_MS as DEFAULT_SLOW_THRESHOLD_MS } from './constants';
 
 // User-configurable "slow" threshold in milliseconds. Default mirrors the

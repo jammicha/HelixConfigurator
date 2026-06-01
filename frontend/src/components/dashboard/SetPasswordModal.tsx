@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { X, Loader2, AlertTriangle } from 'lucide-react';
 
 type Phase =
   | { kind: 'form'; error: string | null }

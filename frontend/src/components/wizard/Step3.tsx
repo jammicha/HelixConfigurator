@@ -250,9 +250,6 @@ export const Step3: React.FC<Props> = ({
                       // the network we'll disconnect so the action is
                       // unambiguous when a collector is on multiple.
                       (() => {
-                        const sharedNetworks = c.networks.filter(n => attachable.includes(n)
-                          ? false /* attachable is "not shared yet"; if reachable, the shared one isn't here */
-                          : true) || [];
                         // Best-effort: pick a non-system network that isn't in the
                         // attachable (unshared) list — that's the one we're already on.
                         const sharedNetwork = c.networks.find(n => !attachable.includes(n) && n !== 'helix-bridge') || c.networks[0];
