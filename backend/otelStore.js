@@ -42,6 +42,10 @@ const LOG_CAP = 20_000;
 // can arrive for trace IDs we don't see (sampling holes, propagated
 // upstream span IDs) and would accumulate without bound. Cap at 5k.
 const ERROR_CAP = 5_000;
+// Number of points in the per-operation latency sparkline on the Operations
+// tab. Small and fixed — enough to convey a trend in a ~80px-wide cell without
+// bloating the /api/operations payload.
+const SPARK_BUCKETS = 24;
 
 // OTLP/JSON encodes traceId/spanId as lowercase hex strings (per the OTLP
 // spec post-1.0). Older builds may emit base64; tolerate both so we don't
@@ -693,9 +697,15 @@ class OtelStore {
       where.push('trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
       params.push(container);
     }
-    const sql = `SELECT service_name, root_operation, duration_ms, has_error
+    const sql = `SELECT service_name, root_operation, duration_ms, has_error, received_at
                  FROM traces ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`;
     const rows = this.db.prepare(sql).all(...params);
+    // Concrete window for the per-operation latency sparkline. Mirrors
+    // tracesHistogram's default (last hour → now) when the caller didn't pin
+    // an explicit window, so the trend axis lines up with the timeline chart.
+    const now = Date.now();
+    const sparkStart = Number.isFinite(sinceMs) ? Number(sinceMs) : now - 60 * 60 * 1000;
+    const sparkEnd = Number.isFinite(untilMs) ? Number(untilMs) : now;
     const groups = new Map();
     for (const r of rows) {
       const key = `${r.service_name || ''}|${r.root_operation || ''}`;
@@ -705,6 +715,7 @@ class OtelStore {
           service_name: r.service_name || '',
           root_operation: r.root_operation || '',
           durations: [],
+          samples: [],
           error_count: 0,
           slow_count: 0,
           satisfied_count: 0,
@@ -713,6 +724,7 @@ class OtelStore {
         groups.set(key, g);
       }
       g.durations.push(r.duration_ms);
+      g.samples.push({ ts: r.received_at, dur: r.duration_ms });
       if (r.has_error) {
         g.error_count += 1;
       } else {
@@ -747,6 +759,7 @@ class OtelStore {
         error_count: g.error_count,
         slow_count: g.slow_count,
         apdex,
+        sparkline: latencySparkline(g.samples, sparkStart, sparkEnd, SPARK_BUCKETS),
       };
     }).sort((a, b) => b.trace_count - a.trace_count);
   }
@@ -1133,6 +1146,32 @@ const computePercentiles = (arr) => {
     return sorted[idx];
   };
   return { p50: at(0.5), p95: at(0.95), p99: at(0.99) };
+};
+
+// Compact per-operation latency sparkline: split [startMs, endMs] into `buckets`
+// equal slices and return the MEAN duration (ms) in each slice — 0 for empty
+// slices. Mean (not p95) keeps the line readable when an operation has only a
+// handful of traces per slice, where a per-slice p95 would just echo the single
+// slowest sample and read as noise. Samples whose timestamp falls outside the
+// window are clamped to the nearest edge bucket so a slightly-off received_at
+// (clock skew) still contributes rather than vanishing. The Operations tab
+// renders this beside the p95 column as a latency trend.
+const latencySparkline = (samples, startMs, endMs, buckets) => {
+  const n = Math.max(1, buckets | 0);
+  const out = new Array(n).fill(0);
+  if (!samples || samples.length === 0 || !(endMs > startMs)) return out;
+  const size = (endMs - startMs) / n;
+  const sums = new Array(n).fill(0);
+  const counts = new Array(n).fill(0);
+  for (const s of samples) {
+    let idx = Math.floor((s.ts - startMs) / size);
+    if (idx < 0) idx = 0;
+    if (idx >= n) idx = n - 1;
+    sums[idx] += s.dur || 0;
+    counts[idx] += 1;
+  }
+  for (let i = 0; i < n; i++) out[i] = counts[i] ? sums[i] / counts[i] : 0;
+  return out;
 };
 
 // Bin trace rows into a fixed number of equal-width time buckets. Each bucket
@@ -1660,4 +1699,4 @@ OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace,
   };
 };
 
-module.exports = { OtelStore, extractSpans, extractLogRecords, TRACE_CAP };
+module.exports = { OtelStore, extractSpans, extractLogRecords, latencySparkline, TRACE_CAP };

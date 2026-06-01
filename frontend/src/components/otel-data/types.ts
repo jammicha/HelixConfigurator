@@ -97,6 +97,11 @@ export type OperationStat = {
   error_count: number;
   slow_count: number;
   apdex: number;
+  // Per-bucket mean latency (ms) over the active window — a compact trend the
+  // Operations tab renders as a sparkline beside the p95 column. Fixed length
+  // (SPARK_BUCKETS on the backend); empty buckets are 0. Optional so rows from
+  // an older backend that predates the field still render.
+  sparkline?: number[];
 };
 
 // Per-(service, operation) span-latency percentiles from /api/operations/
