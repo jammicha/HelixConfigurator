@@ -217,6 +217,34 @@ export const buildHelixTraceUrl = (
   return `${env.endpoint.replace(/\/+$/, '')}/dashboards/d/OTelTraceDetails/otel-trace-details?${qs}`;
 };
 
+// Span ids in a trace that have at least one child span — i.e. the rows that
+// can be collapsed in the waterfall tree. Backs the "Collapse all" control
+// (collapse every parent → only roots remain visible). Parent ids that don't
+// resolve to a span actually in the trace (orphaned subtrees) are excluded so
+// collapsing them can't hide rows with no visible toggle to expand them again.
+export const collapsibleSpanIds = (spans: SpanDetail[]): Set<string> => {
+  const existing = new Set(spans.map(s => s.spanId));
+  const out = new Set<string>();
+  for (const s of spans) {
+    if (s.parentSpanId && existing.has(s.parentSpanId)) out.add(s.parentSpanId);
+  }
+  return out;
+};
+
+// Next row index for keyboard navigation in a list. Clamps at both ends (no
+// wrap — wrapping past the bottom back to the top reads as a glitch in a long
+// trace list). From "nothing focused" (-1), a downward step selects the first
+// row and an upward step the last, so the first keypress always lands on a
+// sensible edge regardless of direction.
+export const nextFocusIndex = (current: number, delta: number, length: number): number => {
+  if (length <= 0) return -1;
+  if (current < 0) return delta > 0 ? 0 : length - 1;
+  const next = current + delta;
+  if (next < 0) return 0;
+  if (next > length - 1) return length - 1;
+  return next;
+};
+
 // Does a span match the waterfall's free-text "Find in spans" query? Matches
 // the span name, its service, and any attribute value (case-insensitive).
 // Extracted from the Waterfall component so the highlight pass and the

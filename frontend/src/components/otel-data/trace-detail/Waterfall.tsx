@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Activity, AlertTriangle, Clock, Database, Repeat, Server } from 'lucide-react';
 import type { LogRecord, SpanDetail, TraceDetail } from '../types';
 import { useSlowThreshold } from '../SlowThresholdContext';
-import { countMatchingSpans, detectNPlusOne, formatDuration, spanMatchesQuery } from '../utils';
+import { collapsibleSpanIds, countMatchingSpans, detectNPlusOne, formatDuration, spanMatchesQuery } from '../utils';
 import { colorForService } from './palette';
 import { LogLine } from './LogLine';
 import { SpanRow } from './SpanRow';
@@ -218,6 +218,11 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
       return next;
     });
   };
+  // Every span that has children — the rows a "Collapse all" can fold. When all
+  // of them are collapsed only the roots remain, so "Collapse all" disables;
+  // "Expand all" disables when nothing is collapsed.
+  const collapsibleIds = useMemo(() => collapsibleSpanIds(spans), [spans]);
+  const allCollapsed = collapsibleIds.size > 0 && Array.from(collapsibleIds).every(id => collapsedIds.has(id));
   const traceStartNs = useMemo(() => {
     let min = Infinity;
     for (const s of spans) if (s.startTimeNs < min) min = s.startTimeNs;
@@ -589,6 +594,24 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
               />
               Critical path only
             </label>
+          )}
+          {traceView === 'waterfall' && collapsibleIds.size > 0 && (
+            <div className="ml-3 inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setCollapsedIds(new Set())}
+                disabled={collapsedIds.size === 0}
+                title="Expand every collapsed subtree"
+                className="px-2 py-0.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200 disabled:opacity-40 disabled:hover:bg-gray-800 disabled:hover:text-gray-400 disabled:cursor-not-allowed"
+              >Expand all</button>
+              <button
+                type="button"
+                onClick={() => setCollapsedIds(new Set(collapsibleIds))}
+                disabled={allCollapsed}
+                title="Collapse every subtree down to the root spans"
+                className="px-2 py-0.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200 disabled:opacity-40 disabled:hover:bg-gray-800 disabled:hover:text-gray-400 disabled:cursor-not-allowed"
+              >Collapse all</button>
+            </div>
           )}
           {traceView === 'waterfall' && (
             <div className="flex items-center gap-1.5 ml-4">
