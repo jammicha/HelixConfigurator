@@ -7,7 +7,10 @@ import type { OperationStat } from './types';
 export const OperationsTab: React.FC<{
   operations: OperationStat[];
   loading: boolean;
-  onJumpToOperation: (op: string) => void;
+  // Drill into the Traces tab scoped to BOTH the service and the operation —
+  // passing the operation name alone let same-named operations on other
+  // services (e.g. a shared GET /health) leak into the filtered list.
+  onJumpToOperation: (service: string, operation: string) => void;
 }> = ({ operations, loading, onJumpToOperation }) => {
   const slowThresholdMs = useSlowThreshold();
   const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'max' | 'count' | 'errors' | 'slow' | 'service' | 'apdex'>('p95');
@@ -114,8 +117,8 @@ export const OperationsTab: React.FC<{
                   <tr key={`${op.service_name}|${op.root_operation}`} className="border-b border-gray-800 hover:bg-gray-800/50">
                     <td className="px-4 py-2">
                       <button
-                        onClick={() => onJumpToOperation(op.root_operation)}
-                        title="Filter the trace list to this operation"
+                        onClick={() => onJumpToOperation(op.service_name, op.root_operation)}
+                        title={`Show traces for ${op.service_name} · ${op.root_operation}`}
                         className="text-left hover:underline"
                       >
                         <span className="text-gray-200">{op.service_name}</span>

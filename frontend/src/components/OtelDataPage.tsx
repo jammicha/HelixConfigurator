@@ -24,7 +24,7 @@ import { useLocalStorageState } from '../hooks/useLocalStorageState';
 import type { HelixEnv, OperationStat, ServiceOperationLatency, TraceDetail, TraceStatus, TraceSummary, TimeRange, LogRecord, ErrorRecord } from './otel-data/types';
 import { TIME_RANGES, SLOW_THRESHOLD_MS, INTERNAL_SERVICES, TRACE_LIST_LIMIT } from './otel-data/constants';
 import { SlowThresholdProvider } from './otel-data/SlowThresholdContext';
-import { serviceTraceView, buildOperationP95Map, buildHelixBusinessServiceUrl, hasRealHelixEndpoint } from './otel-data/utils';
+import { serviceTraceView, buildOperationP95Map, buildHelixBusinessServiceUrl, hasRealHelixEndpoint, hasActiveOtelFilters } from './otel-data/utils';
 import { CustomRangePopover } from './otel-data/CustomRangePopover';
 import { TabButton } from './otel-data/TabButton';
 import { TracesTab } from './otel-data/TracesTab';
@@ -896,6 +896,32 @@ export const OtelDataPage: React.FC = () => {
     }).catch(() => setDetailLoading(false));
   }, [selectedTraceId]);
 
+  // Single "Clear filters" reset for the top bar. The page accumulates filters
+  // across tabs (service / namespace / container / status / min-duration /
+  // search / custom window), several of which apply to tabs with no UI of their
+  // own to clear them — so one reset beats hunting down each control. Range
+  // returns to the 1h default; stream mode and slow threshold are display
+  // preferences, not filters, so they're intentionally left alone.
+  const filtersActive = hasActiveOtelFilters({
+    service: serviceFilter,
+    namespace: namespaceFilter,
+    container: containerFilter,
+    status: statusFilter,
+    minMs,
+    search: searchQuery,
+    customRange: !!customRange,
+  });
+  const resetAllFilters = () => {
+    setServiceFilter('');
+    setNamespaceFilter('');
+    setContainerFilter('');
+    setStatusFilter('');
+    setMinMs(0);
+    setSearchQuery('');
+    setCustomRange(null);
+    setRange('1h');
+  };
+
   return (
     <SlowThresholdProvider value={slowThresholdMs}>
     <div className="flex h-screen w-full overflow-hidden bg-gray-1000 font-sans text-gray-100 flex-col">
@@ -963,6 +989,16 @@ export const OtelDataPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-3 pb-2">
+            {filtersActive && (
+              <button
+                onClick={resetAllFilters}
+                title="Clear every active filter (service, namespace, container, status, min duration, search, custom window) and reset the range to 1h"
+                className="inline-flex items-center gap-1 text-tiny uppercase tracking-wider font-semibold text-link hover:text-white transition-colors border-r border-gray-800 pr-3"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear filters
+              </button>
+            )}
             <div ref={customRangePopoverRef} className="relative">
               <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
                 <Clock className="w-3.5 h-3.5" />
@@ -1272,7 +1308,12 @@ export const OtelDataPage: React.FC = () => {
           <OperationsTab
             operations={operations}
             loading={operationsLoading}
-            onJumpToOperation={(op) => {
+            onJumpToOperation={(service, op) => {
+              // Scope by service AND operation so a same-named operation on
+              // another service can't leak into the filtered list. Under a
+              // service filter the Traces table renders each row from that
+              // service's entry-span perspective, matching the operation row.
+              setServiceFilter(service);
               setSearchQuery(op);
               setActiveTab('traces');
             }}

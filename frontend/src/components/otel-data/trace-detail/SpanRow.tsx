@@ -4,6 +4,7 @@ import type { LogRecord, SpanDetail } from '../types';
 import { useSlowThreshold } from '../SlowThresholdContext';
 import { formatDuration } from '../utils';
 import { colorForService } from './palette';
+import { CopyButton } from '../CopyButton';
 import { LogLine } from './LogLine';
 
 export const SpanRow: React.FC<{
@@ -286,7 +287,16 @@ export const SpanRow: React.FC<{
 
           {Object.keys(span.attributes).length > 0 && (
             <div>
-              <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold mb-1">Attributes</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Attributes</div>
+                {/* Copy the full attribute set as pretty JSON — the shape you'd
+                    paste into a query builder, a ticket, or a colleague's DM. */}
+                <CopyButton
+                  value={JSON.stringify(span.attributes, null, 2)}
+                  label="Copy all"
+                  title="Copy all span attributes as JSON"
+                />
+              </div>
               <div className="bg-gray-1000 border border-gray-800 rounded p-2 text-tiny font-mono space-y-0.5 max-h-40 overflow-auto" style={{ fontFamily: "'Source Code Pro', monospace" }}>
                 {Object.entries(span.attributes).map(([k, v]) => (
                   <div key={k} className="flex gap-3">
