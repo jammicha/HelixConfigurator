@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 // otelStore.js is CommonJS (module.exports). createRequire bridges to it
 // from this .mjs test file so we don't have to rewrite the source.
 const require = createRequire(import.meta.url);
-const { OtelStore, extractSpans } = require('../otelStore');
+const { OtelStore, extractSpans, TRACE_CAP } = require('../otelStore');
 
 const makeSpan = (overrides = {}) => {
   const start = overrides.startTimeNs ?? 1_000_000_000;
@@ -44,22 +44,23 @@ describe('OtelStore', () => {
   });
 
   describe('TRACE_CAP eviction', () => {
-    it('keeps newest 500 traces when 600 are ingested, evicting oldest first', () => {
-      for (let i = 0; i < 600; i++) {
-        // Advance the clock so received_at strictly increases — the eviction
-        // query orders by received_at ASC, ties are not guaranteed stable.
+    it('keeps the newest TRACE_CAP traces, evicting oldest first', () => {
+      const overflow = 100;
+      const total = TRACE_CAP + overflow;
+      const id = (i) => `t${String(i).padStart(6, '0')}`;
+      for (let i = 0; i < total; i++) {
+        // Advance the clock so received_at strictly increases — eviction
+        // orders by received_at ASC and ties are not guaranteed stable.
         vi.setSystemTime(Date.now() + 1);
-        store.ingestSpans([makeSpan({
-          traceId: `t${String(i).padStart(4, '0')}`,
-          spanId: `s${i}`,
-        })]);
+        store.ingestSpans([makeSpan({ traceId: id(i), spanId: `s${i}` })]);
       }
       const { n } = store.countTraces.get();
-      expect(n).toBe(500);
-      expect(store.getTrace('t0000')).toBeNull();
-      expect(store.getTrace('t0099')).toBeNull();
-      expect(store.getTrace('t0100')).not.toBeNull();
-      expect(store.getTrace('t0599')).not.toBeNull();
+      expect(n).toBe(TRACE_CAP);
+      // Oldest `overflow` evicted; newest TRACE_CAP retained.
+      expect(store.getTrace(id(0))).toBeNull();
+      expect(store.getTrace(id(overflow - 1))).toBeNull();
+      expect(store.getTrace(id(overflow))).not.toBeNull();
+      expect(store.getTrace(id(total - 1))).not.toBeNull();
     });
   });
 

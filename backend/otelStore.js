@@ -11,7 +11,7 @@ const path = require('path');
 const EventEmitter = require('events');
 const Database = require('better-sqlite3');
 
-const TRACE_CAP = 500;
+const TRACE_CAP = 1000;
 
 // Services emitted by the configurator/sidecar pipeline itself. The Traces
 // tab's frontend filter hides these (see frontend/src/components/otel-data/
@@ -1555,4 +1555,4 @@ OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace,
   };
 };
 
-module.exports = { OtelStore, extractSpans, extractLogRecords };
+module.exports = { OtelStore, extractSpans, extractLogRecords, TRACE_CAP };
