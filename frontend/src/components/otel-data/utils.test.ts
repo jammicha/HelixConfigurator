@@ -15,6 +15,8 @@ import {
   spanMatchesQuery,
   countMatchingSpans,
   hasActiveOtelFilters,
+  collapsibleSpanIds,
+  nextFocusIndex,
 } from './utils';
 
 // This suite runs under TZ=America/Chicago (see the "test" script in
@@ -275,6 +277,47 @@ describe('detectNPlusOne', () => {
   it('ignores spans without a db.operation', () => {
     const spans = Array.from({ length: 6 }, () => span(undefined, 'orders'));
     expect(detectNPlusOne(spans)).toBeNull();
+  });
+});
+
+describe('collapsibleSpanIds', () => {
+  const sp = (spanId: string, parentSpanId: string | null): SpanDetail =>
+    ({ spanId, parentSpanId, attributes: {}, events: [] }) as unknown as SpanDetail;
+
+  it('returns only the span ids that have at least one child', () => {
+    // root → a → b, and root → c (leaf). Collapsible = root and a.
+    const spans = [sp('root', null), sp('a', 'root'), sp('b', 'a'), sp('c', 'root')];
+    expect(collapsibleSpanIds(spans)).toEqual(new Set(['root', 'a']));
+  });
+
+  it('excludes parent ids that are not spans in the trace (orphaned subtree)', () => {
+    // "ghost" is referenced as a parent but never present as a span.
+    const spans = [sp('x', 'ghost'), sp('y', 'x')];
+    expect(collapsibleSpanIds(spans)).toEqual(new Set(['x']));
+  });
+
+  it('returns an empty set for a flat, single-span, or empty trace', () => {
+    expect(collapsibleSpanIds([])).toEqual(new Set());
+    expect(collapsibleSpanIds([sp('only', null)])).toEqual(new Set());
+  });
+});
+
+describe('nextFocusIndex', () => {
+  it('selects the first row going down and the last going up from nothing focused', () => {
+    expect(nextFocusIndex(-1, 1, 5)).toBe(0);
+    expect(nextFocusIndex(-1, -1, 5)).toBe(4);
+  });
+
+  it('steps within bounds and clamps at both ends without wrapping', () => {
+    expect(nextFocusIndex(2, 1, 5)).toBe(3);
+    expect(nextFocusIndex(2, -1, 5)).toBe(1);
+    expect(nextFocusIndex(4, 1, 5)).toBe(4); // clamp at bottom
+    expect(nextFocusIndex(0, -1, 5)).toBe(0); // clamp at top
+  });
+
+  it('returns -1 for an empty list', () => {
+    expect(nextFocusIndex(-1, 1, 0)).toBe(-1);
+    expect(nextFocusIndex(3, 1, 0)).toBe(-1);
   });
 });
 

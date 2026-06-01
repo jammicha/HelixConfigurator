@@ -1298,6 +1298,7 @@ export const OtelDataPage: React.FC = () => {
             tracesLoading={tracesLoading}
             tracesError={tracesError}
             onSelect={setSelectedTraceId}
+            keyboardEnabled={!selectedTraceId}
             histogram={ov.tracesHistogram}
             customRange={customRange}
             onBucketClick={(s, u) => setCustomRange({ sinceMs: s, untilMs: u })}

@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, Database, ExternalLink, FileText, Loader2, Play, Server, X } from 'lucide-react';
 import { TimelineChart, TIMELINE_COLORS } from '../TimelineChart';
 import { BmcChevron } from './BmcChevron';
 import { StatusPill } from './StatusPill';
 import { MIN_DURATION_PRESETS } from './constants';
-import { buildHelixTraceUrl, failingOperationView, bottleneckOperationView, formatDuration, formatRelative, hasRealHelixEndpoint, serviceTraceView } from './utils';
+import { buildHelixTraceUrl, failingOperationView, bottleneckOperationView, formatDuration, formatRelative, hasRealHelixEndpoint, nextFocusIndex, serviceTraceView } from './utils';
 import { useSlowThreshold } from './SlowThresholdContext';
 import { useSyntheticRun } from '../../hooks/useSyntheticRun';
 import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
@@ -34,6 +34,9 @@ export const TracesTab: React.FC<{
   // isn't mistaken for "no traces yet".
   tracesError: string | null;
   onSelect: (traceId: string) => void;
+  // Disabled while the trace-detail drawer is open (the page passes
+  // !selectedTraceId) so j/k/Enter don't drive the list underneath the drawer.
+  keyboardEnabled: boolean;
   histogram: Histogram | null;
   customRange: { sinceMs: number; untilMs: number } | null;
   onBucketClick: (sinceMs: number, untilMs: number) => void;
@@ -43,7 +46,7 @@ export const TracesTab: React.FC<{
   namespaceFilter, containerFilter,
   statusFilter, setStatusFilter,
   searchQuery, setSearchQuery, minMs, setMinMs,
-  helixEnv, operationP95, tracesLoading, tracesError, onSelect,
+  helixEnv, operationP95, tracesLoading, tracesError, onSelect, keyboardEnabled,
   histogram, customRange, onBucketClick, onClearCustomRange,
 }) => {
   const slowThresholdMs = useSlowThreshold();
@@ -75,6 +78,49 @@ export const TracesTab: React.FC<{
   }, [traces, sortKey, sortDir]);
   const sortIndicator = (key: SortKey) =>
     sortKey === key ? (sortDir === 'desc' ? ' ▾' : ' ▴') : '';
+
+  // Keyboard navigation. Track the focused row by trace_id (not index) so the
+  // highlight sticks to the same trace as live SSE merges prepend new rows and
+  // shift indices. The index is derived for stepping/scroll-into-view.
+  const [focusedTraceId, setFocusedTraceId] = useState<string | null>(null);
+  const focusedIndex = useMemo(
+    () => (focusedTraceId ? sortedTraces.findIndex(t => t.trace_id === focusedTraceId) : -1),
+    [sortedTraces, focusedTraceId],
+  );
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+
+  useEffect(() => {
+    if (!keyboardEnabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Never hijack typing in the search box / dropdowns, or browser shortcuts.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const len = sortedTraces.length;
+      if (len === 0) return;
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const ni = nextFocusIndex(focusedIndex, 1, len);
+        setFocusedTraceId(sortedTraces[ni]?.trace_id ?? null);
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const ni = nextFocusIndex(focusedIndex, -1, len);
+        setFocusedTraceId(sortedTraces[ni]?.trace_id ?? null);
+      } else if (e.key === 'Enter' && focusedIndex >= 0) {
+        e.preventDefault();
+        onSelect(sortedTraces[focusedIndex].trace_id);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [keyboardEnabled, sortedTraces, focusedIndex, onSelect]);
+
+  // Keep the focused row in view as the selection steps past the fold.
+  useEffect(() => {
+    if (!focusedTraceId) return;
+    rowRefs.current.get(focusedTraceId)?.scrollIntoView({ block: 'nearest' });
+  }, [focusedTraceId]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-end gap-3 mb-4 flex-wrap">
@@ -162,14 +208,25 @@ export const TracesTab: React.FC<{
             )}
           </div>
         </div>
-        <div className="ml-auto text-tiny text-gray-500 pb-1">
-          {(() => {
-            const windowTotal = histogram?.buckets.reduce((a, b) => a + (b.total || 0), 0) ?? null;
-            if (windowTotal != null && windowTotal > traces.length) {
-              return <>{traces.length} of {windowTotal.toLocaleString()} traces in window <span className="text-gray-600" title="The table shows the most recent matching traces (server-capped). The volume chart counts everything in the window.">· most recent shown</span></>;
-            }
-            return <>{traces.length} trace{traces.length === 1 ? '' : 's'}</>;
-          })()}
+        <div className="ml-auto flex items-center gap-3 pb-1">
+          {keyboardEnabled && traces.length > 0 && (
+            <div className="hidden lg:flex items-center gap-1 text-tiny text-gray-600 select-none" title="Use J / K or the arrow keys to move between traces, Enter to open the focused trace">
+              <kbd className="px-1 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">J</kbd>
+              <kbd className="px-1 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">K</kbd>
+              <span>navigate</span>
+              <kbd className="px-1 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">↵</kbd>
+              <span>open</span>
+            </div>
+          )}
+          <div className="text-tiny text-gray-500">
+            {(() => {
+              const windowTotal = histogram?.buckets.reduce((a, b) => a + (b.total || 0), 0) ?? null;
+              if (windowTotal != null && windowTotal > traces.length) {
+                return <>{traces.length} of {windowTotal.toLocaleString()} traces in window <span className="text-gray-600" title="The table shows the most recent matching traces (server-capped). The volume chart counts everything in the window.">· most recent shown</span></>;
+              }
+              return <>{traces.length} trace{traces.length === 1 ? '' : 's'}</>;
+            })()}
+          </div>
         </div>
       </div>
 
@@ -270,8 +327,14 @@ export const TracesTab: React.FC<{
                 return (
                 <tr
                   key={t.trace_id}
-                  onClick={() => onSelect(t.trace_id)}
-                  className="group border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors"
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(t.trace_id, el);
+                    else rowRefs.current.delete(t.trace_id);
+                  }}
+                  onClick={() => { setFocusedTraceId(t.trace_id); onSelect(t.trace_id); }}
+                  className={`group border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors ${
+                    t.trace_id === focusedTraceId ? 'bg-primary/10 ring-1 ring-inset ring-primary/50' : ''
+                  }`}
                   title={`Click to view detailed waterfall Gantt chart with ${t.span_count} spans`}
                 >
                   <td className="px-4 py-2">
