@@ -6,6 +6,7 @@ import { useLocalStorageState } from './hooks/useLocalStorageState';
 import { useSmartAdd } from './hooks/useSmartAdd';
 import { useToasts } from './hooks/useToasts';
 import { usePolledFetch } from './hooks/usePolledFetch';
+import { useGatewayActions } from './hooks/useGatewayActions';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
@@ -55,7 +56,6 @@ const App = () => {
   const [networkDiag, setNetworkDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [expandedRemediations, setExpandedRemediations] = useState<Record<number, boolean>>({});
   const [gatewayStatus, setGatewayStatus] = useState('unknown'); // running, exited, restarting, error
-  const [actionLoading, setActionLoading] = useState<'start' | 'stop' | 'restart' | null>(null);
   const [isConfigSaving, setIsConfigSaving] = useState(false);
   // Toast stack (state, eviction, and auto-dismiss timers live in the hook).
   const { toasts, showToast: showToastMsg } = useToasts();
@@ -759,54 +759,12 @@ const App = () => {
     }
   };
 
-  // start/stop share the same shape: guard, flip actionLoading, POST, toast
-  // the action-specific result. (restart is separate — it also polls +
-  // refreshes the collector diag.)
-  const runGatewayAction = async (
-    action: 'start' | 'stop',
-    messages: { ok: string; fail: string; err: string },
-  ) => {
-    if (actionLoading) return;
-    setActionLoading(action);
-    try {
-      const res = await fetch(`/api/lifecycle/${action}`, { method: 'POST' });
-      showToastMsg(res.ok ? messages.ok : messages.fail, res.ok ? 'success' : 'error');
-    } catch (e) {
-      showToastMsg(messages.err, 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleStart = () => runGatewayAction('start', {
-    ok: 'Gateway Started Successfully', fail: 'Failed to start gateway', err: 'Error starting gateway',
+  const { actionLoading, handleStart, handleStop, handleRestart } = useGatewayActions({
+    showToast: showToastMsg,
+    setGatewayStatus,
+    setCollectorDiag,
+    pushTimelineEvent,
   });
-  const handleStop = () => runGatewayAction('stop', {
-    ok: 'Gateway Stopped Successfully', fail: 'Failed to stop gateway', err: 'Error stopping gateway',
-  });
-
-  const handleRestart = async () => {
-    if (actionLoading) return;
-    setActionLoading('restart');
-    setGatewayStatus('restarting');
-    try {
-      const res = await fetch('/api/lifecycle/restart', { method: 'POST' });
-      if (res.ok) {
-        showToastMsg('Gateway Restarted Successfully');
-        pushTimelineEvent('restart', 'Gateway restarted');
-        // Poll for the gateway to settle instead of a blind 3s sleep.
-        await waitForGatewayRunning(15000);
-        const collectorStatus = await fetch('/api/diagnostics/collector').then(r => r.json());
-        setCollectorDiag(collectorStatus);
-      } else {
-        showToastMsg('Failed to restart gateway', 'error');
-      }
-    } catch (e) {
-      showToastMsg('Error restarting gateway', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
 
   const handleInitialize = async () => {
     setIsVerifying(true);
