@@ -8,6 +8,7 @@ import { useToasts } from './hooks/useToasts';
 import { usePolledFetch } from './hooks/usePolledFetch';
 import { useGatewayActions } from './hooks/useGatewayActions';
 import { useTimeline } from './hooks/useTimeline';
+import { useRawMetrics } from './hooks/useRawMetrics';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
@@ -62,10 +63,15 @@ const App = () => {
   const { toasts, showToast: showToastMsg } = useToasts();
   const [logs, setLogs] = useState<string[]>([]);
   const [logFilter, setLogFilter] = useState<'helix' | 'all'>('helix');
-  const [isRawMetricsOpen, setIsRawMetricsOpen] = useState(false);
-  const [rawMetricsText, setRawMetricsText] = useState('');
-  const [isLoadingRawMetrics, setIsLoadingRawMetrics] = useState(false);
-  const [rawMetricsFilter, setRawMetricsFilter] = useState<'relevant' | 'all'>('relevant');
+  const {
+    isOpen: isRawMetricsOpen,
+    text: rawMetricsText,
+    isLoading: isLoadingRawMetrics,
+    filter: rawMetricsFilter,
+    setFilter: setRawMetricsFilter,
+    open: handleOpenRawMetrics,
+    close: closeRawMetrics,
+  } = useRawMetrics();
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loadingTemplateId, setLoadingTemplateId] = useState<string | null>(null);
@@ -611,22 +617,8 @@ const App = () => {
     }
   };
 
-  const handleOpenRawMetrics = async () => {
-    setIsRawMetricsOpen(true);
-    setIsLoadingRawMetrics(true);
-    try {
-      const res = await fetch('/api/diagnostics/metrics/raw');
-      const text = await res.text();
-      setRawMetricsText(text);
-    } catch (err: any) {
-      setRawMetricsText(`Failed to fetch metrics: ${err.message || err}`);
-    } finally {
-      setIsLoadingRawMetrics(false);
-    }
-  };
-
   useEscClose(isTemplatesOpen, () => setIsTemplatesOpen(false));
-  useEscClose(isRawMetricsOpen, () => setIsRawMetricsOpen(false));
+  useEscClose(isRawMetricsOpen, closeRawMetrics);
   useEscClose(isServicesOpen, () => setIsServicesOpen(false));
   useEscClose(!!confirmDialog, () => setConfirmDialog(null));
 
@@ -1664,7 +1656,7 @@ const App = () => {
           navigator.clipboard.writeText(filtered);
           showToastMsg('Metrics copied to clipboard');
         }}
-        onClose={() => setIsRawMetricsOpen(false)}
+        onClose={closeRawMetrics}
       />
 
       {/* Discovered Services Pinned Sidebar Panel */}
