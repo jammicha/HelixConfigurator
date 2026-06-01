@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Database, FileText } from 'lucide-react';
 import type { LogRecord, SpanDetail } from '../types';
 import { useSlowThreshold } from '../SlowThresholdContext';
-import { formatDuration } from '../utils';
+import { formatDuration, isErrorSpan } from '../utils';
 import { colorForService } from './palette';
 import { CopyButton } from '../CopyButton';
 import { LogLine } from './LogLine';
@@ -31,7 +31,7 @@ export const SpanRow: React.FC<{
   const leftPct = (offsetNs / traceDurationNs) * 100;
   const widthPct = Math.max(0.5, (widthNs / traceDurationNs) * 100);
 
-  const isError = span.statusCode === 2 || span.events.some(e => e.name === 'exception');
+  const isError = isErrorSpan(span);
   const isSlow = span.durationMs > slowThresholdMs;
   // OTel renamed several DB attributes in semconv 1.27+. Read both old and
   // new keys so spans from either era render the same way.
