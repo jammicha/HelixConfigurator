@@ -7,7 +7,6 @@ import { MIN_DURATION_PRESETS } from './constants';
 import { buildHelixTraceUrl, failingOperationView, bottleneckOperationView, formatDuration, formatRelative, hasRealHelixEndpoint, serviceTraceView } from './utils';
 import { useSlowThreshold } from './SlowThresholdContext';
 import { useSyntheticRun } from '../../hooks/useSyntheticRun';
-import { colorForService } from './trace-detail/palette';
 import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
 
 export const TracesTab: React.FC<{
@@ -309,21 +308,6 @@ export const TracesTab: React.FC<{
                         </span>
                       )}
                     </span>
-                    {t.participating_services && t.participating_services.length > 1 && (
-                      <div className="mt-1 flex items-center gap-1 text-tiny text-gray-500 font-normal flex-wrap">
-                        {t.participating_services.map((s, idx) => (
-                          <React.Fragment key={s}>
-                            {idx > 0 && <span className="text-gray-600">➔</span>}
-                            <span
-                              className="px-1.5 py-0.5 rounded font-mono text-gray-300 bg-gray-900 border border-gray-800"
-                              style={{ borderLeftColor: colorForService(s), borderLeftWidth: 3 }}
-                            >
-                              {s}
-                            </span>
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    )}
                     {(() => {
                       // Failing operation as a subline under the service — the
                       // originating error span's name, so the list names *what*

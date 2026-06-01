@@ -1073,38 +1073,39 @@ export const OtelDataPage: React.FC = () => {
               and Logs/Errors all see the same picker. The filter state itself is
               page-level — applies to every tab — and was previously only visible
               from Traces, which was confusing (active filter, no UI to clear it).
-              Conditionally rendered: only show a dropdown if we've actually seen
-              spans carrying that resource attr, so collectors that don't set
-              service.namespace / container.name don't get a useless picker. The
-              || namespaceFilter clause is belt-and-suspenders for a deep-linked
-              filter that arrives before the first /filter-values response —
-              keeps the (stale) clear-out option reachable.
+              Namespace is ALWAYS shown — service.namespace is this tool's core
+              routing concept (it maps to the Helix namespace), so its filter must
+              never silently vanish. (A stale build that lacked namespace data was
+              misread as "the namespace filter is gone.") When no namespaces have
+              been seen yet it simply offers "All". Container stays conditional —
+              it's a secondary attribute, so collectors that don't set
+              container.name don't get a useless picker. The || *Filter clauses are
+              belt-and-suspenders for a deep-linked filter that arrives before the
+              first /filter-values response — keeps the (stale) option reachable.
               Highlighted with the active color when a filter is engaged so the
               non-Traces tabs (which have no other filter UI) make the active
               filter visible at a glance.
             */}
-            {(namespaces.length > 0 || namespaceFilter) && (
-              <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
-                <Server className="w-3.5 h-3.5" />
-                Namespace
-                <select
-                  value={namespaceFilter}
-                  onChange={(e) => setNamespaceFilter(e.target.value)}
-                  title="Filter by OTel resource attribute service.namespace. Applies to every tab."
-                  className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-link normal-case tracking-normal font-normal ${
-                    namespaceFilter ? 'border-active text-link' : 'border-gray-800 text-gray-200'
-                  }`}
-                >
-                  <option value="">All</option>
-                  {namespaces.map(n => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                  {namespaceFilter && !namespaces.includes(namespaceFilter) && (
-                    <option value={namespaceFilter}>{namespaceFilter} (stale)</option>
-                  )}
-                </select>
-              </label>
-            )}
+            <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
+              <Server className="w-3.5 h-3.5" />
+              Namespace
+              <select
+                value={namespaceFilter}
+                onChange={(e) => setNamespaceFilter(e.target.value)}
+                title="Filter by OTel resource attribute service.namespace. Applies to every tab."
+                className={`bg-gray-1000 border rounded px-2 py-0.5 text-tiny focus:outline-none focus:border-link normal-case tracking-normal font-normal ${
+                  namespaceFilter ? 'border-active text-link' : 'border-gray-800 text-gray-200'
+                }`}
+              >
+                <option value="">All</option>
+                {namespaces.map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+                {namespaceFilter && !namespaces.includes(namespaceFilter) && (
+                  <option value={namespaceFilter}>{namespaceFilter} (stale)</option>
+                )}
+              </select>
+            </label>
             {(containers.length > 0 || containerFilter) && (
               <label className="inline-flex items-center gap-1.5 text-tiny uppercase tracking-wider font-semibold text-gray-400">
                 <Server className="w-3.5 h-3.5" />
