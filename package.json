@@ -1,0 +1,14 @@
+{
+  "name": "helix-configurator",
+  "private": true,
+  "description": "Root convenience scripts. The app lives in two self-contained packages (frontend/, backend/); these just fan out to both so you don't have to cd around. The Dockerfile builds each package directly and ignores this file.",
+  "scripts": {
+    "install:all": "npm --prefix backend ci && npm --prefix frontend ci",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "npm --prefix backend test",
+    "test:frontend": "npm --prefix frontend test",
+    "build": "npm --prefix frontend run build",
+    "dev:backend": "npm --prefix backend start",
+    "dev:frontend": "npm --prefix frontend run dev"
+  }
+}
