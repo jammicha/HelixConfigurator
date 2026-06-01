@@ -78,6 +78,27 @@ describe('OtelStore', () => {
     });
   });
 
+  describe('incremental vacuum maintenance', () => {
+    it('skips reclaim when ingest is recent (quiet-time gate)', () => {
+      store.ingestSpans([makeSpan({ traceId: 'tq', spanId: 'sq' })]); // sets _lastIngestAt = now
+      const spy = vi.spyOn(store.db, 'pragma');
+      store._maybeIncrementalVacuum();
+      const ranIncVac = spy.mock.calls.some(([arg]) => String(arg).includes('incremental_vacuum'));
+      expect(ranIncVac).toBe(false);
+      spy.mockRestore();
+    });
+
+    it('attempts reclaim once ingest has been quiet', () => {
+      store.ingestSpans([makeSpan({ traceId: 'tq2', spanId: 'sq2' })]);
+      store._lastIngestAt = Date.now() - 10_000; // older than the quiet window
+      const spy = vi.spyOn(store.db, 'pragma');
+      store._maybeIncrementalVacuum();
+      const checkedFreelist = spy.mock.calls.some(([arg]) => String(arg).includes('freelist_count'));
+      expect(checkedFreelist).toBe(true);
+      spy.mockRestore();
+    });
+  });
+
   describe('listTraces participant filter', () => {
     it('includes traces with at least one non-internal participating span', () => {
       store.ingestSpans([
