@@ -11,6 +11,7 @@ import { useTimeline } from './hooks/useTimeline';
 import { useRawMetrics } from './hooks/useRawMetrics';
 import { useTemplates } from './hooks/useTemplates';
 import { useTestConnection } from './hooks/useTestConnection';
+import { useAuth } from './hooks/useAuth';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
@@ -185,7 +186,8 @@ const App = () => {
   const isTogglingDiagRef = useRef(false);
 
   const [envLoaded, setEnvLoaded] = useState(false);
-  const [authStatus, setAuthStatus] = useState<{ required: boolean; authenticated: boolean } | null>(null);
+  // Auth gate (status check on mount + login/logout) lives in the hook.
+  const { authStatus, performLogin, handleLogout } = useAuth();
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
   const [isTogglingDiag, setIsTogglingDiag] = useState(false);
   const [systemHealth, setSystemHealth] = useState<any>(null);
@@ -201,38 +203,6 @@ const App = () => {
   // until the user has replaced that placeholder with a real tenant URL —
   // otherwise clicking "View dashboard" opens the literal placeholder host.
   const hasRealHelixEndpoint = !!helixConfig.baseUrl && !/\/\/your-tenant\.onbmc\.com\b/i.test(helixConfig.baseUrl);
-
-  // Check auth status on mount; gate the rest of the app on it.
-  useEffect(() => {
-    fetch('/api/auth/status')
-      .then(r => r.json())
-      .then(data => setAuthStatus(data))
-      .catch(() => setAuthStatus({ required: true, authenticated: false }));
-  }, []);
-
-  const performLogin = async (password: string): Promise<{ ok: boolean; error?: string }> => {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      if (res.ok) {
-        setAuthStatus({ required: true, authenticated: true });
-        return { ok: true };
-      }
-      return { ok: false, error: 'Invalid password' };
-    } catch {
-      return { ok: false, error: 'Login request failed' };
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-    } catch {}
-    setAuthStatus({ required: true, authenticated: false });
-  };
 
   // Shared between the top-nav Onboarding tab and the app-switcher
   // dropdown. Tears down any active diagnostic session, resets dashboard
