@@ -211,7 +211,7 @@ Diagnostics popover (top-right of the page) lists detected upstream OTel collect
 
 Both containers attach to the `helix-bridge` Docker network. Application containers can be attached to the same network at runtime via the *Discovered Services* panel — once attached, point your app's OTel exporter at `helix-gateway:4317` and `X-Api-Key` / `X-Source` headers will be injected by the gateway.
 
-The gateway also fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is a SQLite database mounted at `./data/otel-store.db` (capped at 500 traces, sliding window) and persists across container restarts.
+The gateway also fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is a SQLite database mounted at `./data/otel-store.db` (capped at 1000 traces, sliding window) and persists across container restarts.
 
 The configurator also exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes — bypasses the auth gate so it works in unauthenticated orchestrator checks.
 

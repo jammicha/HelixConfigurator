@@ -4,6 +4,8 @@
 // over otelStore methods; the heavy lifting (aggregation, percentile math,
 // service-map graph construction, insight rules) lives there.
 
+const { TRACE_CAP } = require('../otelStore');
+
 function register(app, { otelStore, docker }) {
   // Pull the three resource-level filters off the query string in one place
   // so every endpoint that supports them stays in sync. typeof checks tolerate
@@ -25,7 +27,7 @@ function register(app, { otelStore, docker }) {
     // (including the LEFT JOIN against the rollup CTEs) never sees a request
     // for an unreasonable LIMIT in the first place.
     const requested = limit ? Number(limit) : 200;
-    const clampedLimit = Math.min(500, Math.max(1, Number.isFinite(requested) ? requested : 200));
+    const clampedLimit = Math.min(TRACE_CAP, Math.max(1, Number.isFinite(requested) ? requested : 200));
     const traces = otelStore.listTraces({
       service: svc,
       namespace,

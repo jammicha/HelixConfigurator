@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // otelStore.js is CommonJS (module.exports). createRequire bridges to it
 // from this .mjs test file so we don't have to rewrite the source.
 const require = createRequire(import.meta.url);
-const { OtelStore, extractSpans } = require('../otelStore');
+const { OtelStore, extractSpans, TRACE_CAP } = require('../otelStore');
+const Database = require('better-sqlite3');
 
 const makeSpan = (overrides = {}) => {
   const start = overrides.startTimeNs ?? 1_000_000_000;
@@ -44,22 +48,54 @@ describe('OtelStore', () => {
   });
 
   describe('TRACE_CAP eviction', () => {
-    it('keeps newest 500 traces when 600 are ingested, evicting oldest first', () => {
-      for (let i = 0; i < 600; i++) {
-        // Advance the clock so received_at strictly increases — the eviction
-        // query orders by received_at ASC, ties are not guaranteed stable.
+    it('keeps the newest TRACE_CAP traces, evicting oldest first', () => {
+      const overflow = 100;
+      const total = TRACE_CAP + overflow;
+      const id = (i) => `t${String(i).padStart(6, '0')}`;
+      for (let i = 0; i < total; i++) {
+        // Advance the clock so received_at strictly increases — eviction
+        // orders by received_at ASC and ties are not guaranteed stable.
         vi.setSystemTime(Date.now() + 1);
-        store.ingestSpans([makeSpan({
-          traceId: `t${String(i).padStart(4, '0')}`,
-          spanId: `s${i}`,
-        })]);
+        store.ingestSpans([makeSpan({ traceId: id(i), spanId: `s${i}` })]);
       }
       const { n } = store.countTraces.get();
-      expect(n).toBe(500);
-      expect(store.getTrace('t0000')).toBeNull();
-      expect(store.getTrace('t0099')).toBeNull();
-      expect(store.getTrace('t0100')).not.toBeNull();
-      expect(store.getTrace('t0599')).not.toBeNull();
+      expect(n).toBe(TRACE_CAP);
+      // Oldest `overflow` evicted; newest TRACE_CAP retained.
+      expect(store.getTrace(id(0))).toBeNull();
+      expect(store.getTrace(id(overflow - 1))).toBeNull();
+      expect(store.getTrace(id(overflow))).not.toBeNull();
+      expect(store.getTrace(id(total - 1))).not.toBeNull();
+    });
+  });
+
+  describe('pragmas', () => {
+    it('opens with incremental auto_vacuum', () => {
+      expect(store.db.pragma('auto_vacuum', { simple: true })).toBe(2); // INCREMENTAL
+    });
+    it('uses in-memory temp store and a 16 MB page cache', () => {
+      expect(store.db.pragma('temp_store', { simple: true })).toBe(2);     // MEMORY
+      expect(store.db.pragma('cache_size', { simple: true })).toBe(-16000); // ~16 MB
+    });
+  });
+
+  describe('incremental vacuum maintenance', () => {
+    it('skips reclaim when ingest is recent (quiet-time gate)', () => {
+      store.ingestSpans([makeSpan({ traceId: 'tq', spanId: 'sq' })]); // sets _lastIngestAt = now
+      const spy = vi.spyOn(store.db, 'pragma');
+      store._maybeIncrementalVacuum();
+      const ranIncVac = spy.mock.calls.some(([arg]) => String(arg).includes('incremental_vacuum'));
+      expect(ranIncVac).toBe(false);
+      spy.mockRestore();
+    });
+
+    it('attempts reclaim once ingest has been quiet', () => {
+      store.ingestSpans([makeSpan({ traceId: 'tq2', spanId: 'sq2' })]);
+      store._lastIngestAt = Date.now() - 10_000; // older than the quiet window
+      const spy = vi.spyOn(store.db, 'pragma');
+      store._maybeIncrementalVacuum();
+      const checkedFreelist = spy.mock.calls.some(([arg]) => String(arg).includes('freelist_count'));
+      expect(checkedFreelist).toBe(true);
+      spy.mockRestore();
     });
   });
 
@@ -499,6 +535,28 @@ describe('namespace/container filtering', () => {
     const { namespaces, containers } = store.listFilterValues();
     expect(namespaces).toEqual(['prod']);
     expect(containers.sort()).toEqual(['cart-a', 'inv-a']);
+  });
+});
+
+describe('auto_vacuum conversion', () => {
+  it('converts a pre-existing NONE database to INCREMENTAL', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'otelstore-'));
+    const dbPath = path.join(dir, 'legacy.db');
+    // Seed a DB in auto_vacuum=NONE with a table so the mode is committed.
+    const seed = new Database(dbPath);
+    seed.pragma('auto_vacuum = NONE');
+    seed.exec('CREATE TABLE seed (id INTEGER)');
+    expect(seed.pragma('auto_vacuum', { simple: true })).toBe(0); // NONE
+    seed.close();
+
+    const store = new OtelStore({ dbPath });
+    try {
+      expect(store.db.pragma('auto_vacuum', { simple: true })).toBe(2); // INCREMENTAL
+    } finally {
+      store.stopMaintenance();
+      store.db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

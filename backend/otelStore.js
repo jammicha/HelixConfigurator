@@ -11,7 +11,15 @@ const path = require('path');
 const EventEmitter = require('events');
 const Database = require('better-sqlite3');
 
-const TRACE_CAP = 500;
+const TRACE_CAP = 1000;
+
+// Incremental-vacuum maintenance: reclaim freelist pages in small,
+// non-blocking chunks during ingest-quiet windows (replaces a blocking full
+// VACUUM that froze the event loop — and OTLP ingest — for the whole rewrite).
+// All three are tunable.
+const INC_VACUUM_PAGES = 200;           // ~800 KB/cycle at the 4 KB page size
+const INC_VACUUM_INTERVAL_MS = 10_000;  // how often to attempt reclaim
+const VACUUM_QUIET_MS = 2_000;          // skip if ingest landed within this window
 
 // Services emitted by the configurator/sidecar pipeline itself. The Traces
 // tab's frontend filter hides these (see frontend/src/components/otel-data/
@@ -188,6 +196,11 @@ class OtelStore {
     this.events.setMaxListeners(50);
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
+    // Incremental auto-vacuum: eviction's deletes move pages to the freelist,
+    // reclaimed in small non-blocking chunks by _maybeIncrementalVacuum. Set
+    // before any table is created so it applies for free on a new DB; an
+    // existing DB is converted by the one-time VACUUM below.
+    this.db.pragma('auto_vacuum = INCREMENTAL');
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     // Cap WAL growth. Without these, the WAL file can grow unbounded between
@@ -196,8 +209,22 @@ class OtelStore {
     // journal_size_limit truncates the WAL back to 64 MB on each checkpoint.
     this.db.pragma('wal_autocheckpoint = 1000');
     this.db.pragma('journal_size_limit = 67108864'); // 64 MB
+    // Read-path tuning: temp B-trees (GROUP BY/ORDER BY/CTEs) build in RAM;
+    // ~16 MB page cache keeps the hot working set resident.
+    this.db.pragma('temp_store = MEMORY');
+    this.db.pragma('cache_size = -16000');
     this._initSchema();
     this._prepStatements();
+    // Convert a pre-existing FULL/NONE database to incremental auto-vacuum.
+    // The pragma above only takes effect on an existing DB after one VACUUM;
+    // run it here at construct time (before app.listen) so no ingest is
+    // blocked, and the DB is bounded by TRACE_CAP so it's quick.
+    if (this.db.pragma('auto_vacuum', { simple: true }) !== 2) {
+      try { this.db.exec('VACUUM'); }
+      catch (e) { console.warn('[otelStore] auto_vacuum conversion VACUUM failed:', e.message); }
+    }
+    // Wall-clock of the last ingest, for the maintenance quiet-time gate.
+    this._lastIngestAt = 0;
     // One-shot startup eviction — covers the case where an existing DB has
     // accumulated way past the new cap (we discovered 1M+ logs in an
     // unevicted store). Without this, a fresh code drop would have to wait
@@ -209,38 +236,39 @@ class OtelStore {
     this._startMaintenance();
   }
 
-  // Periodic housekeeping for the trace store: force-truncate the WAL and
-  // VACUUM the main database to return free pages to the OS. The 500-row
-  // count cap is enforced on every insert by _evictIfNeeded; without this
-  // maintenance, the deleted rows' pages sit unused but uncollected in the
-  // file, which is how the on-disk size grew unboundedly.
+  // Periodic housekeeping: force-truncate the WAL and reclaim freed pages.
+  // The TRACE_CAP count cap is enforced on every insert by _evictIfNeeded;
+  // those deletes leave free pages in the file that incremental_vacuum returns
+  // to the OS in small chunks (see _maybeIncrementalVacuum). This replaced a
+  // periodic full VACUUM, which on the synchronous driver froze the event loop
+  // — and OTLP ingest — for the entire rewrite.
   _startMaintenance() {
     // Truncate WAL every 60s — cheap, keeps the WAL file from creeping.
     this._walTimer = setInterval(() => {
       try { this.db.pragma('wal_checkpoint(TRUNCATE)'); }
       catch (e) { console.warn('[otelStore] WAL checkpoint failed:', e.message); }
     }, 60_000);
-    // VACUUM every 30 min — more expensive (rewrites the database). 30 min
-    // is a balance: long enough that VACUUM isn't running back-to-back
-    // under continuous eviction, short enough that on-disk size doesn't
-    // creep visibly between runs.
-    this._vacuumTimer = setInterval(() => {
-      try { this.db.exec('VACUUM'); }
-      catch (e) { console.warn('[otelStore] VACUUM failed:', e.message); }
-    }, 30 * 60_000);
-    // First VACUUM after 30 s so a fresh install with a pre-grown file
-    // shrinks promptly instead of waiting half an hour.
-    setTimeout(() => {
-      try { this.db.exec('VACUUM'); }
-      catch (e) { console.warn('[otelStore] initial VACUUM failed:', e.message); }
-    }, 30_000);
+    // Reclaim freed pages incrementally instead of a periodic full VACUUM.
+    this._incVacTimer = setInterval(() => this._maybeIncrementalVacuum(), INC_VACUUM_INTERVAL_MS);
+  }
+
+  // Return up to INC_VACUUM_PAGES freelist pages to the OS, but only when no
+  // ingest has landed recently — so reclaim never adds latency to a burst.
+  _maybeIncrementalVacuum() {
+    if (Date.now() - this._lastIngestAt < VACUUM_QUIET_MS) return;
+    try {
+      if (!this.db.pragma('freelist_count', { simple: true })) return;
+      this.db.pragma(`incremental_vacuum(${INC_VACUUM_PAGES})`);
+    } catch (e) {
+      console.warn('[otelStore] incremental_vacuum failed:', e.message);
+    }
   }
 
   stopMaintenance() {
     if (this._walTimer) clearInterval(this._walTimer);
-    if (this._vacuumTimer) clearInterval(this._vacuumTimer);
+    if (this._incVacTimer) clearInterval(this._incVacTimer);
     this._walTimer = null;
-    this._vacuumTimer = null;
+    this._incVacTimer = null;
   }
 
   _initSchema() {
@@ -427,6 +455,7 @@ class OtelStore {
   ingestSpans(rawSpans) {
     if (!rawSpans || !rawSpans.length) return [];
     const now = Date.now();
+    this._lastIngestAt = now;
     const touchedTraces = new Set();
     const summaries = [];
     const errorEvents = [];
@@ -524,6 +553,7 @@ class OtelStore {
   ingestLogs(rawLogs) {
     if (!rawLogs || !rawLogs.length) return 0;
     const now = Date.now();
+    this._lastIngestAt = now;
     const touchedTraces = new Set();
     const tx = this.db.transaction(() => {
       for (const log of rawLogs) {
@@ -1563,4 +1593,4 @@ OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace,
   };
 };
 
-module.exports = { OtelStore, extractSpans, extractLogRecords };
+module.exports = { OtelStore, extractSpans, extractLogRecords, TRACE_CAP };
