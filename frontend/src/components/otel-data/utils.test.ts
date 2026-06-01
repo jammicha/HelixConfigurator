@@ -17,7 +17,9 @@ import {
   hasActiveOtelFilters,
   collapsibleSpanIds,
   nextFocusIndex,
+  filterOperations,
 } from './utils';
+import type { OperationStat } from './types';
 
 // This suite runs under TZ=America/Chicago (see the "test" script in
 // package.json) on purpose: formatHelixTimestamp must emit UTC, and a
@@ -277,6 +279,31 @@ describe('detectNPlusOne', () => {
   it('ignores spans without a db.operation', () => {
     const spans = Array.from({ length: 6 }, () => span(undefined, 'orders'));
     expect(detectNPlusOne(spans)).toBeNull();
+  });
+});
+
+describe('filterOperations', () => {
+  const op = (service_name: string, root_operation: string): OperationStat =>
+    ({ service_name, root_operation } as OperationStat);
+  const ops = [
+    op('cart-api', 'GET /cart/items'),
+    op('checkout-api', 'POST /checkout'),
+    op('mysql', 'SELECT carts'),
+  ];
+
+  it('returns the list unchanged for a blank or whitespace query', () => {
+    expect(filterOperations(ops, '')).toBe(ops);
+    expect(filterOperations(ops, '   ')).toBe(ops);
+  });
+
+  it('matches the service name or the operation, case-insensitively', () => {
+    expect(filterOperations(ops, 'CART').map(o => o.service_name)).toEqual(['cart-api', 'mysql']);
+    expect(filterOperations(ops, 'checkout').map(o => o.service_name)).toEqual(['checkout-api']);
+    expect(filterOperations(ops, 'select').map(o => o.service_name)).toEqual(['mysql']);
+  });
+
+  it('returns an empty list when nothing matches', () => {
+    expect(filterOperations(ops, 'redis')).toEqual([]);
   });
 });
 
