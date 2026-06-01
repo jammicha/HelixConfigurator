@@ -98,11 +98,11 @@ export const SpanRow: React.FC<{
       : 'adapt-badge-info';
 
   return (
-    <div className={`group transition-all duration-200 ${open ? 'bg-gray-900/60' : ''} ${isDimmed ? 'opacity-30 filter blur-[0.2px]' : ''}`}>
+    <div className={`group transition-all duration-200 ${open ? 'bg-gray-900/60' : ''} ${isDimmed ? 'opacity-40' : ''}`}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className={`w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-gray-800/40 transition-all ${isHighlighted ? 'bg-warning/10 border-l-[3px] border-warning' : ''}`}
+        className={`w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-gray-800/40 transition-all ${isHighlighted ? 'bg-primary/10 border-l-[3px] border-primary' : ''}`}
       >
         <div className="w-[28rem] flex items-center gap-2 min-w-0" style={{ paddingLeft: depth * 14 }}>
           {/* Parent rows: the chevron is a tree-collapse toggle. We use a real

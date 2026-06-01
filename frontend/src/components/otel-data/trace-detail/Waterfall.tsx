@@ -135,12 +135,12 @@ const ServiceBreakdownPanel: React.FC<{
               onMouseEnter={() => setHoveredService(b.name)}
               onMouseLeave={() => setHoveredService(null)}
               onClick={() => setSelectedService(selectedService === b.name ? null : b.name)}
-              className={`h-full border-r border-gray-900/40 transition-all cursor-pointer ${
+              className={`h-full border-r border-gray-900/40 transition-all cursor-pointer outline-none ${
                 isSelected 
-                  ? 'brightness-125 saturate-150 scale-y-110 shadow-lg z-10' 
+                  ? 'ring-1 ring-white z-10 scale-y-110 shadow-lg' 
                   : isHovered 
-                    ? 'brightness-110 saturate-125' 
-                    : 'brightness-90 opacity-80 hover:opacity-100 hover:brightness-105'
+                    ? 'brightness-110 opacity-100' 
+                    : 'opacity-85'
               }`}
             />
           );
