@@ -271,6 +271,11 @@ class OtelStore {
     catch (e) { console.warn('[otelStore] startup log eviction failed:', e.message); }
     try { this._evictErrorsIfNeeded(); }
     catch (e) { console.warn('[otelStore] startup error eviction failed:', e.message); }
+    // Reconcile has_error on existing rows to the current root-based rule, so
+    // traces ingested under an older (trace-wide) rule don't keep showing as
+    // errors until they age out. Only rewrites rows whose flag actually changes.
+    try { this._reconcileHasError(); }
+    catch (e) { console.warn('[otelStore] has_error reconcile failed:', e.message); }
     this._startMaintenance();
   }
 
@@ -484,7 +489,7 @@ class OtelStore {
         -- span on a multi-root or rootless trace — and so root detection matches
         -- the frontend waterfall, which also treats a missing-parent span as a
         -- root. Falls back to the earliest span of all for a fully rootless trace.
-        SELECT service_name, service_namespace, name FROM spans s
+        SELECT service_name, service_namespace, name, status_code FROM spans s
         WHERE trace_id = @traceId
           AND (parent_span_id IS NULL
                OR parent_span_id = ''
@@ -503,9 +508,12 @@ class OtelStore {
         (SELECT MAX(end_time_ns) FROM spans WHERE trace_id = @traceId),
         (SELECT (MAX(end_time_ns) - MIN(start_time_ns)) / 1e6 FROM spans WHERE trace_id = @traceId),
         (SELECT COUNT(*) FROM spans WHERE trace_id = @traceId),
-        (SELECT CASE WHEN MAX(status_code) >= 2 THEN 1
-                     WHEN EXISTS (SELECT 1 FROM span_errors WHERE trace_id = @traceId) THEN 1
-                     ELSE 0 END FROM spans WHERE trace_id = @traceId),
+        -- has_error = the trace OUTCOME: did the root/entry span fail? NOT "any
+        -- span anywhere errored". Handled/retried downstream failures (e.g. a
+        -- retried Redis lookup inside an otherwise-successful request) stay
+        -- visible via error_count + the in-trace error pills, but don't flag the
+        -- whole trace as an error.
+        COALESCE((SELECT CASE WHEN status_code >= 2 THEN 1 ELSE 0 END FROM root_span), 0),
         @receivedAt
       ON CONFLICT(trace_id) DO UPDATE SET
         service_name = excluded.service_name,
@@ -892,6 +900,23 @@ class OtelStore {
     const totalSpans = row?.total || 0;
     const spansPerSec = totalSpans / (windowMs / 1000);
     return { totalSpans, spansPerSec, windowMs };
+  }
+
+  // Recompute has_error for every stored trace using the current root-based
+  // rule (a trace's outcome = its root/entry span's status). Idempotent, and
+  // the WHERE guard rewrites only rows whose flag actually flips — a no-op on
+  // every boot after the first reconcile. Runs once at startup so a rule change
+  // doesn't leave pre-upgrade traces mis-flagged until they age out.
+  _reconcileHasError() {
+    const rootError = `COALESCE((
+      SELECT CASE WHEN s.status_code >= 2 THEN 1 ELSE 0 END
+      FROM spans s
+      WHERE s.trace_id = traces.trace_id
+        AND (s.parent_span_id IS NULL OR s.parent_span_id = ''
+             OR NOT EXISTS (SELECT 1 FROM spans p WHERE p.trace_id = s.trace_id AND p.span_id = s.parent_span_id))
+      ORDER BY s.start_time_ns ASC LIMIT 1
+    ), 0)`;
+    this.db.exec(`UPDATE traces SET has_error = ${rootError} WHERE has_error != ${rootError}`);
   }
 
   // Drop a trace and everything hanging off it (spans, errors, logs).

@@ -146,14 +146,37 @@ describe('OtelStore', () => {
       expect(row.root_operation).toBe('op-root');
     });
 
-    it('keeps has_error trace-wide — a downstream error flags an OK-root trace', () => {
+    it('has_error reflects the root/entry span outcome, not handled downstream errors', () => {
       const t0 = 1_000_000_000;
       store.ingestSpans([
-        makeSpan({ traceId: 'dserr', spanId: 'root', parentSpanId: '', serviceName: 'svc', name: 'op', startTimeNs: t0, endTimeNs: t0 + 9_000_000, statusCode: 0 }),
-        makeSpan({ traceId: 'dserr', spanId: 'child', parentSpanId: 'root', serviceName: 'db', name: 'SELECT', startTimeNs: t0 + 1_000_000, endTimeNs: t0 + 4_000_000, statusCode: 2 }),
+        // OK root (the request succeeded)...
+        makeSpan({ traceId: 'okroot', spanId: 'root', parentSpanId: '', serviceName: 'frontend', name: 'Dispatch', startTimeNs: t0, endTimeNs: t0 + 9_000_000, statusCode: 0 }),
+        // ...over a retried downstream failure (e.g. a Redis flake that recovers).
+        makeSpan({ traceId: 'okroot', spanId: 'child', parentSpanId: 'root', serviceName: 'driver', name: 'Fetch Driver Profile', startTimeNs: t0 + 1_000_000, endTimeNs: t0 + 4_000_000, statusCode: 2, events: [{ name: 'exception', timeUnixNano: t0, attributes: { 'exception.type': 'redis timeout' } }] }),
       ]);
-      const row = store.db.prepare('SELECT has_error FROM traces WHERE trace_id = ?').get('dserr');
-      expect(row.has_error).toBe(1); // root is OK, but the child error must still flag the trace
+      expect(store.db.prepare('SELECT has_error FROM traces WHERE trace_id = ?').get('okroot').has_error).toBe(0);
+      // The handled downstream error is still recorded — it drives error_count / the badge.
+      expect(store.db.prepare('SELECT COUNT(*) c FROM span_errors WHERE trace_id = ?').get('okroot').c).toBeGreaterThan(0);
+    });
+
+    it('has_error is set when the root/entry span itself failed', () => {
+      const t0 = 1_000_000_000;
+      store.ingestSpans([
+        makeSpan({ traceId: 'rootfail', spanId: 'root', parentSpanId: '', serviceName: 'frontend', name: 'Dispatch', startTimeNs: t0, endTimeNs: t0 + 5_000_000, statusCode: 2 }),
+      ]);
+      expect(store.db.prepare('SELECT has_error FROM traces WHERE trace_id = ?').get('rootfail').has_error).toBe(1);
+    });
+
+    it('_reconcileHasError corrects rows left over from the old trace-wide rule', () => {
+      const t0 = 1_000_000_000;
+      store.ingestSpans([
+        makeSpan({ traceId: 'legacy', spanId: 'root', parentSpanId: '', serviceName: 'frontend', name: 'Dispatch', startTimeNs: t0, endTimeNs: t0 + 5_000_000, statusCode: 0 }),
+        makeSpan({ traceId: 'legacy', spanId: 'child', parentSpanId: 'root', serviceName: 'driver', name: 'Fetch Driver Profile', startTimeNs: t0 + 1_000_000, endTimeNs: t0 + 2_000_000, statusCode: 2 }),
+      ]);
+      // Simulate a row written under the old trace-wide rule, then reconcile.
+      store.db.prepare('UPDATE traces SET has_error = 1 WHERE trace_id = ?').run('legacy');
+      store._reconcileHasError();
+      expect(store.db.prepare('SELECT has_error FROM traces WHERE trace_id = ?').get('legacy').has_error).toBe(0);
     });
   });
 
