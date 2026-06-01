@@ -22,6 +22,7 @@ import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/Wi
 import { parseHelixKeyBundle, extractServiceKey } from './utils/helixKey';
 import { isHelixRelevant } from './utils/logFilter';
 import { waitForGatewayRunning } from './utils/gateway';
+import { buildSupportBundle } from './utils/supportBundle';
 import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
 import { PipelineStatusBanner } from './components/dashboard/PipelineStatusBanner';
 import { QuickActions } from './components/dashboard/QuickActions';
@@ -1166,69 +1167,17 @@ const App = () => {
         fetch('/api/diagnostics/logs/recent?tail=5').then(r => r.json()).catch(() => ({ logs: '(unavailable)' })),
       ]);
 
-      const redactKey = (key: string) => {
-        if (!key) return '(unset)';
-        const parts = key.split('::');
-        if (parts.length === 3) return `${parts[0]}::***::***`;
-        return '***';
-      };
-
-      // Build a compact rate timeline from metricsHistory (cumulative counters
-      // → per-sample deltas). Useful when an issue self-resolves before the
-      // user copies the bundle — the snapshot alone would otherwise look fine.
-      const renderRateHistory = () => {
-        if (metricsHistory.length < 2) return '(no rate history available)';
-        const lines: string[] = ['  sample  recv/Δ  sent/Δ  fail/Δ'];
-        for (let i = 1; i < metricsHistory.length; i++) {
-          const prev = metricsHistory[i - 1];
-          const cur = metricsHistory[i];
-          const dRecv = Math.max(0, cur.received - prev.received);
-          const dSent = Math.max(0, cur.sent - prev.sent);
-          const dFail = Math.max(0, cur.failed - prev.failed);
-          lines.push(`  ${String(i).padStart(6)}  ${String(dRecv).padStart(6)}  ${String(dSent).padStart(6)}  ${String(dFail).padStart(6)}`);
-        }
-        return lines.join('\n');
-      };
-
-      const renderTimeline = () => {
-        if (timeline.length === 0) return '(no events recorded this session)';
-        return timeline.map(ev => {
-          const t = new Date(ev.ts).toISOString();
-          return `  ${t}  [${ev.kind}] ${ev.message}`;
-        }).join('\n');
-      };
-
-      const bundle =
-`=== Helix Configurator Support Bundle ===
-Generated: ${new Date().toISOString()}
-
-[Environment]
-HELIX_ENDPOINT: ${envVars.HELIX_ENDPOINT || '(unset)'}
-HELIX_API_KEY: ${redactKey(envVars.HELIX_API_KEY)}
-X_SOURCE: ${envVars.X_SOURCE || '(unset)'}
-BUSINESS_SERVICE_KEY: ${envVars.BUSINESS_SERVICE_KEY ? '(set)' : '(unset)'}
-
-[Gateway Status]
-Container: ${statusData.status || 'unknown'}
-
-[Diagnostic Checks]
-Collector Configuration: ${collectorDiag.status}${collectorDiag.error ? ' - ' + collectorDiag.error : ''}
-X-API Key Format: ${apiKeyDiag.status}${apiKeyDiag.error ? ' - ' + apiKeyDiag.error : ''}
-X-Source Format: ${envVars.X_SOURCE ? 'PASS' : 'FAIL'}
-Tenant URL Endpoint: ${networkDiag.status}${networkDiag.error ? ' - ' + networkDiag.error : ''}
-
-[Live Metrics - current]
-Received: ${liveMetrics.received}, Sent: ${liveMetrics.sent}, Failed: ${liveMetrics.failed}
-
-[Rate History - last ${metricsHistory.length} samples (~3s each)]
-${renderRateHistory()}
-
-[Session Timeline]
-${renderTimeline()}
-
-[Last Gateway Log Lines]
-${logsData.logs || '(no logs available)'}
-`;
+      const bundle = buildSupportBundle({
+        envVars,
+        gatewayStatus: statusData.status,
+        collectorDiag,
+        apiKeyDiag,
+        networkDiag,
+        liveMetrics,
+        metricsHistory,
+        timeline,
+        recentLogs: logsData.logs,
+      });
 
       await navigator.clipboard.writeText(bundle);
       showToastMsg('Support bundle copied to clipboard');
