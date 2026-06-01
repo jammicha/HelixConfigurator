@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Editor, { useMonaco } from '@monaco-editor/react';
-import { Settings, Loader2, X, Activity, Container, ExternalLink, Server, ChevronDown } from 'lucide-react';
+import { Settings, Loader2, X, ChevronDown } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
 import { useLocalStorageState } from './hooks/useLocalStorageState';
 import { useSmartAdd } from './hooks/useSmartAdd';
@@ -29,8 +29,8 @@ import { QuickActions } from './components/dashboard/QuickActions';
 import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConnectionSettingsDrawer';
 import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/SetPasswordModal';
 import { NavAvatar } from './components/NavAvatar';
-import { ContainerCard } from './components/dashboard/ContainerCard';
 import { LiveMetricsCards } from './components/dashboard/LiveMetricsCards';
+import { DiscoveredServicesDrawer } from './components/dashboard/DiscoveredServicesDrawer';
 
 const App = () => {
   const monaco = useMonaco();
@@ -1382,18 +1382,6 @@ const App = () => {
     showToastMsg('Copied to clipboard');
   };
 
-  const renderContainerCard = (container: any, isCore: boolean = false) => (
-    <ContainerCard
-      key={container.name}
-      container={container}
-      isCore={isCore}
-      hasRealHelixEndpoint={hasRealHelixEndpoint}
-      helixConfig={helixConfig}
-      loadingContainers={loadingContainers}
-      onAttach={handleAttachContainer}
-      onDisconnect={handleDisconnectContainer}
-    />
-  );
 
   // Loading state while we check auth status
   if (authStatus === null) {
@@ -1995,81 +1983,16 @@ const App = () => {
       />
 
       {/* Discovered Services Pinned Sidebar Panel */}
-      <div
-        className={`relative w-[450px] h-full flex-shrink-0 bg-gray-1000 border-l border-gray-700 shadow-4 flex flex-col transition-all duration-300 ease-in-out ${isServicesOpen ? 'translate-x-0' : 'hidden'}`}
-        role={isServicesOpen ? 'dialog' : undefined}
-        aria-modal={isServicesOpen ? true : undefined}
-        aria-labelledby="discovered-services-title"
-        aria-hidden={!isServicesOpen}
-      >
-        <div className="bg-gray-900 px-4 border-b border-gray-700 flex items-center justify-between flex-shrink-0 h-[52px]">
-          <h2 id="discovered-services-title" className="text-lg font-semibold flex items-center gap-2">
-            <Activity className="w-5 h-5 text-link" />
-            Discovered Services
-          </h2>
-          <button
-            onClick={() => setIsServicesOpen(false)}
-            className="text-gray-400 hover:text-white p-1"
-            aria-label="Close discovered services panel"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
-          {/* Namespace Dashboard Link */}
-          {hasRealHelixEndpoint && (
-            <a
-              href={`${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`}
-              target="_blank"
-              rel="noreferrer"
-              className="bg-info/10 border border-info/30 hover:bg-info/20 p-4 rounded-lg flex items-center justify-between group transition-all mb-6 block"
-            >
-              <div className="flex flex-col">
-                <span className="text-info text-sm font-bold flex items-center gap-2">
-                  View Namespace Dashboard
-                  <ExternalLink className="w-4 h-4" />
-                </span>
-              </div>
-            </a>
-          )}
-
-          {/* Section: Core Infrastructure */}
-          <section className="space-y-4">
-            <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-widest">
-              <Server className="w-4 h-4" />
-              Core Infrastructure
-            </div>
-            <div className="space-y-3">
-              {discoveredContainers
-                .filter(c => c.name.includes('helix-gateway'))
-                .map(container => renderContainerCard(container, true))}
-            </div>
-          </section>
-
-          {/* Section: Local Applications */}
-          <section className="space-y-4">
-            <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-widest">
-              <Container className="w-4 h-4" />
-              Local Applications
-            </div>
-            <div className="space-y-3">
-              {(() => {
-                const apps = discoveredContainers.filter(c => !c.name.includes('helix-gateway'));
-                if (apps.length === 0) {
-                  return (
-                    <div className="border border-dashed border-gray-700 rounded-lg p-5 text-center text-sm text-gray-400 bg-gray-1000/50">
-                      <p className="text-gray-300 font-semibold mb-1">No applications discovered</p>
-                      <p className="text-tiny">Start your application on this Docker host, then click Discovered Services again to refresh.</p>
-                    </div>
-                  );
-                }
-                return apps.map(container => renderContainerCard(container, false));
-              })()}
-            </div>
-          </section>
-        </div>
-      </div>
+      <DiscoveredServicesDrawer
+        isOpen={isServicesOpen}
+        onClose={() => setIsServicesOpen(false)}
+        hasRealHelixEndpoint={hasRealHelixEndpoint}
+        helixConfig={helixConfig}
+        discoveredContainers={discoveredContainers}
+        loadingContainers={loadingContainers}
+        onAttach={handleAttachContainer}
+        onDisconnect={handleDisconnectContainer}
+      />
     </div>
   );
 };
