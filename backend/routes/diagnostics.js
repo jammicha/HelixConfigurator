@@ -31,6 +31,32 @@ const closeActiveLogProcesses = () => {
   activeLogProcesses.clear();
 };
 
+// Sum a Prometheus `<baseName>_total` counter across every label permutation
+// in a /metrics scrape. Prometheus emits float64, so parseFloat keeps
+// "1.234e+05" from truncating. When exporterFilter is set, only lines
+// carrying exporter="<filter>" count — used to isolate the bmchelix exporter
+// from the local-viewer fan-out so "sent" reflects Helix delivery alone.
+const sumPromCounter = (metricsText, baseName, { exporterFilter } = {}) => {
+  const name = baseName + '_total';
+  let sum = 0;
+  for (const line of metricsText.split('\n')) {
+    if (!line.startsWith(name)) continue;
+    if (exporterFilter && !line.includes(`exporter="${exporterFilter}"`)) continue;
+    const parts = line.trim().split(/\s+/);
+    const val = parseFloat(parts[parts.length - 1]);
+    if (!isNaN(val)) sum += val;
+  }
+  return Math.round(sum);
+};
+
+// The collector self-telemetry metrics block in the modern (otelcol 0.123+)
+// reader format. Rewritten on every debug-mode toggle so a config still
+// carrying the legacy `metrics: { address: ... }` shape gets healed to the
+// format the gateway's Prometheus scrape (and our counter checks) expect.
+const healedMetricsTelemetry = () => ({
+  readers: [{ pull: { exporter: { prometheus: { host: '0.0.0.0', port: 8888 } } } }],
+});
+
 // Shared helper: parse the gateway's Prometheus metrics endpoint into
 // { received, sent, failed }. Counters are cumulative since collector start;
 // callers that need rates must compute deltas.
@@ -39,25 +65,11 @@ const fetchCounters = async (targetContainer) => {
   const response = await axios.get(url, { timeout: 2000 });
   const metrics = response.data;
 
-  const extractSum = (baseName) => {
-    const name = baseName + '_total';
-    let sum = 0;
-    metrics.split('\n').forEach(line => {
-      if (line.startsWith(name)) {
-        // Prometheus emits float64 — parseFloat so "1.234e+05" doesn't truncate.
-        const parts = line.trim().split(/\s+/);
-        const val = parseFloat(parts[parts.length - 1]);
-        if (!isNaN(val)) {
-          if (baseName.includes('exporter')) {
-            if (line.includes('exporter="otlphttp/bmchelix"')) sum += val;
-          } else {
-            sum += val;
-          }
-        }
-      }
-    });
-    return Math.round(sum);
-  };
+  // Exporter counters are scoped to the bmchelix exporter so the local-viewer
+  // fan-out doesn't inflate "sent"; receiver counters sum across all labels.
+  const extractSum = (baseName) =>
+    sumPromCounter(metrics, baseName,
+      baseName.includes('exporter') ? { exporterFilter: 'otlphttp/bmchelix' } : {});
 
   return {
     received:
@@ -352,11 +364,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
       const configObj = yaml.load(configContent);
       if (configObj.service && configObj.service.telemetry) {
         delete configObj.service.telemetry.logs;
-
-        // Force heal metrics format.
-        configObj.service.telemetry.metrics = {
-          readers: [{ pull: { exporter: { prometheus: { host: '0.0.0.0', port: 8888 } } } }]
-        };
+        configObj.service.telemetry.metrics = healedMetricsTelemetry();
 
         const newYaml = yaml.dump(configObj, { lineWidth: -1 });
         fs.writeFileSync(configPath, newYaml, 'utf8');
@@ -564,11 +572,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
 
       configObj.service = configObj.service || {};
       configObj.service.telemetry = configObj.service.telemetry || {};
-
-      // Force heal metrics format.
-      configObj.service.telemetry.metrics = {
-        readers: [{ pull: { exporter: { prometheus: { host: '0.0.0.0', port: 8888 } } } }]
-      };
+      configObj.service.telemetry.metrics = healedMetricsTelemetry();
 
       if (enable) {
         configObj.service.telemetry.logs = { level: 'debug' };
@@ -829,18 +833,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     const url = `http://${targetContainer}:8888/metrics`;
     try {
       const response = await axios.get(url, { timeout: 2000 });
-      const lines = response.data.split('\n');
-      const sumOf = (baseName) => {
-        const name = baseName + '_total';
-        let sum = 0;
-        for (const line of lines) {
-          if (!line.startsWith(name)) continue;
-          const parts = line.trim().split(/\s+/);
-          const val = parseFloat(parts[parts.length - 1]);
-          if (!isNaN(val)) sum += val;
-        }
-        return Math.round(sum);
-      };
+      const sumOf = (baseName) => sumPromCounter(response.data, baseName);
       res.json({
         acceptedSpans: sumOf('otelcol_receiver_accepted_spans'),
         acceptedMetricPoints: sumOf('otelcol_receiver_accepted_metric_points'),
