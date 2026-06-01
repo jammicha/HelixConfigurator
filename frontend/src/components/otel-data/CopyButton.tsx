@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 
 // Compact, reusable copy-to-clipboard control for the OTel viewer. Trace IDs and
@@ -21,6 +21,11 @@ export const CopyButton: React.FC<{
   stopPropagation?: boolean;
 }> = ({ value, label, title, className = '', stopPropagation = true }) => {
   const [copied, setCopied] = useState(false);
+  // Hold the "Copied" reset timer so a rapid second click doesn't leave the
+  // first timer live (which would revert the checkmark early), and so it's
+  // cleared on unmount.
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (resetTimer.current) clearTimeout(resetTimer.current); }, []);
   const onCopy = async (e: React.MouseEvent) => {
     if (stopPropagation) {
       e.stopPropagation();
@@ -29,7 +34,8 @@ export const CopyButton: React.FC<{
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+      resetTimer.current = setTimeout(() => setCopied(false), 1500);
     } catch {
       /* clipboard blocked — value stays selectable in the DOM */
     }

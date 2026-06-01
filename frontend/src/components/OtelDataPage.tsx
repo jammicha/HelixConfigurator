@@ -107,6 +107,12 @@ const readUrlState = () => {
 
 
 
+// Monotonic client-side id for SSE-injected log/error records. Date.now() (or
+// Date.now()+Math.random()) collided as a React key when two records arrived in
+// the same millisecond — exactly when errors burst. A pure counter is unique
+// per session; ordering is carried by received_at, not the id.
+let sseClientRecordSeq = 0;
+
 export const OtelDataPage: React.FC = () => {
   const initial = readUrlState();
   // Persisted so a refresh / new session lands on whichever tab the user was
@@ -127,6 +133,12 @@ export const OtelDataPage: React.FC = () => {
   // See buildOperationP95Map / the operationP95 memo.
   const [serviceOpLatencies, setServiceOpLatencies] = useState<ServiceOperationLatency[]>([]);
   const [operationsLoading, setOperationsLoading] = useState<boolean>(false);
+  // Mirror the Traces tab's error surfacing on the other data tabs: a backend
+  // 500 (e.g. a corrupt store) should show an explicit "couldn't refresh"
+  // banner instead of an empty list that reads as "no data".
+  const [operationsError, setOperationsError] = useState<string | null>(null);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [errorsError, setErrorsError] = useState<string | null>(null);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [services, setServices] = useState<{ name: string; traceCount: number }[]>([]);
   // Distinct namespace/container values for filter dropdowns. Fetched
@@ -590,10 +602,17 @@ export const OtelDataPage: React.FC = () => {
     if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
     if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
     const qs = params.toString();
-    const res = await fetch(`/api/traces/errors${qs ? `?${qs}` : ''}`);
-    if (res.ok) {
-      const j = await res.json();
-      setErrors(j.errors || []);
+    try {
+      const res = await fetch(`/api/traces/errors${qs ? `?${qs}` : ''}`);
+      if (res.ok) {
+        const j = await res.json();
+        setErrors(j.errors || []);
+        setErrorsError(null);
+      } else {
+        setErrorsError(`HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setErrorsError(e instanceof Error ? e.message : 'Could not reach the errors endpoint');
     }
   };
 
@@ -602,10 +621,17 @@ export const OtelDataPage: React.FC = () => {
     const w = resolveWindow();
     if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
     if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
-    const res = await fetch(`/api/logs?${params}`);
-    if (res.ok) {
-      const j = await res.json();
-      setLogs(j.logs || []);
+    try {
+      const res = await fetch(`/api/logs?${params}`);
+      if (res.ok) {
+        const j = await res.json();
+        setLogs(j.logs || []);
+        setLogsError(null);
+      } else {
+        setLogsError(`HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setLogsError(e instanceof Error ? e.message : 'Could not reach the logs endpoint');
     }
   };
 
@@ -619,6 +645,10 @@ export const OtelDataPage: React.FC = () => {
       const w = resolveWindow();
       if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
       if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+      // Operations now respects the active service filter (server-side, same
+      // participant rule as Traces) so picking a service scopes this rollup to
+      // the traffic it took part in, consistent with namespace/container.
+      if (serviceFilter) params.set('service', serviceFilter);
       if (namespaceFilter) params.set('namespace', namespaceFilter);
       if (containerFilter) params.set('container', containerFilter);
       params.set('slowThresholdMs', String(slowThresholdMs));
@@ -638,15 +668,20 @@ export const OtelDataPage: React.FC = () => {
       if (res.ok) {
         const j = await res.json();
         setOperations(j.operations || []);
+        setOperationsError(null);
+      } else {
+        setOperationsError(`HTTP ${res.status}`);
       }
       if (latRes.ok) {
         const lj = await latRes.json();
         setServiceOpLatencies(lj.operations || []);
       }
+    } catch (e) {
+      setOperationsError(e instanceof Error ? e.message : 'Could not reach the operations endpoint');
     } finally {
       setOperationsLoading(false);
     }
-  }, [range, customRange, slowThresholdMs, namespaceFilter, containerFilter]);
+  }, [range, customRange, slowThresholdMs, namespaceFilter, containerFilter, serviceFilter]);
 
   // Fetch on initial mount + whenever underlying inputs change. Operations
   // data also feeds the Traces tab's outlier flagging (rows whose duration
@@ -826,7 +861,7 @@ export const OtelDataPage: React.FC = () => {
         // endpoint returns snake_case rows. Normalize to the snake_case shape
         // used by the table so a single render path handles both.
         const record: ErrorRecord = {
-          id: Date.now(),
+          id: ++sseClientRecordSeq,
           trace_id: err.traceId || err.trace_id,
           span_id: err.spanId || err.span_id,
           service_name: err.serviceName || err.service_name,
@@ -856,7 +891,7 @@ export const OtelDataPage: React.FC = () => {
       try {
         const raw: any = JSON.parse(evt.data);
         const record: LogRecord = {
-          id: Date.now() + Math.random(),
+          id: ++sseClientRecordSeq,
           traceId: raw.traceId || '',
           spanId: raw.spanId || null,
           serviceName: raw.serviceName,
@@ -921,6 +956,15 @@ export const OtelDataPage: React.FC = () => {
     setCustomRange(null);
     setRange('1h');
   };
+
+  // Which tab's background fetch (if any) is currently failing — drives the
+  // inline "couldn't refresh" banner below. Traces has its own richer error
+  // state (TracesErrorState), handled inside that tab.
+  const activeTabError =
+    activeTab === 'operations' ? operationsError
+    : activeTab === 'errors' ? (errorsError || logsError)
+    : activeTab === 'overview' ? ov.error
+    : null;
 
   return (
     <SlowThresholdProvider value={slowThresholdMs}>
@@ -1250,6 +1294,12 @@ export const OtelDataPage: React.FC = () => {
           </div>
         </div>
 
+        {activeTabError && (
+          <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded border border-danger/40 bg-danger/10 text-tiny text-danger-text" role="status">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+            <span>Couldn’t refresh this tab’s data ({activeTabError}). Showing the last data that loaded — it recovers on the next successful poll.</span>
+          </div>
+        )}
         {activeTab === 'overview' && (
           <OverviewTab
             data={ov.overview}

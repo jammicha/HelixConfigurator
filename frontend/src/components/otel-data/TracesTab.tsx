@@ -35,7 +35,8 @@ export const TracesTab: React.FC<{
   tracesError: string | null;
   onSelect: (traceId: string) => void;
   // Disabled while the trace-detail drawer is open (the page passes
-  // !selectedTraceId) so j/k/Enter don't drive the list underneath the drawer.
+  // !selectedTraceId) so the arrow keys / Enter don't drive the list
+  // underneath the drawer.
   keyboardEnabled: boolean;
   histogram: Histogram | null;
   customRange: { sinceMs: number; untilMs: number } | null;
@@ -98,11 +99,11 @@ export const TracesTab: React.FC<{
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const len = sortedTraces.length;
       if (len === 0) return;
-      if (e.key === 'j' || e.key === 'ArrowDown') {
+      if (e.key === 'ArrowDown') {
         e.preventDefault();
         const ni = nextFocusIndex(focusedIndex, 1, len);
         setFocusedTraceId(sortedTraces[ni]?.trace_id ?? null);
-      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+      } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const ni = nextFocusIndex(focusedIndex, -1, len);
         setFocusedTraceId(sortedTraces[ni]?.trace_id ?? null);
@@ -210,9 +211,9 @@ export const TracesTab: React.FC<{
         </div>
         <div className="ml-auto flex items-center gap-3 pb-1">
           {keyboardEnabled && traces.length > 0 && (
-            <div className="hidden lg:flex items-center gap-1 text-tiny text-gray-600 select-none" title="Use J / K or the arrow keys to move between traces, Enter to open the focused trace">
-              <kbd className="px-1 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">J</kbd>
-              <kbd className="px-1 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">K</kbd>
+            <div className="hidden lg:flex items-center gap-1 text-tiny text-gray-600 select-none" title="Use the ↑ / ↓ arrow keys to move between traces, Enter to open the focused trace">
+              <kbd className="px-1 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">↑</kbd>
+              <kbd className="px-1 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">↓</kbd>
               <span>navigate</span>
               <kbd className="px-1 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">↵</kbd>
               <span>open</span>

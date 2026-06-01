@@ -58,6 +58,8 @@ export type UseOverview = {
   insights: InsightFinding[];
   serviceMap: ServiceMapData | null;
   loading: boolean;
+  /** Non-null when the last bundle fetch failed (HTTP error or network). */
+  error: string | null;
   /** Imperative refresh — used by the page-wide refresh interval orchestrator. */
   refresh: () => Promise<void>;
 };
@@ -81,6 +83,7 @@ export function useOverview({ sinceMs, untilMs, service, namespace, container, s
   const [insights, setInsights] = useState<InsightFinding[]>([]);
   const [serviceMap, setServiceMap] = useState<ServiceMapData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Inflight token: if a new fetch starts before the old one resolves, we
   // ignore the stale response. Prevents flicker / out-of-order overwrites.
@@ -102,9 +105,13 @@ export function useOverview({ sinceMs, untilMs, service, namespace, container, s
     setLoading(true);
     try {
       const res = await fetch(`/api/overview-bundle?${params}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (myToken === inflightRef.current) setError(`HTTP ${res.status}`);
+        return;
+      }
       const data: BundleResponse = await res.json();
       if (myToken !== inflightRef.current) return; // stale
+      setError(null);
       setOverview(data.overview);
       setTracesHistogram(data.tracesHistogram);
       setLogsHistogram(data.logsHistogram);
@@ -121,7 +128,9 @@ export function useOverview({ sinceMs, untilMs, service, namespace, container, s
       lastFindingTitlesRef.current = new Set(incoming.map(f => f.title));
       setInsights(tagged);
       setServiceMap(data.serviceMap);
-    } catch { /* non-fatal */ } finally {
+    } catch {
+      if (myToken === inflightRef.current) setError('Could not reach the overview endpoint');
+    } finally {
       if (myToken === inflightRef.current) setLoading(false);
     }
   }, [sinceMs, untilMs, service, namespace, container, slowThresholdMs]);
@@ -131,5 +140,5 @@ export function useOverview({ sinceMs, untilMs, service, namespace, container, s
   // pollers from one place.
   useEffect(() => { fetchBundle(); }, [fetchBundle]);
 
-  return { overview, tracesHistogram, logsHistogram, priorTotals, heatmap, insights, serviceMap, loading, refresh: fetchBundle };
+  return { overview, tracesHistogram, logsHistogram, priorTotals, heatmap, insights, serviceMap, loading, error, refresh: fetchBundle };
 }

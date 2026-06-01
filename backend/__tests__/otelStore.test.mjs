@@ -7,7 +7,7 @@ import path from 'node:path';
 // otelStore.js is CommonJS (module.exports). createRequire bridges to it
 // from this .mjs test file so we don't have to rewrite the source.
 const require = createRequire(import.meta.url);
-const { OtelStore, extractSpans, latencySparkline, TRACE_CAP } = require('../otelStore');
+const { OtelStore, extractSpans, latencySparkline } = require('../otelStore');
 const Database = require('better-sqlite3');
 
 const makeSpan = (overrides = {}) => {
@@ -47,24 +47,64 @@ describe('OtelStore', () => {
     vi.useRealTimers();
   });
 
-  describe('TRACE_CAP eviction', () => {
-    it('keeps the newest TRACE_CAP traces, evicting oldest first', () => {
-      const overflow = 100;
-      const total = TRACE_CAP + overflow;
+  describe('count-ceiling eviction', () => {
+    it('keeps the newest maxTraces, evicting oldest first', () => {
+      // Dedicated store with a tiny ceiling and time eviction off, so this
+      // exercises the count safety net directly (the prod ceiling is 100k).
+      const cap = new OtelStore({ dbPath: ':memory:', maxTraces: 50, retentionMs: 0 });
+      cap.stopMaintenance();
+      const ceiling = 50;
+      const overflow = 20;
+      const total = ceiling + overflow;
       const id = (i) => `t${String(i).padStart(6, '0')}`;
       for (let i = 0; i < total; i++) {
-        // Advance the clock so received_at strictly increases — eviction
-        // orders by received_at ASC and ties are not guaranteed stable.
+        // Advance the clock so received_at strictly increases — eviction orders
+        // by received_at ASC and ties are not guaranteed stable.
         vi.setSystemTime(Date.now() + 1);
-        store.ingestSpans([makeSpan({ traceId: id(i), spanId: `s${i}` })]);
+        cap.ingestSpans([makeSpan({ traceId: id(i), spanId: `s${i}` })]);
       }
-      const { n } = store.countTraces.get();
-      expect(n).toBe(TRACE_CAP);
-      // Oldest `overflow` evicted; newest TRACE_CAP retained.
-      expect(store.getTrace(id(0))).toBeNull();
-      expect(store.getTrace(id(overflow - 1))).toBeNull();
-      expect(store.getTrace(id(overflow))).not.toBeNull();
-      expect(store.getTrace(id(total - 1))).not.toBeNull();
+      expect(cap.countTraces.get().n).toBe(ceiling);
+      // Oldest `overflow` evicted; newest `ceiling` retained.
+      expect(cap.getTrace(id(0))).toBeNull();
+      expect(cap.getTrace(id(overflow - 1))).toBeNull();
+      expect(cap.getTrace(id(overflow))).not.toBeNull();
+      expect(cap.getTrace(id(total - 1))).not.toBeNull();
+      cap.db.close();
+    });
+  });
+
+  describe('time-based retention', () => {
+    it('evicts traces older than the horizon, with their spans + errors', () => {
+      const ret = new OtelStore({ dbPath: ':memory:', retentionMs: 60 * 60 * 1000 }); // 1h
+      ret.stopMaintenance();
+      const t0 = Date.now();
+      // A trace from 2h ago — beyond the 1h horizon — with a child error span.
+      vi.setSystemTime(t0 - 2 * 60 * 60 * 1000);
+      ret.ingestSpans([
+        makeSpan({ traceId: 'old', spanId: 'os', serviceName: 'app', name: 'op' }),
+        makeSpan({ traceId: 'old', spanId: 'oc', parentSpanId: 'os', serviceName: 'app', name: 'boom', statusCode: 2, events: [{ name: 'exception', timeUnixNano: 1, attributes: { 'exception.type': 'E', 'exception.message': 'x' } }] }),
+      ]);
+      // Back to now: the next ingest triggers the age sweep.
+      vi.setSystemTime(t0);
+      ret.ingestSpans([makeSpan({ traceId: 'fresh', spanId: 'fs', serviceName: 'app', name: 'op' })]);
+      expect(ret.getTrace('old')).toBeNull();        // aged out
+      expect(ret.getTrace('fresh')).not.toBeNull();  // within horizon
+      // Cascade: the old trace's spans + error rows are gone too.
+      expect(ret.db.prepare('SELECT COUNT(*) c FROM spans WHERE trace_id = ?').get('old').c).toBe(0);
+      expect(ret.db.prepare('SELECT COUNT(*) c FROM span_errors WHERE trace_id = ?').get('old').c).toBe(0);
+      ret.db.close();
+    });
+
+    it('retentionMs <= 0 disables time eviction (count ceiling only)', () => {
+      const ret = new OtelStore({ dbPath: ':memory:', retentionMs: 0 });
+      ret.stopMaintenance();
+      const t0 = Date.now();
+      vi.setSystemTime(t0 - 100 * 60 * 60 * 1000); // 100h ago
+      ret.ingestSpans([makeSpan({ traceId: 'ancient', spanId: 'a', serviceName: 'app', name: 'op' })]);
+      vi.setSystemTime(t0);
+      ret.ingestSpans([makeSpan({ traceId: 'now', spanId: 'b', serviceName: 'app', name: 'op' })]);
+      expect(ret.getTrace('ancient')).not.toBeNull(); // kept — no time eviction
+      ret.db.close();
     });
   });
 
@@ -218,6 +258,44 @@ describe('OtelStore', () => {
       expect(op.trace_count).toBe(4);
       // Apdex = (Satisfied + 0.5 * Tolerating) / Total = (1 + 0.5 * 1) / 4 = 1.5 / 4 = 0.375
       expect(op.apdex).toBe(0.375);
+    });
+
+    it('respects an active service filter (participant scope, like listTraces)', () => {
+      // Trace A: rooted at checkout, with a cart-api child (cart-api is a
+      // participant, never a root). Trace B: an unrelated search trace.
+      store.ingestSpans([
+        makeSpan({ traceId: 'ta', spanId: 'ra', parentSpanId: '', serviceName: 'checkout', name: 'POST /checkout' }),
+        makeSpan({ traceId: 'ta', spanId: 'ca', parentSpanId: 'ra', serviceName: 'cart-api', name: 'GET /cart' }),
+      ]);
+      store.ingestSpans([
+        makeSpan({ traceId: 'tb', spanId: 'rb', parentSpanId: '', serviceName: 'search', name: 'GET /search' }),
+      ]);
+      // Unfiltered: both trace-root operations are present.
+      const all = store.listOperations();
+      expect(all.some(o => o.root_operation === 'POST /checkout')).toBe(true);
+      expect(all.some(o => o.root_operation === 'GET /search')).toBe(true);
+      // Filtered to a participating (non-root) service: only the trace it took
+      // part in stays in scope; the unrelated search trace drops out.
+      const cart = store.listOperations({ service: 'cart-api' });
+      expect(cart.some(o => o.root_operation === 'POST /checkout')).toBe(true);
+      expect(cart.some(o => o.root_operation === 'GET /search')).toBe(false);
+      // A service that appears in no trace yields nothing.
+      expect(store.listOperations({ service: 'no-such-svc' })).toHaveLength(0);
+    });
+  });
+
+  describe('default ("All" range) window', () => {
+    it('overview() with no window spans from the earliest trace, not just last hour', () => {
+      const t0 = Date.now();
+      // Earliest trace landed ~2h ago — older than the legacy now-1h default.
+      vi.setSystemTime(t0 - 2 * 60 * 60 * 1000);
+      store.ingestSpans([makeSpan({ traceId: 'old', spanId: 's', serviceName: 'app', name: 'op' })]);
+      vi.setSystemTime(t0);
+      const ov = store.overview({});
+      // Window start reaches back to the earliest trace rather than stopping at
+      // now-1h, so "All" actually covers all retained data.
+      expect(ov.windowMs.start).toBe(t0 - 2 * 60 * 60 * 1000);
+      expect(ov.windowMs.end).toBe(t0);
     });
   });
 

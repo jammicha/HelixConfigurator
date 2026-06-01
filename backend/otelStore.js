@@ -11,7 +11,26 @@ const path = require('path');
 const EventEmitter = require('events');
 const Database = require('better-sqlite3');
 
-const TRACE_CAP = 1000;
+// Hard ceiling on retained traces — a storage safety net behind the time-based
+// retention window below. Time eviction is the primary control; this only bites
+// if a traffic spike packs more than this many traces into the retention
+// horizon, in which case we keep the most-recent maxTraces. Overridable per
+// store via the constructor's maxTraces.
+const TRACE_CAP = 100_000;
+// Time-based retention horizon: traces (and their spans/logs/errors) older than
+// this are evicted, so the window holds "the last N hours" rather than "the
+// last N traces". Default 24h; override with the TRACE_RETENTION_HOURS env var,
+// or per store via the constructor's retentionMs (<=0 disables time eviction).
+const TRACE_RETENTION_MS = (() => {
+  const h = Number(process.env.TRACE_RETENTION_HOURS);
+  return Number.isFinite(h) && h > 0 ? Math.round(h * 3_600_000) : 24 * 3_600_000;
+})();
+// Max rows a single listTraces / GET /api/traces call returns. Deliberately
+// decoupled from retention: the store keeps a large time window for the charts
+// and time-range views, but the table only ever fetches the most-recent slice
+// (older traces are reachable by zooming the timeline). Keeps the list query
+// fast regardless of how big the retention window grows.
+const TRACE_LIST_MAX = 2000;
 
 // Incremental-vacuum maintenance: reclaim freelist pages in small,
 // non-blocking chunks during ingest-quiet windows (replaces a blocking full
@@ -195,10 +214,15 @@ const buildErrorRecords = (span) => {
 };
 
 class OtelStore {
-  constructor({ dbPath }) {
+  constructor({ dbPath, retentionMs, maxTraces } = {}) {
     this.events = new EventEmitter();
     this.events.setMaxListeners(50);
     this.dbPath = dbPath;
+    // Retention controls — overridable per store (tests / deployment tuning).
+    // retentionMs <= 0 disables time-based eviction, leaving only the count
+    // ceiling; both fall back to the module defaults.
+    this.retentionMs = Number.isFinite(retentionMs) ? retentionMs : TRACE_RETENTION_MS;
+    this.maxTraces = Number.isFinite(maxTraces) && maxTraces > 0 ? maxTraces : TRACE_CAP;
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     // Verify the store's integrity before trusting it. A corrupt page in the
     // spans B-tree (observed after a hard kill mid-checkpoint) makes every
@@ -241,6 +265,8 @@ class OtelStore {
     // accumulated way past the new cap (we discovered 1M+ logs in an
     // unevicted store). Without this, a fresh code drop would have to wait
     // for the next ingest to trim.
+    try { this._evictIfNeeded(); }
+    catch (e) { console.warn('[otelStore] startup trace eviction failed:', e.message); }
     try { this._evictLogsIfNeeded(); }
     catch (e) { console.warn('[otelStore] startup log eviction failed:', e.message); }
     try { this._evictErrorsIfNeeded(); }
@@ -498,6 +524,12 @@ class OtelStore {
     this.oldestTraceIds = this.db.prepare(
       `SELECT trace_id FROM traces ORDER BY received_at ASC LIMIT ?`
     );
+    // Traces older than a cutoff received_at — drives time-based retention.
+    // Uses idx_traces_received, so it's an indexed range scan (a no-op when
+    // nothing has aged out).
+    this.expiredTraceIds = this.db.prepare(
+      `SELECT trace_id FROM traces WHERE received_at < ?`
+    );
     this.deleteSpansForTrace = this.db.prepare(`DELETE FROM spans WHERE trace_id = ?`);
     this.deleteErrorsForTrace = this.db.prepare(`DELETE FROM span_errors WHERE trace_id = ?`);
     // Span re-ingestion: spans are upserted by (trace_id, span_id), but
@@ -680,15 +712,21 @@ class OtelStore {
   // Computes p50/p95 from raw durations in JS — the trace cap (500) keeps
   // the result set small enough that a sort-and-index is faster than wiring
   // SQLite window functions.
-  listOperations({ sinceMs, untilMs, slowThresholdMs, namespace, container } = {}) {
+  listOperations({ sinceMs, untilMs, slowThresholdMs, namespace, container, service } = {}) {
     const SLOW_MS = Number.isFinite(slowThresholdMs) && slowThresholdMs > 0 ? slowThresholdMs : 1000;
     const params = [];
     const where = [];
     if (sinceMs) { where.push('received_at >= ?'); params.push(sinceMs); }
     if (untilMs) { where.push('received_at <= ?'); params.push(untilMs); }
-    // Namespace/container are span-level resource attrs; filter via
-    // participant subquery, same shape as the `service` filter on
-    // listTraces. A trace is included if ANY of its spans matches.
+    // Service/namespace/container are span-level participation filters, same
+    // shape as listTraces: a trace (and therefore its root-operation row) is
+    // included if ANY of its spans matches. Service scopes the Operations tab
+    // to the traffic the filtered service took part in, consistent with how
+    // the page's namespace/container filters already narrow this rollup.
+    if (service) {
+      where.push('trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
+      params.push(service);
+    }
     if (namespace) {
       where.push('trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
       params.push(namespace);
@@ -704,7 +742,11 @@ class OtelStore {
     // tracesHistogram's default (last hour → now) when the caller didn't pin
     // an explicit window, so the trend axis lines up with the timeline chart.
     const now = Date.now();
-    const sparkStart = Number.isFinite(sinceMs) ? Number(sinceMs) : now - 60 * 60 * 1000;
+    // When no window is pinned (the "All" range), span the sparkline across the
+    // actual data — earliest stored trace → now — so the trend matches the
+    // all-time aggregates beside it instead of silently showing only the last
+    // hour. Falls back to last-hour when the store is empty.
+    const sparkStart = Number.isFinite(sinceMs) ? Number(sinceMs) : (this.earliestReceivedAt('traces') ?? now - 60 * 60 * 1000);
     const sparkEnd = Number.isFinite(untilMs) ? Number(untilMs) : now;
     const groups = new Map();
     for (const r of rows) {
@@ -738,7 +780,11 @@ class OtelStore {
     }
     const percentile = (sorted, p) => {
       if (sorted.length === 0) return 0;
-      const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+      // Nearest-rank: idx = ceil(p*n) - 1, clamped. Same formula as
+      // computePercentiles (histogram/overview) so every rollup agrees, and so
+      // a small-N operation's p95 still surfaces its slow tail instead of
+      // collapsing toward the median.
+      const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1));
       return sorted[idx];
     };
     return Array.from(groups.values()).map(g => {
@@ -807,7 +853,11 @@ class OtelStore {
     }
     const percentile = (sorted, p) => {
       if (sorted.length === 0) return 0;
-      const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+      // Nearest-rank: idx = ceil(p*n) - 1, clamped. Same formula as
+      // computePercentiles (histogram/overview) so every rollup agrees, and so
+      // a small-N operation's p95 still surfaces its slow tail instead of
+      // collapsing toward the median.
+      const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1));
       return sorted[idx];
     };
     return Array.from(groups.values()).map(g => {
@@ -836,17 +886,30 @@ class OtelStore {
     return { totalSpans, spansPerSec, windowMs };
   }
 
+  // Drop a trace and everything hanging off it (spans, errors, logs).
+  _deleteTraceCascade(traceId) {
+    this.deleteSpansForTrace.run(traceId);
+    this.deleteErrorsForTrace.run(traceId);
+    this.deleteLogsForTrace.run(traceId);
+    this.deleteTrace.run(traceId);
+  }
+
   _evictIfNeeded() {
-    const { n } = this.countTraces.get();
-    if (n <= TRACE_CAP) return;
-    const overflow = n - TRACE_CAP;
-    const victims = this.oldestTraceIds.all(overflow).map(r => r.trace_id);
-    for (const traceId of victims) {
-      this.deleteSpansForTrace.run(traceId);
-      this.deleteErrorsForTrace.run(traceId);
-      this.deleteLogsForTrace.run(traceId);
-      this.deleteTrace.run(traceId);
+    // Primary retention is time-based: drop anything older than the horizon so
+    // the window holds "the last N hours", not "the last N traces". Indexed
+    // range scan — a no-op when nothing has aged out.
+    if (this.retentionMs > 0) {
+      const cutoff = Date.now() - this.retentionMs;
+      const expired = this.expiredTraceIds.all(cutoff).map(r => r.trace_id);
+      for (const traceId of expired) this._deleteTraceCascade(traceId);
     }
+    // Safety net: a hard count ceiling so a burst inside the horizon can't grow
+    // the store unbounded. Normally a no-op — time eviction keeps the count low.
+    const { n } = this.countTraces.get();
+    if (n <= this.maxTraces) return;
+    const overflow = n - this.maxTraces;
+    const victims = this.oldestTraceIds.all(overflow).map(r => r.trace_id);
+    for (const traceId of victims) this._deleteTraceCascade(traceId);
   }
 
   // Eviction for the standalone log records table. Trace eviction only drops
@@ -973,9 +1036,9 @@ class OtelStore {
             ORDER BY s.start_time_ns DESC, s.span_id DESC LIMIT 1)
         ) AS failing_service,
         (SELECT group_concat(DISTINCT service_name) FROM spans WHERE trace_id = t.trace_id AND service_name IS NOT NULL AND service_name <> '') AS participating_services,
-        (SELECT s.name FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC LIMIT 1) AS slowest_child_operation,
-        (SELECT s.service_name FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC LIMIT 1) AS slowest_child_service,
-        (SELECT s.duration_ms FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC LIMIT 1) AS slowest_child_duration_ms${svcSelect}
+        (SELECT s.name FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC, s.span_id DESC LIMIT 1) AS slowest_child_operation,
+        (SELECT s.service_name FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC, s.span_id DESC LIMIT 1) AS slowest_child_service,
+        (SELECT s.duration_ms FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC, s.span_id DESC LIMIT 1) AS slowest_child_duration_ms${svcSelect}
       FROM traces t
       LEFT JOIN lc ON lc.trace_id = t.trace_id
       LEFT JOIN ec ON ec.trace_id = t.trace_id
@@ -983,7 +1046,7 @@ class OtelStore {
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY t.received_at DESC LIMIT ?
     `;
-    params.push(Math.min(Math.max(1, limit | 0), TRACE_CAP));
+    params.push(Math.min(Math.max(1, limit | 0), TRACE_LIST_MAX));
     const headParams = service ? [service] : [];
     const rows = this.db.prepare(sql).all(...headParams, ...params);
     return rows.map(r => ({
@@ -1142,7 +1205,9 @@ const computePercentiles = (arr) => {
   if (!arr.length) return null;
   const sorted = arr.slice().sort((a, b) => a - b);
   const at = (p) => {
-    const idx = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p));
+    // Nearest-rank: idx = ceil(p*n) - 1, clamped. Matches the
+    // listOperations / listOperationLatencies percentile so every rollup agrees.
+    const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1));
     return sorted[idx];
   };
   return { p50: at(0.5), p95: at(0.95), p99: at(0.99) };
@@ -1174,13 +1239,24 @@ const latencySparkline = (samples, startMs, endMs, buckets) => {
   return out;
 };
 
+// Earliest received_at across a table, used to resolve the "All" range (no
+// pinned window) to an explicit data-spanning window instead of silently
+// defaulting to the last hour. Returns null when the table is empty so the
+// caller can fall back to a last-hour default. Cheap — the store is capped and
+// received_at is the natural sort column.
+OtelStore.prototype.earliestReceivedAt = function (table) {
+  const t = table === 'log_records' ? 'log_records' : 'traces';
+  const row = this.db.prepare(`SELECT MIN(received_at) AS m FROM ${t}`).get();
+  return row && row.m != null ? Number(row.m) : null;
+};
+
 // Bin trace rows into a fixed number of equal-width time buckets. Each bucket
 // reports total/ok/slow/error counts plus p50/p95 of duration. Used by the
 // Traces timeline chart on /otel-data. Service filter matches the trace-list
 // behavior (any participant, not just root).
 OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, service, namespace, container, slowThresholdMs }) {
   const now = Date.now();
-  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : now - 60 * 60 * 1000;
+  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : (this.earliestReceivedAt('traces') ?? now - 60 * 60 * 1000);
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
   if (end <= start) return { bucketStartMs: start, bucketEndMs: end, bucketSizeMs: 0, buckets: [] };
   const n = Math.min(Math.max(2, buckets | 0 || 60), 240);
@@ -1246,7 +1322,7 @@ OtelStore.prototype.tracesHistogram = function ({ sinceMs, untilMs, buckets, ser
 // Logs sub-tab's severity filter.
 OtelStore.prototype.logsHistogram = function ({ sinceMs, untilMs, buckets }) {
   const now = Date.now();
-  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : now - 60 * 60 * 1000;
+  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : (this.earliestReceivedAt('log_records') ?? now - 60 * 60 * 1000);
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
   if (end <= start) return { bucketStartMs: start, bucketEndMs: end, bucketSizeMs: 0, buckets: [] };
   const n = Math.min(Math.max(2, buckets | 0 || 60), 240);
@@ -1285,7 +1361,7 @@ OtelStore.prototype.logsHistogram = function ({ sinceMs, untilMs, buckets }) {
 OtelStore.prototype.overview = function ({ sinceMs, untilMs, service, namespace, container } = {}) {
   const now = Date.now();
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
-  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : end - 60 * 60 * 1000;
+  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : (this.earliestReceivedAt('traces') ?? end - 60 * 60 * 1000);
   const span = Math.max(1, end - start);
   // Compare-against window is the same-duration slot immediately prior so
   // the delta indicators ("+12%", "-4%") are stable across page refreshes.
@@ -1457,7 +1533,7 @@ OtelStore.prototype.overview = function ({ sinceMs, untilMs, service, namespace,
 OtelStore.prototype.latencyHeatmap = function ({ sinceMs, untilMs, timeBuckets, durationBuckets, service, namespace, container } = {}) {
   const now = Date.now();
   const end = untilMs && Number.isFinite(untilMs) ? Number(untilMs) : now;
-  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : end - 60 * 60 * 1000;
+  const start = sinceMs && Number.isFinite(sinceMs) ? Number(sinceMs) : (this.earliestReceivedAt('traces') ?? end - 60 * 60 * 1000);
   if (end <= start) return { timeStart: start, timeEnd: end, timeBuckets: 0, durationBuckets: 0, cells: [], durationEdgesMs: [], maxCount: 0 };
   const nT = Math.min(Math.max(2, timeBuckets | 0 || 60), 240);
   const nD = Math.min(Math.max(3, durationBuckets | 0 || 12), 24);
@@ -1699,4 +1775,4 @@ OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace,
   };
 };
 
-module.exports = { OtelStore, extractSpans, extractLogRecords, latencySparkline, TRACE_CAP };
+module.exports = { OtelStore, extractSpans, extractLogRecords, latencySparkline, TRACE_CAP, TRACE_LIST_MAX, TRACE_RETENTION_MS };

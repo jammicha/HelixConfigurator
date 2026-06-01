@@ -4,7 +4,7 @@
 // over otelStore methods; the heavy lifting (aggregation, percentile math,
 // service-map graph construction, insight rules) lives there.
 
-const { TRACE_CAP } = require('../otelStore');
+const { TRACE_LIST_MAX } = require('../otelStore');
 
 function register(app, { otelStore, docker }) {
   // Pull the three resource-level filters off the query string in one place
@@ -22,12 +22,13 @@ function register(app, { otelStore, docker }) {
     const since = sinceMs ? Number(sinceMs) : undefined;
     const until = untilMs ? Number(untilMs) : undefined;
     const query = typeof q === 'string' && q ? q : undefined;
-    // Clamp at the route layer too. otelStore.listTraces clamps to TRACE_CAP
-    // internally, but with a hard upper bound here the SQL execution
-    // (including the LEFT JOIN against the rollup CTEs) never sees a request
-    // for an unreasonable LIMIT in the first place.
+    // Clamp at the route layer too. otelStore.listTraces clamps to TRACE_LIST_MAX
+    // internally, but a hard upper bound here means the SQL execution (including
+    // the LEFT JOIN against the rollup CTEs) never sees an unreasonable LIMIT in
+    // the first place. This caps the *list size*, not retention — the store keeps
+    // a much larger time-based window for the charts.
     const requested = limit ? Number(limit) : 200;
-    const clampedLimit = Math.min(TRACE_CAP, Math.max(1, Number.isFinite(requested) ? requested : 200));
+    const clampedLimit = Math.min(TRACE_LIST_MAX, Math.max(1, Number.isFinite(requested) ? requested : 200));
     const traces = otelStore.listTraces({
       service: svc,
       namespace,
@@ -148,12 +149,13 @@ function register(app, { otelStore, docker }) {
   // Item 8: per-(service, root_operation) aggregates for the Operations tab.
   app.get('/api/operations', (req, res) => {
     const { sinceMs, untilMs, slowThresholdMs } = req.query;
-    const { namespace, container } = readResourceFilters(req.query);
+    const { service, namespace, container } = readResourceFilters(req.query);
     res.json({
       operations: otelStore.listOperations({
         sinceMs: sinceMs ? Number(sinceMs) : undefined,
         untilMs: untilMs ? Number(untilMs) : undefined,
         slowThresholdMs: slowThresholdMs ? Number(slowThresholdMs) : undefined,
+        service,
         namespace,
         container,
       }),
