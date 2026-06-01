@@ -10,3 +10,14 @@ export const parseHelixKeyBundle = (raw: string): string | null => {
   if (!keyMatch || !tenantMatch) return null;
   return `${tenantMatch[1]}::${keyMatch[1]}::${keyMatch[2]}`;
 };
+
+// Accept a bare AIOps business-service key, a URL path fragment, or a full
+// AIOps URL and return just the opaque key. Used to build the deep-link into
+// the configured Business Service.
+export const extractServiceKey = (input: string): string => {
+  if (!input) return '';
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/entities\/service\/([^/?#\s]+)/);
+  if (match) return match[1];
+  return trimmed.split(/[?#\s]/)[0];
+};
