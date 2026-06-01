@@ -110,11 +110,11 @@ export const TracesTab: React.FC<{
             onChange={(e) => setStatusFilter(e.target.value as '' | TraceStatus)}
             className="bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-link"
           >
-            <option value="">All statuses</option>
-            <option value="error">Error</option>
-            <option value="slow">Slow (&gt;{slowThresholdMs}ms)</option>
-            <option value="ok">OK</option>
-            <option value="outlier">Outlier (&gt;2× p95)</option>
+            <option value="">⚪ All statuses</option>
+            <option value="error">🔴 Error</option>
+            <option value="slow">🟡 Slow (&gt;{slowThresholdMs}ms)</option>
+            <option value="ok">🟢 OK</option>
+            <option value="outlier">🟣 Outlier (&gt;2× p95)</option>
           </select>
         </div>
         <div className="flex flex-col gap-1">

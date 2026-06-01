@@ -20,7 +20,9 @@ export const SpanRow: React.FC<{
   descendantCount: number;
   isCollapsed: boolean;
   onToggleCollapsed: (() => void) | null;
-}> = ({ span, depth, traceStartNs, traceDurationNs, logs, isOnCriticalPath, criticalInterval, descendantCount, isCollapsed, onToggleCollapsed }) => {
+  isHighlighted?: boolean;
+  isDimmed?: boolean;
+}> = ({ span, depth, traceStartNs, traceDurationNs, logs, isOnCriticalPath, criticalInterval, descendantCount, isCollapsed, onToggleCollapsed, isHighlighted = false, isDimmed = false }) => {
   const slowThresholdMs = useSlowThreshold();
   const [open, setOpen] = useState(false);
   const offsetNs = Math.max(0, span.startTimeNs - traceStartNs);
@@ -96,11 +98,11 @@ export const SpanRow: React.FC<{
       : 'adapt-badge-info';
 
   return (
-    <div className={`group ${open ? 'bg-gray-900/60' : ''}`}>
+    <div className={`group transition-all duration-200 ${open ? 'bg-gray-900/60' : ''} ${isDimmed ? 'opacity-30 filter blur-[0.2px]' : ''}`}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-gray-800/40 transition-colors"
+        className={`w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-gray-800/40 transition-all ${isHighlighted ? 'bg-warning/10 border-l-[3px] border-warning' : ''}`}
       >
         <div className="w-[28rem] flex items-center gap-2 min-w-0" style={{ paddingLeft: depth * 14 }}>
           {/* Parent rows: the chevron is a tree-collapse toggle. We use a real
