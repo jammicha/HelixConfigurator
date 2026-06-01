@@ -1,4 +1,4 @@
-import type { HelixEnv, SpanDetail, TraceStatus, TraceSummary } from './types';
+import type { HelixEnv, OperationStat, SpanDetail, TraceStatus, TraceSummary } from './types';
 import { SLOW_THRESHOLD_MS } from './constants';
 
 export const formatDuration = (ms: number) => {
@@ -215,6 +215,20 @@ export const buildHelixTraceUrl = (
   // is already percent-encoded as %2B, so this only rewrites encoded spaces.
   const qs = params.toString().replace(/\+/g, '%20');
   return `${env.endpoint.replace(/\/+$/, '')}/dashboards/d/OTelTraceDetails/otel-trace-details?${qs}`;
+};
+
+// Free-text filter for the Operations tab — matches the service name or the
+// operation name, case-insensitively. A blank/whitespace query returns the list
+// unchanged. Kept pure (and tested) so the tab's render stays a thin wrapper,
+// mirroring the Traces/Logs search boxes.
+export const filterOperations = (operations: OperationStat[], query: string): OperationStat[] => {
+  const q = query.trim().toLowerCase();
+  if (!q) return operations;
+  return operations.filter(
+    o =>
+      (o.service_name || '').toLowerCase().includes(q) ||
+      (o.root_operation || '').toLowerCase().includes(q),
+  );
 };
 
 // Span ids in a trace that have at least one child span — i.e. the rows that

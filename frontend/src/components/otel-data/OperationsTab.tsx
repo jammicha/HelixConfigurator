@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Loader2, Server } from 'lucide-react';
+import { Loader2, Server, X } from 'lucide-react';
 import { useSlowThreshold } from './SlowThresholdContext';
-import { formatDuration } from './utils';
+import { filterOperations, formatDuration } from './utils';
 import { Sparkline } from '../Sparkline';
 import type { OperationStat } from './types';
 
@@ -15,8 +15,10 @@ export const OperationsTab: React.FC<{
 }> = ({ operations, loading, onJumpToOperation }) => {
   const slowThresholdMs = useSlowThreshold();
   const [sortBy, setSortBy] = useState<'p95' | 'p50' | 'max' | 'count' | 'errors' | 'slow' | 'service' | 'apdex'>('p95');
+  const [query, setQuery] = useState('');
+  const filtered = useMemo(() => filterOperations(operations, query), [operations, query]);
   const sorted = useMemo(() => {
-    const arr = operations.slice();
+    const arr = filtered.slice();
     switch (sortBy) {
       case 'p95': arr.sort((a, b) => b.p95_ms - a.p95_ms); break;
       case 'p50': arr.sort((a, b) => b.p50_ms - a.p50_ms); break;
@@ -28,7 +30,7 @@ export const OperationsTab: React.FC<{
       case 'apdex': arr.sort((a, b) => a.apdex - b.apdex); break; // ascending — worst first
     }
     return arr;
-  }, [operations, sortBy]);
+  }, [filtered, sortBy]);
 
   // Grafana-style color-by-value: subtle bg tint based on duration / error %
   // thresholds. Stays on ADAPT palette (success / warning / danger muted) so
@@ -84,8 +86,32 @@ export const OperationsTab: React.FC<{
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-end gap-3 mb-4 flex-wrap">
+        <div className="flex flex-col gap-1 w-72">
+          <label htmlFor="operations-search" className="text-tiny font-semibold text-gray-400 uppercase tracking-wider">Search</label>
+          <div className="relative">
+            <input
+              id="operations-search"
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="service or operation…"
+              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-link pr-8"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
         <div className="ml-auto text-tiny text-gray-500 pb-1">
-          {operations.length} operation{operations.length === 1 ? '' : 's'}
+          {query.trim() && filtered.length !== operations.length
+            ? <>{filtered.length} of {operations.length} operations</>
+            : <>{operations.length} operation{operations.length === 1 ? '' : 's'}</>}
         </div>
       </div>
       <div className="flex-1 overflow-auto adapt-card !p-0">
@@ -98,10 +124,22 @@ export const OperationsTab: React.FC<{
             <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
               <Server className="w-6 h-6 text-gray-500" />
             </div>
-            <h3 className="text-base font-semibold text-gray-200 mb-2">No transactions in this window</h3>
-            <p className="text-sm text-gray-400 max-w-md leading-relaxed">
-              Aggregates over transaction entry-point (service + operation) for the selected time range. Widen the range above to see more.
-            </p>
+            {query.trim() && operations.length > 0 ? (
+              <>
+                <h3 className="text-base font-semibold text-gray-200 mb-2">No operations match “{query.trim()}”</h3>
+                <p className="text-sm text-gray-400 max-w-md leading-relaxed">
+                  Searching {operations.length} operation{operations.length === 1 ? '' : 's'} in this window.{' '}
+                  <button onClick={() => setQuery('')} className="text-link hover:underline font-semibold">Clear search</button>
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="text-base font-semibold text-gray-200 mb-2">No transactions in this window</h3>
+                <p className="text-sm text-gray-400 max-w-md leading-relaxed">
+                  Aggregates over transaction entry-point (service + operation) for the selected time range. Widen the range above to see more.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <table className="w-full text-sm">
