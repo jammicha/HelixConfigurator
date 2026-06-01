@@ -5,7 +5,6 @@ import {
   Check,
   Clock,
   Download,
-  ExternalLink,
   LayoutDashboard,
   Loader2,
   RefreshCw,
@@ -16,7 +15,7 @@ import {
 import { TimelineChart, TIMELINE_COLORS } from './TimelineChart';
 import { OverviewTab } from './OverviewTab';
 import { useOverview } from '../hooks/useOverview';
-import { usePageRefresh, REFRESH_INTERVAL_MS } from '../hooks/usePageRefresh';
+import { usePageRefresh } from '../hooks/usePageRefresh';
 import type { StreamMode } from '../hooks/usePageRefresh';
 import { isStreamLive } from '../hooks/usePageRefresh';
 import { useLocalStorageState } from '../hooks/useLocalStorageState';
