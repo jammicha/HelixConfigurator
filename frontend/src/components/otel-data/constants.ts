@@ -26,6 +26,8 @@ export const INTERNAL_SERVICES = new Set<string>([
   'helix-configurator',
   'helix-configurator-verify',
   'otelcol-contrib',
+  // Load generator: demo scaffolding, not a monitored app service.
+  'traffic-generator',
 ]);
 
 export const MIN_DURATION_PRESETS: { value: number; label: string }[] = [

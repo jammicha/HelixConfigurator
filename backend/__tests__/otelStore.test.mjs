@@ -167,16 +167,33 @@ describe('OtelStore', () => {
       expect(store.db.prepare('SELECT has_error FROM traces WHERE trace_id = ?').get('rootfail').has_error).toBe(1);
     });
 
-    it('_reconcileHasError corrects rows left over from the old trace-wide rule', () => {
+    it('roots the trace at the entry SERVER span, not an upstream client span', () => {
       const t0 = 1_000_000_000;
       store.ingestSpans([
-        makeSpan({ traceId: 'legacy', spanId: 'root', parentSpanId: '', serviceName: 'frontend', name: 'Dispatch', startTimeNs: t0, endTimeNs: t0 + 5_000_000, statusCode: 0 }),
-        makeSpan({ traceId: 'legacy', spanId: 'child', parentSpanId: 'root', serviceName: 'driver', name: 'Fetch Driver Profile', startTimeNs: t0 + 1_000_000, endTimeNs: t0 + 2_000_000, statusCode: 2 }),
+        // Upstream client span (e.g. a load generator) — earliest, but kind=CLIENT.
+        makeSpan({ traceId: 'entry', spanId: 'gen', parentSpanId: '', serviceName: 'traffic-generator', name: 'GET', kind: 3, startTimeNs: t0, endTimeNs: t0 + 8_000_000, statusCode: 2 }),
+        // The app's entry point: a SERVER span, child of the client.
+        makeSpan({ traceId: 'entry', spanId: 'fe', parentSpanId: 'gen', serviceName: 'frontend', name: 'Dispatch', kind: 2, startTimeNs: t0 + 1_000_000, endTimeNs: t0 + 7_000_000, statusCode: 0 }),
       ]);
-      // Simulate a row written under the old trace-wide rule, then reconcile.
-      store.db.prepare('UPDATE traces SET has_error = 1 WHERE trace_id = ?').run('legacy');
-      store._reconcileHasError();
-      expect(store.db.prepare('SELECT has_error FROM traces WHERE trace_id = ?').get('legacy').has_error).toBe(0);
+      const row = store.db.prepare('SELECT service_name, root_operation, has_error FROM traces WHERE trace_id = ?').get('entry');
+      expect(row.service_name).toBe('frontend');   // entry SERVER span, not the load-gen client
+      expect(row.root_operation).toBe('Dispatch');
+      expect(row.has_error).toBe(0);               // entry succeeded; the client's status=2 doesn't flag it
+    });
+
+    it('_reconcileTraceSummaries re-derives service/operation/has_error from the entry span', () => {
+      const t0 = 1_000_000_000;
+      store.ingestSpans([
+        makeSpan({ traceId: 'reattr', spanId: 'gen', parentSpanId: '', serviceName: 'traffic-generator', name: 'GET', kind: 3, startTimeNs: t0, endTimeNs: t0 + 8_000_000, statusCode: 2 }),
+        makeSpan({ traceId: 'reattr', spanId: 'fe', parentSpanId: 'gen', serviceName: 'frontend', name: 'Dispatch', kind: 2, startTimeNs: t0 + 1_000_000, endTimeNs: t0 + 7_000_000, statusCode: 0 }),
+      ]);
+      // Simulate stale columns from an older client-rooting + trace-wide rule, then reconcile.
+      store.db.prepare(`UPDATE traces SET service_name='traffic-generator', root_operation='GET', has_error=1 WHERE trace_id='reattr'`).run();
+      store._reconcileTraceSummaries();
+      const row = store.db.prepare('SELECT service_name, root_operation, has_error FROM traces WHERE trace_id = ?').get('reattr');
+      expect(row.service_name).toBe('frontend');
+      expect(row.root_operation).toBe('Dispatch');
+      expect(row.has_error).toBe(0);
     });
   });
 

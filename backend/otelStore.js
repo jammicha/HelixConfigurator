@@ -50,6 +50,9 @@ const INTERNAL_SERVICES = [
   'helix-configurator',
   'helix-configurator-verify',
   'otelcol-contrib',
+  // Load generator: demo scaffolding (no equivalent in a real deployment).
+  // Its own client spans shouldn't appear as a monitored service.
+  'traffic-generator',
 ];
 // Log records (severity-tagged log lines) are stored separately from traces
 // because OTel logs frequently arrive without a trace_id. Without a count
@@ -65,6 +68,12 @@ const ERROR_CAP = 5_000;
 // tab. Small and fixed — enough to convey a trend in a ~80px-wide cell without
 // bloating the /api/operations payload.
 const SPARK_BUCKETS = 24;
+
+// Bumped whenever the trace-summary derivation rule changes (e.g. the entry-span
+// root rule). On startup, stored traces are re-derived once via the reconcile
+// when the DB's PRAGMA user_version is below this — so a rule change re-processes
+// the store only after the rule actually moves, not on every boot.
+const TRACE_SUMMARY_RULE_VERSION = 1;
 
 // OTLP/JSON encodes traceId/spanId as lowercase hex strings (per the OTLP
 // spec post-1.0). Older builds may emit base64; tolerate both so we don't
@@ -271,11 +280,16 @@ class OtelStore {
     catch (e) { console.warn('[otelStore] startup log eviction failed:', e.message); }
     try { this._evictErrorsIfNeeded(); }
     catch (e) { console.warn('[otelStore] startup error eviction failed:', e.message); }
-    // Reconcile has_error on existing rows to the current root-based rule, so
-    // traces ingested under an older (trace-wide) rule don't keep showing as
-    // errors until they age out. Only rewrites rows whose flag actually changes.
-    try { this._reconcileHasError(); }
-    catch (e) { console.warn('[otelStore] has_error reconcile failed:', e.message); }
+    // One-time migration: when the summary rule changes, re-derive existing
+    // traces' columns (service / operation / has_error) once — tracked via
+    // PRAGMA user_version — so they re-attribute + re-classify without waiting
+    // out retention, and without re-processing the whole store on every boot.
+    try {
+      if (this.db.pragma('user_version', { simple: true }) < TRACE_SUMMARY_RULE_VERSION) {
+        this._reconcileTraceSummaries();
+        this.db.pragma(`user_version = ${TRACE_SUMMARY_RULE_VERSION}`);
+      }
+    } catch (e) { console.warn('[otelStore] trace-summary reconcile failed:', e.message); }
     this._startMaintenance();
   }
 
@@ -481,20 +495,21 @@ class OtelStore {
       INSERT INTO traces (trace_id, service_name, service_namespace, root_operation, start_time_ns, end_time_ns,
                           duration_ms, span_count, has_error, received_at)
       WITH root_span AS (
-        -- The trace's root span: the earliest span with no parent inside this
-        -- trace — either truly parentless, or one whose parent_span_id dangles
-        -- (the real root was never ingested). Resolved once so service /
-        -- namespace / operation stay mutually consistent — three independent
-        -- LIMIT-1 subqueries could otherwise pull each column from a different
-        -- span on a multi-root or rootless trace — and so root detection matches
-        -- the frontend waterfall, which also treats a missing-parent span as a
-        -- root. Falls back to the earliest span of all for a fully rootless trace.
+        -- The trace's ENTRY span — the app's view of where the request enters.
+        -- Preference: (1) the earliest SERVER span (kind=2), the real entry
+        -- point, so an upstream CLIENT span (a load generator, API gateway, RUM
+        -- beacon) can't hijack the trace's service / operation / outcome; then
+        -- (2) the earliest truly-parentless or dangling-parent (orphaned) span;
+        -- then (3) the earliest span of all. Resolved once so service /
+        -- namespace / operation / has_error all come from the same span.
         SELECT service_name, service_namespace, name, status_code FROM spans s
         WHERE trace_id = @traceId
-          AND (parent_span_id IS NULL
-               OR parent_span_id = ''
-               OR NOT EXISTS (SELECT 1 FROM spans p WHERE p.trace_id = s.trace_id AND p.span_id = s.parent_span_id))
-        ORDER BY start_time_ns ASC LIMIT 1
+        ORDER BY
+          (kind = 2) DESC,
+          (parent_span_id IS NULL OR parent_span_id = ''
+            OR NOT EXISTS (SELECT 1 FROM spans p WHERE p.trace_id = s.trace_id AND p.span_id = s.parent_span_id)) DESC,
+          start_time_ns ASC
+        LIMIT 1
       )
       SELECT
         @traceId,
@@ -902,21 +917,18 @@ class OtelStore {
     return { totalSpans, spansPerSec, windowMs };
   }
 
-  // Recompute has_error for every stored trace using the current root-based
-  // rule (a trace's outcome = its root/entry span's status). Idempotent, and
-  // the WHERE guard rewrites only rows whose flag actually flips — a no-op on
-  // every boot after the first reconcile. Runs once at startup so a rule change
-  // doesn't leave pre-upgrade traces mis-flagged until they age out.
-  _reconcileHasError() {
-    const rootError = `COALESCE((
-      SELECT CASE WHEN s.status_code >= 2 THEN 1 ELSE 0 END
-      FROM spans s
-      WHERE s.trace_id = traces.trace_id
-        AND (s.parent_span_id IS NULL OR s.parent_span_id = ''
-             OR NOT EXISTS (SELECT 1 FROM spans p WHERE p.trace_id = s.trace_id AND p.span_id = s.parent_span_id))
-      ORDER BY s.start_time_ns ASC LIMIT 1
-    ), 0)`;
-    this.db.exec(`UPDATE traces SET has_error = ${rootError} WHERE has_error != ${rootError}`);
+  // Re-derive every stored trace's root columns (service / namespace / operation
+  // / has_error) by re-running recomputeTrace — the single source of truth for
+  // the entry-span rule — preserving each trace's original received_at. So when
+  // the rule changes (e.g. client-rooting → SERVER-rooting), existing traces
+  // re-attribute and re-classify on the next boot instead of aging out. Reusing
+  // recomputeTrace means the reconcile can't drift from ingest. Idempotent.
+  _reconcileTraceSummaries() {
+    const rows = this.db.prepare('SELECT trace_id AS traceId, received_at AS receivedAt FROM traces').all();
+    const run = this.db.transaction((list) => {
+      for (const r of list) this.recomputeTrace.run(r);
+    });
+    run(rows);
   }
 
   // Drop a trace and everything hanging off it (spans, errors, logs).
@@ -1670,6 +1682,9 @@ OtelStore.prototype.serviceMap = function ({ sinceMs, untilMs, service, namespac
     params.push(container);
   }
   const filterClause = filterClauses.length ? 'AND ' + filterClauses.join(' AND ') : '';
+  // Hide internal/infra services (gateway, collector, load generator) from the
+  // topology too, consistent with the service dropdown and trace/overview totals.
+  const internalPh = INTERNAL_SERVICES.map(() => '?').join(',');
 
   // Per-service rollup over the window. Joining via trace_id keeps the
   // service set consistent with the trace listing UI.
@@ -1684,8 +1699,9 @@ OtelStore.prototype.serviceMap = function ({ sinceMs, untilMs, service, namespac
      WHERE t.received_at >= ? AND t.received_at <= ?
        AND s.service_name IS NOT NULL
        ${filterClause}
+       AND s.service_name NOT IN (${internalPh})
      GROUP BY s.service_name`,
-  ).all(...params);
+  ).all(...params, ...INTERNAL_SERVICES);
 
   // Edges: parent→child span pairs whose service_names differ. Aggregated
   // by (source, target).
@@ -1702,8 +1718,10 @@ OtelStore.prototype.serviceMap = function ({ sinceMs, untilMs, service, namespac
        AND c.service_name IS NOT NULL
        AND p.service_name != c.service_name
        ${filterClause}
+       AND p.service_name NOT IN (${internalPh})
+       AND c.service_name NOT IN (${internalPh})
      GROUP BY p.service_name, c.service_name`,
-  ).all(...params);
+  ).all(...params, ...INTERNAL_SERVICES, ...INTERNAL_SERVICES);
 
   const nodes = nodeRows.map(n => ({
     name: n.name,
