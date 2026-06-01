@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useMonaco } from '@monaco-editor/react';
-import { Settings, Loader2, ChevronDown } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
 import { useLocalStorageState } from './hooks/useLocalStorageState';
 import { useSmartAdd } from './hooks/useSmartAdd';
@@ -28,7 +28,7 @@ import { PipelineStatusBanner } from './components/dashboard/PipelineStatusBanne
 import { QuickActions } from './components/dashboard/QuickActions';
 import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConnectionSettingsDrawer';
 import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/SetPasswordModal';
-import { NavAvatar } from './components/NavAvatar';
+import { AppHeader } from './components/AppHeader';
 import { DiscoveredServicesDrawer } from './components/dashboard/DiscoveredServicesDrawer';
 import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGrid';
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
@@ -1384,6 +1384,25 @@ const App = () => {
     showToastMsg('Copied to clipboard');
   };
 
+  // Flip to the dashboard view without a full reload — but only when the user
+  // has actually onboarded before and still has credentials, so we don't drop
+  // a fresh user onto an empty dashboard.
+  const handleJumpToDashboard = () => {
+    const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
+    if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {
+      setIsSetupComplete(true);
+    }
+  };
+
+  const externalApps = {
+    otelDashboardUrl: hasRealHelixEndpoint
+      ? `${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`
+      : null,
+    aiopsServiceUrl: hasRealHelixEndpoint && helixConfig.businessServiceKey
+      ? `${helixConfig.baseUrl}/aiops/#/entities/service/${extractServiceKey(helixConfig.businessServiceKey)}?type=key`
+      : null,
+  };
+
 
   // Loading state while we check auth status
   if (authStatus === null) {
@@ -1406,85 +1425,17 @@ const App = () => {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto transition-all duration-300">
         {/* Header */}
-        <header className="bg-helixNav flex items-center px-5 h-14 font-helix w-full flex-shrink-0 sticky top-0 z-40 border-b border-[#3a3f4a]">
-          <div className="flex items-center gap-4">
-            <img src="/bmc-logo.svg" alt="BMC" className="h-7 w-auto" />
-            <h1 className="text-white font-normal text-[1.1875rem] m-0 tracking-normal">Helix OTel Configurator</h1>
-          </div>
-          <nav className="flex items-center gap-7 text-sm text-[#cfd3da] ml-10">
-            <button
-              onClick={handleJumpToOnboarding}
-              className={!isSetupComplete
-                ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
-                : 'hover:text-white transition-colors'}
-            >
-              Onboarding
-            </button>
-            <a
-              href="/"
-              onClick={(e) => {
-                // Already on / — short-circuit the navigation. If we're on
-                // the wizard but already onboarded, just flip to dashboard
-                // view without a full reload.
-                e.preventDefault();
-                const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
-                if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {
-                  setIsSetupComplete(true);
-                }
-              }}
-              className={isSetupComplete
-                ? 'text-white font-semibold border-b-2 border-primary pb-0.5 cursor-default'
-                : 'hover:text-white transition-colors'}
-            >
-              Gateway Dashboard
-            </a>
-            <a
-              href="/otel-data"
-              className="hover:text-white transition-colors"
-            >
-              View OTel Data
-            </a>
-          </nav>
-          <div className="ml-auto flex items-center gap-2">
-            {isSetupComplete && (
-              // Top-nav entry point for Helix Connection Settings. The form
-              // used to be an inline collapsible card mid-dashboard, which
-              // felt awkwardly placed for a piece of config that's rarely
-              // touched after setup. Moved into a right-side drawer that
-              // opens from this gear.
-              <button
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-2 rounded text-[#cfd3da] hover:text-white hover:bg-white/5 transition-colors"
-                title="Helix Connection Settings"
-                aria-label="Open Helix Connection Settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-            )}
-            <NavAvatar
-              authStatus={authStatus}
-              onLogout={handleLogout}
-              currentPage={isSetupComplete ? 'dashboard' : 'onboarding'}
-              onJumpToOnboarding={handleJumpToOnboarding}
-              onOpenSetPassword={() => setSetPasswordModal({ open: true, mode: 'set' })}
-              onRemovePassword={() => setSetPasswordModal({ open: true, mode: 'remove' })}
-              onJumpToDashboard={() => {
-                const onboardedBefore = localStorage.getItem('helix-configurator.onboarded') === '1';
-                if (onboardedBefore && envVars.HELIX_ENDPOINT && envVars.HELIX_API_KEY) {
-                  setIsSetupComplete(true);
-                }
-              }}
-              externalApps={{
-                otelDashboardUrl: hasRealHelixEndpoint
-                  ? `${helixConfig.baseUrl}/dashboards/d/OTelNamespaceOverview/otel-namespace-overview?orgId=${helixConfig.tenantId}&var-BusinessService=${helixConfig.source}&var-OTelNamespace=${helixConfig.source}&from=now-3h&to=now&timezone=browser`
-                  : null,
-                aiopsServiceUrl: hasRealHelixEndpoint && helixConfig.businessServiceKey
-                  ? `${helixConfig.baseUrl}/aiops/#/entities/service/${extractServiceKey(helixConfig.businessServiceKey)}?type=key`
-                  : null,
-              }}
-            />
-          </div>
-        </header>
+        <AppHeader
+          isSetupComplete={isSetupComplete}
+          onJumpToOnboarding={handleJumpToOnboarding}
+          onJumpToDashboard={handleJumpToDashboard}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          authStatus={authStatus}
+          onLogout={handleLogout}
+          onOpenSetPassword={() => setSetPasswordModal({ open: true, mode: 'set' })}
+          onRemovePassword={() => setSetPasswordModal({ open: true, mode: 'remove' })}
+          externalApps={externalApps}
+        />
 
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
           {!isSetupComplete ? (
