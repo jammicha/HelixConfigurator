@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Loader2, Server } from 'lucide-react';
 import { useSlowThreshold } from './SlowThresholdContext';
 import { formatDuration } from './utils';
+import { Sparkline } from '../Sparkline';
 import type { OperationStat } from './types';
 
 export const OperationsTab: React.FC<{
@@ -48,6 +49,17 @@ export const OperationsTab: React.FC<{
     if (pct < 5) return 'bg-warning/5 text-warning';
     if (pct < 25) return 'bg-warning/15 text-warning';
     return 'bg-danger/15 text-[#ff8a8a]';
+  };
+
+  // Latency-trend sparkline stroke: red when the operation is erroring, amber
+  // when its p95 is over the slow threshold, else the calm active blue used by
+  // the Overview sparklines. Keeps the trend's health legible at a glance
+  // without a legend.
+  const sparkStroke = (op: OperationStat): string => {
+    const errPct = op.trace_count ? (op.error_count / op.trace_count) * 100 : 0;
+    if (errPct >= 1) return '#ff8a8a';
+    if (op.p95_ms > slowThresholdMs) return '#ffd200';
+    return '#3759d8';
   };
 
   // Apdex grade helpers — ADAPT Design System compliant muted tones.
@@ -105,6 +117,9 @@ export const OperationsTab: React.FC<{
                 <th className="px-4 py-2 w-24"><Sortable id="p50">p50</Sortable></th>
                 <th className="px-4 py-2 w-24"><Sortable id="p95">p95</Sortable></th>
                 <th className="px-4 py-2 w-24"><Sortable id="max">Max</Sortable></th>
+                <th className="px-4 py-2 w-28 text-right">
+                  <span className="font-semibold uppercase tracking-wider text-tiny text-gray-400" title="Mean latency per time slice over the selected window">Trend</span>
+                </th>
                 <th className="px-4 py-2 w-24"><Sortable id="errors">Error %</Sortable></th>
                 <th className="px-4 py-2 w-24"><Sortable id="slow">Slow</Sortable></th>
               </tr>
@@ -145,6 +160,15 @@ export const OperationsTab: React.FC<{
                     <td className={`px-4 py-2 text-right tabular-nums ${latencyTone(op.p50_ms)}`}>{formatDuration(op.p50_ms)}</td>
                     <td className={`px-4 py-2 text-right tabular-nums font-semibold ${latencyTone(op.p95_ms)}`}>{formatDuration(op.p95_ms)}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-gray-400">{formatDuration(op.max_ms)}</td>
+                    <td className="px-4 py-2 text-right">
+                      {op.sparkline && op.sparkline.length > 0 ? (
+                        <span className="inline-flex justify-end align-middle" title="Mean latency per time slice over the selected window">
+                          <Sparkline data={op.sparkline} width={96} height={24} stroke={sparkStroke(op)} />
+                        </span>
+                      ) : (
+                        <span className="text-gray-600">—</span>
+                      )}
+                    </td>
                     <td className={`px-4 py-2 text-right tabular-nums ${errorPctTone(errPct)}`}>
                       {errPct > 0 ? `${errPct.toFixed(1)}%` : '—'}
                       <span className="text-tiny opacity-70 ml-1">({op.error_count})</span>

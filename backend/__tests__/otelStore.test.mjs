@@ -7,7 +7,7 @@ import path from 'node:path';
 // otelStore.js is CommonJS (module.exports). createRequire bridges to it
 // from this .mjs test file so we don't have to rewrite the source.
 const require = createRequire(import.meta.url);
-const { OtelStore, extractSpans, TRACE_CAP } = require('../otelStore');
+const { OtelStore, extractSpans, latencySparkline, TRACE_CAP } = require('../otelStore');
 const Database = require('better-sqlite3');
 
 const makeSpan = (overrides = {}) => {
@@ -554,6 +554,56 @@ describe('namespace/container filtering', () => {
     const { namespaces, containers } = store.listFilterValues();
     expect(namespaces).toEqual(['prod']);
     expect(containers.sort()).toEqual(['cart-a', 'inv-a']);
+  });
+
+  it('listOperations attaches a per-operation latency sparkline', () => {
+    const base = 1_000_000_000_000; // fixed wall-clock base for received_at
+    // Two cart-api|GET /cart traces in the same hour window: a ~100ms one near
+    // the start, a ~500ms one near the end. received_at = Date.now() at ingest,
+    // so set the fake clock between the two.
+    vi.setSystemTime(base + 60_000); // +1 min
+    store.ingestSpans([makeSpan({ traceId: 'o1', spanId: 'r1', serviceName: 'cart-api', name: 'GET /cart', startTimeNs: 0, endTimeNs: 100_000_000 })]);
+    vi.setSystemTime(base + 59 * 60_000); // +59 min
+    store.ingestSpans([makeSpan({ traceId: 'o2', spanId: 'r2', serviceName: 'cart-api', name: 'GET /cart', startTimeNs: 0, endTimeNs: 500_000_000 })]);
+
+    const ops = store.listOperations({ sinceMs: base, untilMs: base + 60 * 60_000 });
+    const op = ops.find(o => o.service_name === 'cart-api' && o.root_operation === 'GET /cart');
+    expect(op).toBeTruthy();
+    expect(op.sparkline).toHaveLength(24);
+    // 24 buckets over 1h = 2.5 min each: minute 1 lands in bucket 0, minute 59
+    // in bucket 23, and everything between is empty.
+    expect(op.sparkline[0]).toBeCloseTo(100, 5);
+    expect(op.sparkline[23]).toBeCloseTo(500, 5);
+    expect(op.sparkline.slice(1, 23).every(v => v === 0)).toBe(true);
+  });
+});
+
+describe('latencySparkline', () => {
+  it('returns a zero-filled array of the requested length for no samples', () => {
+    expect(latencySparkline([], 0, 100, 5)).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it('returns zeros when the window is empty or inverted', () => {
+    expect(latencySparkline([{ ts: 5, dur: 10 }], 100, 100, 4)).toEqual([0, 0, 0, 0]);
+    expect(latencySparkline([{ ts: 5, dur: 10 }], 100, 0, 4)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('averages the durations that fall in each bucket', () => {
+    // window [0,100), 5 buckets of width 20: ts 0 and 10 share bucket 0
+    // (mean(10,30)=20); ts 90 lands in bucket 4 (100).
+    expect(
+      latencySparkline([{ ts: 0, dur: 10 }, { ts: 10, dur: 30 }, { ts: 90, dur: 100 }], 0, 100, 5),
+    ).toEqual([20, 0, 0, 0, 100]);
+  });
+
+  it('clamps out-of-window samples to the nearest edge bucket', () => {
+    const out = latencySparkline([{ ts: -50, dur: 4 }, { ts: 999, dur: 8 }], 0, 100, 4);
+    expect(out[0]).toBe(4); // below the window → first bucket
+    expect(out[3]).toBe(8); // above the window → last bucket
+  });
+
+  it('treats a missing duration as zero', () => {
+    expect(latencySparkline([{ ts: 1 }], 0, 10, 1)).toEqual([0]);
   });
 });
 
