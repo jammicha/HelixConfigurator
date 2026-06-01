@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import Editor, { useMonaco } from '@monaco-editor/react';
+import { useMonaco } from '@monaco-editor/react';
 import { Settings, Loader2, ChevronDown } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
 import { useLocalStorageState } from './hooks/useLocalStorageState';
@@ -32,6 +32,7 @@ import { NavAvatar } from './components/NavAvatar';
 import { DiscoveredServicesDrawer } from './components/dashboard/DiscoveredServicesDrawer';
 import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGrid';
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
+import { GatewayConfigEditor } from './components/dashboard/GatewayConfigEditor';
 
 const App = () => {
   const monaco = useMonaco();
@@ -1704,63 +1705,17 @@ const App = () => {
               )}
 
               {/* Row 4 — YAML Editor */}
-              <div className={`adapt-card flex flex-col ${isYamlOpen ? 'h-[500px]' : ''}`}>
-                <div className="flex items-center justify-between">
-                  <button
-                    onClick={() => setIsYamlOpen(o => !o)}
-                    className="flex items-center gap-2 flex-1 text-left group"
-                  >
-                    <h2 className="text-base font-semibold text-gray-200 flex-1">Gateway Config (YAML)</h2>
-                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${isYamlOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {isYamlOpen && (
-                    <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                      <button
-                        onClick={handleOpenTemplates}
-                        className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-4 py-1.5 rounded text-sm font-semibold transition-colors"
-                      >
-                        Load Template
-                      </button>
-                      <button
-                        onClick={handleUpdateConfig}
-                        disabled={isConfigSaving}
-                        className="bg-primary hover:bg-[#3006c2] disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-sm font-semibold transition-all flex items-center gap-2"
-                      >
-                        {isConfigSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-                        {isConfigSaving ? 'Saving...' : 'Save Config'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {isYamlOpen && (
-                  <div className="flex-1 border border-gray-800 rounded overflow-hidden mt-4">
-                    <Editor
-                      height="100%"
-                      defaultLanguage="yaml"
-                      theme="vs-dark"
-                      value={config}
-                      onMount={(editor, monacoInstance) => {
-                        editorRef.current = editor;
-                        editor.addCommand(
-                          monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyS,
-                          () => { handleUpdateConfigRef.current(); }
-                        );
-                      }}
-                      onChange={(v) => {
-                        setConfig(v || '');
-                        clearEditorMarkers();
-                      }}
-                      options={{
-                        fontSize: 14,
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        automaticLayout: true,
-                        padding: { top: 16 }
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
+              <GatewayConfigEditor
+                isOpen={isYamlOpen}
+                onToggle={() => setIsYamlOpen(o => !o)}
+                onLoadTemplate={handleOpenTemplates}
+                onSave={handleUpdateConfig}
+                isSaving={isConfigSaving}
+                config={config}
+                onConfigChange={(v) => { setConfig(v); clearEditorMarkers(); }}
+                editorRef={editorRef}
+                onSaveShortcut={() => handleUpdateConfigRef.current()}
+              />
             </>
           )}
         </main>
