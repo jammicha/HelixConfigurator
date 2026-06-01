@@ -756,39 +756,31 @@ const App = () => {
     }
   };
 
-  const handleStart = async () => {
+  // start/stop share the same shape: guard, flip actionLoading, POST, toast
+  // the action-specific result. (restart is separate — it also polls +
+  // refreshes the collector diag.)
+  const runGatewayAction = async (
+    action: 'start' | 'stop',
+    messages: { ok: string; fail: string; err: string },
+  ) => {
     if (actionLoading) return;
-    setActionLoading('start');
+    setActionLoading(action);
     try {
-      const res = await fetch('/api/lifecycle/start', { method: 'POST' });
-      if (res.ok) {
-        showToastMsg('Gateway Started Successfully');
-      } else {
-        showToastMsg('Failed to start gateway', 'error');
-      }
+      const res = await fetch(`/api/lifecycle/${action}`, { method: 'POST' });
+      showToastMsg(res.ok ? messages.ok : messages.fail, res.ok ? 'success' : 'error');
     } catch (e) {
-      showToastMsg('Error starting gateway', 'error');
+      showToastMsg(messages.err, 'error');
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleStop = async () => {
-    if (actionLoading) return;
-    setActionLoading('stop');
-    try {
-      const res = await fetch('/api/lifecycle/stop', { method: 'POST' });
-      if (res.ok) {
-        showToastMsg('Gateway Stopped Successfully');
-      } else {
-        showToastMsg('Failed to stop gateway', 'error');
-      }
-    } catch (e) {
-      showToastMsg('Error stopping gateway', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const handleStart = () => runGatewayAction('start', {
+    ok: 'Gateway Started Successfully', fail: 'Failed to start gateway', err: 'Error starting gateway',
+  });
+  const handleStop = () => runGatewayAction('stop', {
+    ok: 'Gateway Stopped Successfully', fail: 'Failed to stop gateway', err: 'Error stopping gateway',
+  });
 
   const handleRestart = async () => {
     if (actionLoading) return;
