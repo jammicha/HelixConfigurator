@@ -4,9 +4,10 @@ import { TimelineChart, TIMELINE_COLORS } from '../TimelineChart';
 import { BmcChevron } from './BmcChevron';
 import { StatusPill } from './StatusPill';
 import { MIN_DURATION_PRESETS } from './constants';
+import { buildHelixTraceUrl, failingOperationView, bottleneckOperationView, formatDuration, formatRelative, hasRealHelixEndpoint, serviceTraceView } from './utils';
 import { useSlowThreshold } from './SlowThresholdContext';
-import { buildHelixTraceUrl, failingOperationView, formatDuration, formatRelative, hasRealHelixEndpoint, serviceTraceView } from './utils';
 import { useSyntheticRun } from '../../hooks/useSyntheticRun';
+import { colorForService } from './trace-detail/palette';
 import type { HelixEnv, Histogram, TraceStatus, TraceSummary } from './types';
 
 export const TracesTab: React.FC<{
@@ -215,7 +216,9 @@ export const TracesTab: React.FC<{
               <tr className="text-left text-tiny text-gray-400 uppercase tracking-wider">
                 <th className="px-4 py-2 font-semibold">Status</th>
                 <th className="px-4 py-2 font-semibold">Service</th>
-                <th className="px-4 py-2 font-semibold">{serviceFilter ? 'Operation' : 'Root operation'}</th>
+                <th className="px-4 py-2 font-semibold">
+                  {serviceFilter ? 'Operation' : 'Transaction'}
+                </th>
                 <th className="px-4 py-2 font-semibold text-right">
                   <button
                     onClick={() => handleSort('duration')}
@@ -263,7 +266,8 @@ export const TracesTab: React.FC<{
                 <tr
                   key={t.trace_id}
                   onClick={() => onSelect(t.trace_id)}
-                  className="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors"
+                  className="group border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition-colors"
+                  title={`Click to view detailed waterfall Gantt chart with ${t.span_count} spans`}
                 >
                   <td className="px-4 py-2">
                     <StatusPill trace={t} status={svcStatus} />
@@ -305,6 +309,21 @@ export const TracesTab: React.FC<{
                         </span>
                       )}
                     </span>
+                    {t.participating_services && t.participating_services.length > 1 && (
+                      <div className="mt-1 flex items-center gap-1 text-tiny text-gray-500 font-normal flex-wrap">
+                        {t.participating_services.map((s, idx) => (
+                          <React.Fragment key={s}>
+                            {idx > 0 && <span className="text-gray-600">➔</span>}
+                            <span
+                              className="px-1.5 py-0.5 rounded font-mono text-gray-300 bg-gray-900 border border-gray-800"
+                              style={{ borderLeftColor: colorForService(s), borderLeftWidth: 3 }}
+                            >
+                              {s}
+                            </span>
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    )}
                     {(() => {
                       // Failing operation as a subline under the service — the
                       // originating error span's name, so the list names *what*
@@ -312,26 +331,57 @@ export const TracesTab: React.FC<{
                       // a service filter, for error-free traces, or when it
                       // would just echo the Root Operation column.
                       const fail = failingOperationView(t, serviceFilter);
-                      if (!fail) return null;
-                      return (
-                        <div
-                          className="mt-0.5 flex items-center gap-1 text-tiny text-danger-text/80 font-normal"
-                          title={fail.service ? `Failing operation in ${fail.service}: ${fail.operation}` : `Failing operation: ${fail.operation}`}
-                        >
-                          <span className="text-gray-600" aria-hidden="true">└</span>
-                          <span className="font-mono truncate max-w-[16rem]">{fail.operation}</span>
-                        </div>
-                      );
+                      if (fail) {
+                        return (
+                          <div
+                            className="mt-0.5 flex items-center gap-1 text-tiny text-danger-text/80 font-normal"
+                            title={fail.service ? `Failing operation in ${fail.service}: ${fail.operation}` : `Failing operation: ${fail.operation}`}
+                          >
+                            <span className="text-gray-600" aria-hidden="true">└</span>
+                            <span className="font-mono truncate max-w-[16rem]">{fail.operation}</span>
+                          </div>
+                        );
+                      }
+
+                      // Slowest downstream bottleneck operation to surface as a subline under the
+                      // Service cell for slow, error-free traces.
+                      const bottleneck = bottleneckOperationView(t, serviceFilter, slowThresholdMs);
+                      if (bottleneck) {
+                        const label = bottleneck.service 
+                          ? `${bottleneck.service} · ${bottleneck.operation}` 
+                          : bottleneck.operation;
+                        const durationStr = bottleneck.durationMs != null 
+                          ? ` (${formatDuration(bottleneck.durationMs)})` 
+                          : '';
+                        return (
+                          <div
+                            className="mt-0.5 flex items-center gap-1 text-tiny text-warning/80 font-normal select-none"
+                            title={bottleneck.service ? `Slowest downstream child operation in ${bottleneck.service}: ${bottleneck.operation}${durationStr}` : `Slowest downstream child: ${bottleneck.operation}${durationStr}`}
+                          >
+                            <span className="text-gray-600" aria-hidden="true">└</span>
+                            <span className="text-gray-500 font-medium mr-0.5">bottleneck:</span>
+                            <span className="font-mono truncate max-w-[16rem] text-gray-300">{label}</span>
+                            <span className="text-gray-400 font-mono text-[10px]">{durationStr}</span>
+                          </div>
+                        );
+                      }
+
+                      return null;
                     })()}
                   </td>
                   <td className="px-4 py-2 text-gray-300 text-tiny">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSearchQuery(displayOperation); }}
-                      title="Filter list to this operation"
-                      className="text-left hover:text-link hover:underline truncate max-w-md"
-                    >
-                      {displayOperation}
-                    </button>
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSearchQuery(displayOperation); }}
+                        title="Filter list to this operation"
+                        className="text-left hover:text-link hover:underline truncate max-w-[20rem] xl:max-w-[28rem]"
+                      >
+                        {displayOperation}
+                      </button>
+                      <span className="opacity-0 group-hover:opacity-100 text-[10px] text-gray-500 font-mono transition-opacity select-none pr-2 shrink-0">
+                        inspect waterfall ➔
+                      </span>
+                    </div>
                   </td>
                   <td className={`px-4 py-2 text-right tabular-nums ${displayDuration > slowThresholdMs ? 'text-warning font-semibold' : 'text-gray-300'}`}>
                     {formatDuration(displayDuration)}

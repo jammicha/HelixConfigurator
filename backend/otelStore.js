@@ -861,7 +861,11 @@ class OtelStore {
           (SELECT s.service_name FROM spans s
             WHERE s.trace_id = t.trace_id AND s.status_code >= 2
             ORDER BY s.start_time_ns DESC, s.span_id DESC LIMIT 1)
-        ) AS failing_service${svcSelect}
+        ) AS failing_service,
+        (SELECT group_concat(DISTINCT service_name) FROM spans WHERE trace_id = t.trace_id AND service_name IS NOT NULL AND service_name <> '') AS participating_services,
+        (SELECT s.name FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC LIMIT 1) AS slowest_child_operation,
+        (SELECT s.service_name FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC LIMIT 1) AS slowest_child_service,
+        (SELECT s.duration_ms FROM spans s WHERE s.trace_id = t.trace_id AND s.name <> t.root_operation AND s.parent_span_id IS NOT NULL AND s.parent_span_id <> '' ORDER BY s.duration_ms DESC LIMIT 1) AS slowest_child_duration_ms${svcSelect}
       FROM traces t
       LEFT JOIN lc ON lc.trace_id = t.trace_id
       LEFT JOIN ec ON ec.trace_id = t.trace_id
@@ -871,7 +875,11 @@ class OtelStore {
     `;
     params.push(Math.min(Math.max(1, limit | 0), TRACE_CAP));
     const headParams = service ? [service] : [];
-    return this.db.prepare(sql).all(...headParams, ...params);
+    const rows = this.db.prepare(sql).all(...headParams, ...params);
+    return rows.map(r => ({
+      ...r,
+      participating_services: r.participating_services ? r.participating_services.split(',') : []
+    }));
   }
 
   getTrace(traceId) {

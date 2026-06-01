@@ -71,6 +71,28 @@ export const failingOperationView = (
   return { operation: op, service: trace.failing_service ?? null };
 };
 
+// The slowest downstream bottleneck operation to surface as a subline under the
+// Service cell for slow traces. Only in the unfiltered, trace-level view, only
+// for non-failing slow traces, and only when the slowest child operation differs
+// from the root operation. Returns null otherwise.
+export const bottleneckOperationView = (
+  trace: TraceSummary,
+  serviceFilter: string,
+  slowThresholdMs: number = SLOW_THRESHOLD_MS,
+): { operation: string; service: string | null; durationMs: number | null } | null => {
+  if (serviceFilter) return null;
+  if (trace.has_error) return null;
+  if (trace.duration_ms <= slowThresholdMs) return null;
+  const op = trace.slowest_child_operation;
+  if (!op) return null;
+  if (op === trace.root_operation) return null;
+  return {
+    operation: op,
+    service: trace.slowest_child_service ?? null,
+    durationMs: trace.slowest_child_duration_ms ?? null
+  };
+};
+
 // The `service|operation` → p95 map the Outlier filter and row badge look up.
 // The source switches with the active view, mirroring serviceTraceView: with a
 // service filter the row shows that service's entry-span operation, whose

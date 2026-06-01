@@ -46,6 +46,10 @@ export type TraceSummary = {
   svc_duration_ms?: number | null;
   svc_status_code?: number | null;
   svc_start_ns?: number | null;
+  participating_services?: string[];
+  slowest_child_operation?: string | null;
+  slowest_child_service?: string | null;
+  slowest_child_duration_ms?: number | null;
 };
 
 export type SpanDetail = {

@@ -11,6 +11,7 @@ import {
   serviceTraceView,
   buildOperationP95Map,
   failingOperationView,
+  bottleneckOperationView,
 } from './utils';
 
 // This suite runs under TZ=America/Chicago (see the "test" script in
@@ -60,6 +61,55 @@ describe('failingOperationView', () => {
 
   it('returns a null service when failing_service is absent', () => {
     expect(failingOperationView(errored({ failing_service: null }), '')).toEqual({ operation: 'SELECT drivers', service: null });
+  });
+});
+
+describe('bottleneckOperationView', () => {
+  const trace = (overrides: Partial<TraceSummary> = {}): TraceSummary => ({
+    trace_id: 't1', service_name: 'frontend', root_operation: 'Request Ride',
+    start_time_ns: 0, end_time_ns: 0, duration_ms: 1000, span_count: 4,
+    has_error: 0, received_at: 0,
+    slowest_child_operation: 'Calculate Trip ETA', slowest_child_service: 'route',
+    slowest_child_duration_ms: 800,
+    ...overrides,
+  });
+
+  const THRESHOLD = 500;
+
+  it('returns the slowest child operation in the unfiltered slow trace view', () => {
+    expect(bottleneckOperationView(trace(), '', THRESHOLD)).toEqual({
+      operation: 'Calculate Trip ETA',
+      service: 'route',
+      durationMs: 800,
+    });
+  });
+
+  it('returns null under an active service filter', () => {
+    expect(bottleneckOperationView(trace(), 'frontend', THRESHOLD)).toBeNull();
+  });
+
+  it('returns null when the trace has an error', () => {
+    expect(bottleneckOperationView(trace({ has_error: 1 }), '', THRESHOLD)).toBeNull();
+  });
+
+  it('returns null when the trace duration is at or below the threshold', () => {
+    expect(bottleneckOperationView(trace({ duration_ms: 400 }), '', THRESHOLD)).toBeNull();
+  });
+
+  it('returns null when there is no slowest child operation', () => {
+    expect(bottleneckOperationView(trace({ slowest_child_operation: null }), '', THRESHOLD)).toBeNull();
+  });
+
+  it('returns null when the slowest child operation equals the root operation', () => {
+    expect(bottleneckOperationView(trace({ slowest_child_operation: 'Request Ride' }), '', THRESHOLD)).toBeNull();
+  });
+
+  it('returns a null service when slowest_child_service is absent', () => {
+    expect(bottleneckOperationView(trace({ slowest_child_service: null }), '', THRESHOLD)).toEqual({
+      operation: 'Calculate Trip ETA',
+      service: null,
+      durationMs: 800,
+    });
   });
 });
 

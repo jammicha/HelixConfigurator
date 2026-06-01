@@ -42,32 +42,50 @@ const RollupPanel: React.FC<{
 }> = ({ icon, title, subtitle, tone, columns, rows, footer }) => {
   const headerTone = tone === 'danger' ? 'text-[#ff8a8a]' : tone === 'warning' ? 'text-warning' : 'text-link';
   return (
-    <div className="adapt-card !p-0 overflow-hidden">
-      <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 bg-gray-900">
+    <div className="adapt-card !p-0 overflow-hidden flex flex-col">
+      <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 bg-gray-900 flex-shrink-0">
         <span className={headerTone}>{icon}</span>
         <span className="text-sm font-semibold text-gray-200">{title}</span>
         <span className="text-tiny text-gray-500 ml-auto">{subtitle}</span>
       </div>
-      <table className="w-full text-tiny">
-        <thead>
-          <tr className="text-left text-gray-500 uppercase tracking-wider">
-            {columns.map((c, i) => (
-              <th key={c} className={`px-3 py-1 font-semibold ${i === 0 ? '' : 'text-right'}`}>{c}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(r => (
-            <tr key={r.key} className="border-t border-gray-800">
-              {r.cells.map((c, i) => (
-                <td key={i} className={`px-3 py-1 ${i === 0 ? 'text-gray-200' : 'text-right text-gray-300 tabular-nums'}`}>{c}</td>
-              ))}
+      <div className="overflow-y-auto overflow-x-hidden max-h-[148px]" style={{ scrollbarGutter: 'stable' }}>
+        <table className="w-full text-tiny relative border-collapse">
+          <thead className="sticky top-0 bg-gray-900 z-10 shadow-[inset_0_-1px_0_#1f2937]">
+            <tr className="text-left text-gray-500 uppercase tracking-wider bg-gray-900">
+              {columns.map((c, i) => {
+                const isLast = i === columns.length - 1;
+                return (
+                  <th
+                    key={c}
+                    className={`py-1 font-semibold ${i === 0 ? 'pl-3 pr-1' : 'text-right bg-gray-900'} ${isLast ? 'pr-4' : 'px-3'}`}
+                  >
+                    {c}
+                  </th>
+                );
+              })}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.key} className="border-t border-gray-800 hover:bg-gray-800/20">
+                {r.cells.map((c, i) => {
+                  const isLast = i === r.cells.length - 1;
+                  return (
+                    <td
+                      key={i}
+                      className={`py-1 ${i === 0 ? 'text-gray-200 pl-3 pr-1' : 'text-right text-gray-300 tabular-nums'} ${isLast ? 'pr-4' : 'px-3'}`}
+                    >
+                      {c}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {footer && (
-        <div className="px-3 py-1.5 border-t border-gray-800 text-tiny text-gray-500 bg-gray-1000">{footer}</div>
+        <div className="px-3 py-1.5 border-t border-gray-800 text-tiny text-gray-500 bg-gray-1000 flex-shrink-0">{footer}</div>
       )}
     </div>
   );
@@ -413,7 +431,7 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
               subtitle={`${sqlTotalCount} call${sqlTotalCount === 1 ? '' : 's'} • ${formatDuration(sqlTotalMs)} total`}
               tone={sqlRollup.some(b => b.maxMs > slowThresholdMs) ? 'warning' : 'info'}
               columns={['Query', 'Count', 'Total', 'Slowest']}
-              rows={sqlRollup.slice(0, 10).map(b => ({
+              rows={sqlRollup.slice(0, 50).map(b => ({
                 key: b.key,
                 cells: [
                   <span className="font-mono text-tiny truncate inline-block max-w-[24rem]" title={b.display}>
@@ -424,7 +442,7 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
                   <span className={b.maxMs > slowThresholdMs ? 'text-warning font-semibold' : ''}>{formatDuration(b.maxMs)}</span>,
                 ],
               }))}
-              footer={sqlRollup.length > 10 ? `+ ${sqlRollup.length - 10} more` : null}
+              footer={sqlRollup.length > 50 ? `+ ${sqlRollup.length - 50} more` : null}
             />
           )}
           {httpRollup.length > 0 && (
@@ -434,7 +452,7 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
               subtitle={`${httpTotalCount} call${httpTotalCount === 1 ? '' : 's'} • ${formatDuration(httpTotalMs)} total`}
               tone={httpHasError ? 'danger' : httpRollup.some(b => b.maxMs > slowThresholdMs) ? 'warning' : 'info'}
               columns={['Endpoint', 'Count', 'Total', 'Status']}
-              rows={httpRollup.slice(0, 10).map(b => ({
+              rows={httpRollup.slice(0, 50).map(b => ({
                 key: b.key,
                 cells: [
                   <span className="font-mono text-tiny truncate inline-block max-w-[24rem]" title={`${b.method} ${b.url}`}>
@@ -455,7 +473,7 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
                   </span>,
                 ],
               }))}
-              footer={httpRollup.length > 10 ? `+ ${httpRollup.length - 10} more` : null}
+              footer={httpRollup.length > 50 ? `+ ${httpRollup.length - 50} more` : null}
             />
           )}
         </div>
