@@ -354,6 +354,11 @@ export const OtelDataPage: React.FC = () => {
   const [traceLogs, setTraceLogs] = useState<LogRecord[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [tracesLoading, setTracesLoading] = useState(true);
+  // Set when /api/traces fails (e.g. a corrupt trace store 500s). Without this,
+  // a failed fetch left the list silently empty — indistinguishable from "no
+  // traces yet" — hiding a real backend fault. The Traces tab renders a
+  // distinct error state when this is set instead of the empty-state CTA.
+  const [tracesError, setTracesError] = useState<string | null>(null);
   // SSE connection state — only meaningful in Live stream mode. Surfaces as
   // a small dot next to the Stream selector so users have an honest signal
   // when the live feed has silently dropped (the bug that lost this
@@ -502,12 +507,26 @@ export const OtelDataPage: React.FC = () => {
     if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
     if (searchQuery.trim()) params.set('q', searchQuery.trim());
     params.set('limit', String(TRACE_LIST_LIMIT));
-    const res = await fetch(`/api/traces?${params}`);
-    if (res.ok) {
-      const j = await res.json();
-      setTraces(j.traces || []);
+    try {
+      const res = await fetch(`/api/traces?${params}`);
+      if (res.ok) {
+        const j = await res.json();
+        setTraces(j.traces || []);
+        setTracesError(null);
+      } else {
+        // Surface the failure rather than leaving the list silently empty — a
+        // 500 here (e.g. a corrupt trace store) otherwise reads as "no traces
+        // received yet", masking a real backend fault. Logs/Errors are
+        // unaffected because they don't read the spans table.
+        let detail = `HTTP ${res.status}`;
+        try { const j = await res.json(); if (j?.error) detail = j.error; } catch { /* non-JSON error body */ }
+        setTracesError(detail);
+      }
+    } catch (e) {
+      setTracesError(e instanceof Error ? e.message : 'Could not reach the trace store');
+    } finally {
+      setTracesLoading(false);
     }
-    setTracesLoading(false);
   };
 
   // The six overview-tab datasets (overview stats, traces/logs histograms,
@@ -1252,6 +1271,7 @@ export const OtelDataPage: React.FC = () => {
             helixEnv={helixEnv}
             operationP95={operationP95}
             tracesLoading={tracesLoading}
+            tracesError={tracesError}
             onSelect={setSelectedTraceId}
             histogram={ov.tracesHistogram}
             customRange={customRange}

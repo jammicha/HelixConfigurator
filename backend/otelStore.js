@@ -194,8 +194,16 @@ class OtelStore {
   constructor({ dbPath }) {
     this.events = new EventEmitter();
     this.events.setMaxListeners(50);
+    this.dbPath = dbPath;
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
+    // Verify the store's integrity before trusting it. A corrupt page in the
+    // spans B-tree (observed after a hard kill mid-checkpoint) makes every
+    // Traces-tab query throw SqliteError "database disk image is malformed",
+    // while Logs/Errors — which never read the spans table — keep working, so
+    // the fault hides as a silently-empty Traces tab. Self-heal by quarantining
+    // the bad file and starting fresh, rather than 500-ing on every trace query
+    // until someone notices.
+    this.db = this._openVerified(dbPath);
     // Incremental auto-vacuum: eviction's deletes move pages to the freelist,
     // reclaimed in small non-blocking chunks by _maybeIncrementalVacuum. Set
     // before any table is created so it applies for free on a new DB; an
@@ -234,6 +242,51 @@ class OtelStore {
     try { this._evictErrorsIfNeeded(); }
     catch (e) { console.warn('[otelStore] startup error eviction failed:', e.message); }
     this._startMaintenance();
+  }
+
+  // Open the SQLite store and verify it before use, returning a healthy
+  // handle: the existing file if it passes a quick integrity check, otherwise
+  // a freshly-created database after the corrupt files are quarantined aside.
+  // quick_check is chosen over integrity_check because it's far cheaper on a
+  // large store and still catches the page/B-tree corruption we hit; the store
+  // is count-capped, so the check is sub-second at startup.
+  _openVerified(dbPath) {
+    let db;
+    try {
+      db = new Database(dbPath);
+      const verdict = db.pragma('quick_check', { simple: true });
+      if (verdict === 'ok') return db;
+      console.warn(`[otelStore] integrity check failed (quick_check: ${verdict}); rebuilding store`);
+    } catch (e) {
+      // Either the file isn't a usable database at all, or quick_check itself
+      // threw (e.g. SQLITE_NOTADB) — both mean the store can't be trusted.
+      console.warn(`[otelStore] integrity check errored (${e.message}); rebuilding store`);
+    }
+    try { if (db) db.close(); } catch { /* already unusable */ }
+    this._quarantineCorruptStore(dbPath);
+    // Fresh file at the same path; _initSchema (next in the constructor)
+    // recreates the tables.
+    return new Database(dbPath);
+  }
+
+  // Move a corrupt store (and its -wal/-shm sidecars) aside so the next open
+  // starts clean. Renamed rather than deleted so the bad file survives for
+  // offline forensics; falls back to unlink if the rename can't be done, so we
+  // never reopen the same corrupt file.
+  _quarantineCorruptStore(dbPath) {
+    const stamp = Date.now();
+    for (const suffix of ['', '-wal', '-shm']) {
+      const src = dbPath + suffix;
+      if (!fs.existsSync(src)) continue;
+      const dest = `${dbPath}.corrupt-${stamp}${suffix}`;
+      try {
+        fs.renameSync(src, dest);
+      } catch (e) {
+        console.warn(`[otelStore] could not move ${src} aside (${e.message}); deleting it instead`);
+        try { fs.unlinkSync(src); } catch { /* best effort */ }
+      }
+    }
+    console.warn(`[otelStore] corrupt store quarantined to ${dbPath}.corrupt-${stamp}*; created a fresh empty store`);
   }
 
   // Periodic housekeeping: force-truncate the WAL and reclaim freed pages.

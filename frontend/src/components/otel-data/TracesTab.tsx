@@ -29,6 +29,10 @@ export const TracesTab: React.FC<{
   helixEnv: HelixEnv | null;
   operationP95: Map<string, number>;
   tracesLoading: boolean;
+  // Non-null when the /api/traces fetch failed (e.g. a corrupt trace store
+  // returned a 500). Rendered as a distinct error state so a backend fault
+  // isn't mistaken for "no traces yet".
+  tracesError: string | null;
   onSelect: (traceId: string) => void;
   histogram: Histogram | null;
   customRange: { sinceMs: number; untilMs: number } | null;
@@ -39,7 +43,7 @@ export const TracesTab: React.FC<{
   namespaceFilter, containerFilter,
   statusFilter, setStatusFilter,
   searchQuery, setSearchQuery, minMs, setMinMs,
-  helixEnv, operationP95, tracesLoading, onSelect,
+  helixEnv, operationP95, tracesLoading, tracesError, onSelect,
   histogram, customRange, onBucketClick, onClearCustomRange,
 }) => {
   const slowThresholdMs = useSlowThreshold();
@@ -207,6 +211,8 @@ export const TracesTab: React.FC<{
           <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading traces…
           </div>
+        ) : tracesError && traces.length === 0 ? (
+          <TracesErrorState message={tracesError} />
         ) : traces.length === 0 ? (
           <TracesEmptyState filtered={!!serviceFilter || !!namespaceFilter || !!containerFilter || !!statusFilter || !!searchQuery || minMs > 0} />
         ) : (
@@ -405,6 +411,31 @@ export const TracesTab: React.FC<{
           </table>
         )}
       </div>
+    </div>
+  );
+};
+
+// Distinct from the empty state: the trace query actively failed (typically a
+// 500 from the backend). Logs & Errors read different tables and are
+// unaffected, so we say so — and point at the now-automatic store recovery.
+const TracesErrorState: React.FC<{ message: string }> = ({ message }) => {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
+      <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-4">
+        <AlertTriangle className="w-6 h-6 text-danger-text" />
+      </div>
+      <h3 className="text-base font-semibold text-gray-200 mb-2">Couldn’t load traces</h3>
+      <p className="text-sm text-gray-400 max-w-md mb-3 leading-relaxed">
+        The trace store returned an error. Logs &amp; Errors are unaffected — they
+        don’t read the spans table.
+      </p>
+      <code className="font-mono text-tiny text-danger-text bg-gray-1000 px-2 py-1 rounded max-w-md break-words">
+        {message}
+      </code>
+      <p className="text-tiny text-gray-500 mt-3 max-w-md leading-relaxed">
+        If this persists, the local trace store may be corrupt. Restarting the
+        configurator now self-heals a corrupt store on startup.
+      </p>
     </div>
   );
 };
