@@ -31,6 +31,7 @@ import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/S
 import { NavAvatar } from './components/NavAvatar';
 import { LiveMetricsCards } from './components/dashboard/LiveMetricsCards';
 import { DiscoveredServicesDrawer } from './components/dashboard/DiscoveredServicesDrawer';
+import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGrid';
 
 const App = () => {
   const monaco = useMonaco();
@@ -1669,103 +1670,16 @@ const App = () => {
               {showDiagnostics && (
                 <>
                   {/* Row 2 */}
-                  <div className="adapt-card">
-                    <h2 className="text-lg font-semibold mb-4 text-gray-200">Helix troubleshooting & diagnostics</h2>
-                    <div className="grid grid-cols-4 gap-4">
-                      {['Collector Configuration', 'X-API Key Format', 'X-Source Format', 'Tenant URL Endpoint'].map((title, i) => {
-                        let isPass = false;
-                        let isChecking = false;
-                        let subDetail = '';
-                        let remediation = '';
-
-                        if (title === 'Collector Configuration') {
-                          isPass = collectorDiag.status === 'PASS';
-                          isChecking = collectorDiag.status === 'unknown' || collectorDiag.status === 'CHECKING';
-                          subDetail = collectorDiag.error || '';
-                          remediation = collectorDiag.remediation || '';
-                        }
-                        if (title === 'X-API Key Format') {
-                          isPass = apiKeyDiag.status === 'PASS';
-                          isChecking = apiKeyDiag.status === 'unknown';
-                          subDetail = apiKeyDiag.error || '';
-                          remediation = apiKeyDiag.remediation || '';
-                        }
-                        if (title === 'X-Source Format') {
-                          isPass = !!(envVars.X_SOURCE && envVars.X_SOURCE.length > 0);
-                          isChecking = !envLoaded;
-                          remediation = isPass ? '' : 'X-Source is required to identify your telemetry data.';
-                        }
-                        if (title === 'Tenant URL Endpoint') {
-                          isPass = networkDiag.status === 'Success';
-                          isChecking = networkDiag.status === 'unknown';
-                          subDetail = networkDiag.error || '';
-                          remediation = networkDiag.remediation || '';
-                        }
-
-                        return (
-                          <div key={i} className="flex flex-col gap-2">
-                            <div className="bg-gray-800 border border-gray-700 p-4 rounded flex flex-col items-center justify-center gap-3 relative group min-h-[120px]">
-                              <span className="text-sm font-semibold text-gray-300 text-center">{title}</span>
-                              {isPass ? (
-                                <span className="adapt-badge-success px-3 py-1 uppercase tracking-wider">
-                                  Pass
-                                </span>
-                              ) : isChecking ? (
-                                <div className="flex flex-col items-center gap-2">
-                                  <span className="flex items-center gap-2 px-3 py-1 uppercase tracking-wider text-xs font-semibold text-gray-400 bg-gray-800 border border-gray-700 rounded">
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                    Checking
-                                  </span>
-                                  {subDetail && (
-                                    <span className="text-[10px] text-gray-400 font-medium text-center leading-tight">
-                                      {subDetail}
-                                    </span>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="flex flex-col items-center gap-2">
-                                  <span className="adapt-badge-danger px-3 py-1 uppercase tracking-wider">
-                                    Fail
-                                  </span>
-                                  {subDetail && (
-                                    <span className="text-[10px] text-danger-text font-medium text-center leading-tight">
-                                      {subDetail}
-                                    </span>
-                                  )}
-                                  {remediation && (
-                                    <button
-                                      onClick={() => setExpandedRemediations(prev => ({ ...prev, [i]: !prev[i] }))}
-                                      className="text-info text-[11px] font-bold hover:underline cursor-pointer bg-transparent border-none mt-1"
-                                    >
-                                      {expandedRemediations[i] ? 'Hide Fix' : 'View Fix'}
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            {expandedRemediations[i] && remediation && (
-                              <div className="bg-gray-1000 border-l-2 border-danger p-3 rounded-r text-xs text-gray-200 animate-in fade-in slide-in-from-top-2 duration-200">
-                                <div className="flex items-center justify-between mb-1">
-                                  <p className="font-bold text-danger-text uppercase tracking-tighter">Remediation Step:</p>
-                                  <button
-                                    onClick={() => {
-                                      const text = `[${title}] ${subDetail ? subDetail + '\n' : ''}${remediation}`;
-                                      copyToClipboard(text);
-                                    }}
-                                    className="text-tiny text-info hover:underline uppercase tracking-wider font-semibold"
-                                    title="Copy remediation text for sharing"
-                                  >
-                                    Copy
-                                  </button>
-                                </div>
-                                {remediation}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <DiagnosticChecksGrid
+                    collectorDiag={collectorDiag}
+                    apiKeyDiag={apiKeyDiag}
+                    networkDiag={networkDiag}
+                    xSource={envVars.X_SOURCE}
+                    envLoaded={envLoaded}
+                    expandedRemediations={expandedRemediations}
+                    onToggleRemediation={(i) => setExpandedRemediations(prev => ({ ...prev, [i]: !prev[i] }))}
+                    onCopy={copyToClipboard}
+                  />
 
                   {/* Row 3 */}
                   <div className="adapt-card flex flex-col relative overflow-hidden">
