@@ -9,10 +9,11 @@ import { usePolledFetch } from './hooks/usePolledFetch';
 import { useGatewayActions } from './hooks/useGatewayActions';
 import { useTimeline } from './hooks/useTimeline';
 import { useRawMetrics } from './hooks/useRawMetrics';
+import { useTemplates } from './hooks/useTemplates';
 import { LoginScreen } from './components/LoginScreen';
 import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
-import { TemplatesModal, Template } from './components/TemplatesModal';
+import { TemplatesModal } from './components/TemplatesModal';
 import { RawMetricsModal } from './components/RawMetricsModal';
 import { Stepper } from './components/wizard/Stepper';
 import { Step1 } from './components/wizard/Step1';
@@ -72,9 +73,17 @@ const App = () => {
     open: handleOpenRawMetrics,
     close: closeRawMetrics,
   } = useRawMetrics();
-  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [loadingTemplateId, setLoadingTemplateId] = useState<string | null>(null);
+  const {
+    isOpen: isTemplatesOpen,
+    templates,
+    loadingTemplateId,
+    open: handleOpenTemplates,
+    close: closeTemplates,
+    apply: handleApplyTemplate,
+  } = useTemplates({
+    showToast: showToastMsg,
+    onApplyConfig: (content) => { setConfig(content); clearEditorMarkers(); },
+  });
   const [liveMetrics, setLiveMetrics] = useState({ received: 0, sent: 0, failed: 0 });
   const [metricsHistory, setMetricsHistory] = useState<Array<{ received: number; sent: number; failed: number }>>([]);
   const METRICS_HISTORY_MAX = 60; // 3 minutes at 3s polling
@@ -584,40 +593,7 @@ const App = () => {
 
   const visibleLogs = logFilter === 'helix' ? logs.filter(isHelixRelevant) : logs;
 
-  const handleOpenTemplates = async () => {
-    setIsTemplatesOpen(true);
-    if (templates.length === 0) {
-      try {
-        const res = await fetch('/api/templates');
-        const data = await res.json();
-        if (Array.isArray(data)) setTemplates(data);
-      } catch {
-        showToastMsg('Failed to load templates', 'error');
-      }
-    }
-  };
-
-  const handleApplyTemplate = async (id: string) => {
-    setLoadingTemplateId(id);
-    try {
-      const res = await fetch(`/api/templates/${id}`);
-      if (!res.ok) {
-        showToastMsg('Failed to load template', 'error');
-        return;
-      }
-      const data = await res.json();
-      setConfig(data.content || '');
-      clearEditorMarkers();
-      setIsTemplatesOpen(false);
-      showToastMsg('Template loaded. Review and click Save Config to apply.');
-    } catch {
-      showToastMsg('Failed to load template', 'error');
-    } finally {
-      setLoadingTemplateId(null);
-    }
-  };
-
-  useEscClose(isTemplatesOpen, () => setIsTemplatesOpen(false));
+  useEscClose(isTemplatesOpen, closeTemplates);
   useEscClose(isRawMetricsOpen, closeRawMetrics);
   useEscClose(isServicesOpen, () => setIsServicesOpen(false));
   useEscClose(!!confirmDialog, () => setConfirmDialog(null));
@@ -1642,7 +1618,7 @@ const App = () => {
         loadingTemplateId={loadingTemplateId}
         currentConfigYaml={config}
         onApply={handleApplyTemplate}
-        onClose={() => setIsTemplatesOpen(false)}
+        onClose={closeTemplates}
       />
 
       <RawMetricsModal
