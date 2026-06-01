@@ -3,6 +3,7 @@ import { AlertTriangle, Check, ExternalLink, Loader2, X } from 'lucide-react';
 import type { HelixEnv, LogRecord, TraceDetail } from '../types';
 import { buildHelixTraceUrl, formatRelative, hasRealHelixEndpoint } from '../utils';
 import { BmcChevron } from '../BmcChevron';
+import { CopyButton } from '../CopyButton';
 import { Waterfall } from './Waterfall';
 
 export const TraceDetailDrawer: React.FC<{
@@ -131,7 +132,10 @@ export const TraceDetailDrawer: React.FC<{
         <header className="flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-gray-900">
           <div>
             <div className="text-tiny text-gray-500 uppercase tracking-wider font-semibold">Trace</div>
-            <div className="font-mono text-sm text-gray-200 mt-0.5 select-all">{traceId}</div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="font-mono text-sm text-gray-200 select-all">{traceId}</span>
+              <CopyButton value={traceId} title="Copy trace ID" stopPropagation={false} />
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {detail && (

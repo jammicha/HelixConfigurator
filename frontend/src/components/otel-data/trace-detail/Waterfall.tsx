@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Activity, AlertTriangle, Clock, Database, Repeat, Server } from 'lucide-react';
 import type { LogRecord, SpanDetail, TraceDetail } from '../types';
 import { useSlowThreshold } from '../SlowThresholdContext';
-import { detectNPlusOne, formatDuration } from '../utils';
+import { countMatchingSpans, detectNPlusOne, formatDuration, spanMatchesQuery } from '../utils';
 import { colorForService } from './palette';
 import { LogLine } from './LogLine';
 import { SpanRow } from './SpanRow';
@@ -186,21 +186,17 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
   const [hoveredService, setHoveredService] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<string | null>(null);
 
-  const matchesSearch = (span: SpanDetail, query: string): boolean => {
-    if (!query) return false;
-    const q = query.toLowerCase();
-    if (span.name.toLowerCase().includes(q)) return true;
-    if (span.serviceName.toLowerCase().includes(q)) return true;
-    for (const val of Object.values(span.attributes)) {
-      if (val != null && String(val).toLowerCase().includes(q)) return true;
-    }
-    return false;
-  };
+  // Match count for the "Find in spans" box — shared matcher with the page-
+  // level helper so the highlight pass and this count can't disagree.
+  const spanMatchCount = useMemo(
+    () => countMatchingSpans(spans, spanSearchQuery),
+    [spans, spanSearchQuery],
+  );
 
   const isAnySearchOrFilterActive = !!spanSearchQuery || !!selectedService || !!hoveredService;
 
   const isSpanHighlighted = (span: SpanDetail): boolean => {
-    if (spanSearchQuery && matchesSearch(span, spanSearchQuery)) return true;
+    if (spanSearchQuery && spanMatchesQuery(span, spanSearchQuery)) return true;
     const activeSvc = selectedService || hoveredService;
     if (activeSvc && span.serviceName === activeSvc) return true;
     return false;
@@ -604,13 +600,22 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
                 className="bg-gray-1000 border border-gray-800 rounded px-2 py-0.5 text-tiny text-gray-100 focus:outline-none focus:border-link max-w-[12rem] transition-colors"
               />
               {spanSearchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSpanSearchQuery('')}
-                  className="text-gray-500 hover:text-gray-300 text-tiny"
-                >
-                  Clear
-                </button>
+                <>
+                  {/* Explicit hit count so an all-dimmed list reads as "0
+                      matching" rather than looking broken. */}
+                  <span
+                    className={`text-tiny tabular-nums whitespace-nowrap ${spanMatchCount > 0 ? 'text-gray-400' : 'text-warning'}`}
+                  >
+                    {spanMatchCount} match{spanMatchCount === 1 ? '' : 'es'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSpanSearchQuery('')}
+                    className="text-gray-500 hover:text-gray-300 text-tiny"
+                  >
+                    Clear
+                  </button>
+                </>
               )}
             </div>
           )}

@@ -12,6 +12,9 @@ import {
   buildOperationP95Map,
   failingOperationView,
   bottleneckOperationView,
+  spanMatchesQuery,
+  countMatchingSpans,
+  hasActiveOtelFilters,
 } from './utils';
 
 // This suite runs under TZ=America/Chicago (see the "test" script in
@@ -272,6 +275,59 @@ describe('detectNPlusOne', () => {
   it('ignores spans without a db.operation', () => {
     const spans = Array.from({ length: 6 }, () => span(undefined, 'orders'));
     expect(detectNPlusOne(spans)).toBeNull();
+  });
+});
+
+describe('spanMatchesQuery / countMatchingSpans', () => {
+  const mkSpan = (over: Partial<SpanDetail> = {}): SpanDetail =>
+    ({
+      spanId: 's', traceId: 't', parentSpanId: null,
+      serviceName: 'cart-api', name: 'GET /cart/items', kind: 3,
+      startTimeNs: 0, endTimeNs: 0, durationMs: 0, statusCode: 0, statusMessage: '',
+      attributes: { 'http.method': 'GET', 'http.status_code': 200 }, events: [],
+      ...over,
+    }) as SpanDetail;
+
+  it('matches on span name, service, and attribute value, case-insensitively', () => {
+    expect(spanMatchesQuery(mkSpan(), 'cart-api')).toBe(true);   // service
+    expect(spanMatchesQuery(mkSpan(), '/CART/items')).toBe(true); // name (mixed case)
+    expect(spanMatchesQuery(mkSpan(), '200')).toBe(true);         // attribute value
+    expect(spanMatchesQuery(mkSpan(), 'get')).toBe(true);         // attribute value, lowercased
+  });
+
+  it('does not match unrelated text and treats an empty query as inactive', () => {
+    expect(spanMatchesQuery(mkSpan(), 'payment')).toBe(false);
+    expect(spanMatchesQuery(mkSpan(), '')).toBe(false);
+  });
+
+  it('counts only matching spans, zero for an empty query', () => {
+    const spans = [
+      mkSpan({ name: 'GET /cart/items' }),
+      mkSpan({ name: 'POST /checkout', serviceName: 'checkout-api', attributes: {} }),
+      mkSpan({ name: 'SELECT items', serviceName: 'mysql', attributes: { 'db.system': 'mysql' } }),
+    ];
+    expect(countMatchingSpans(spans, 'cart')).toBe(1);
+    expect(countMatchingSpans(spans, 'api')).toBe(2); // cart-api + checkout-api
+    expect(countMatchingSpans(spans, 'redis')).toBe(0);
+    expect(countMatchingSpans(spans, '')).toBe(0);
+  });
+});
+
+describe('hasActiveOtelFilters', () => {
+  it('is false when nothing is engaged (and ignores blank search / zero min-duration)', () => {
+    expect(hasActiveOtelFilters({})).toBe(false);
+    expect(hasActiveOtelFilters({ service: '', namespace: '', status: '', minMs: 0, search: '   ' })).toBe(false);
+    expect(hasActiveOtelFilters({ customRange: false })).toBe(false);
+  });
+
+  it('is true when any individual filter is engaged', () => {
+    expect(hasActiveOtelFilters({ service: 'cart-api' })).toBe(true);
+    expect(hasActiveOtelFilters({ namespace: 'shop' })).toBe(true);
+    expect(hasActiveOtelFilters({ container: 'cart-7f9' })).toBe(true);
+    expect(hasActiveOtelFilters({ status: 'error' })).toBe(true);
+    expect(hasActiveOtelFilters({ minMs: 250 })).toBe(true);
+    expect(hasActiveOtelFilters({ search: 'checkout' })).toBe(true);
+    expect(hasActiveOtelFilters({ customRange: true })).toBe(true);
   });
 });
 

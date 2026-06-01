@@ -217,6 +217,57 @@ export const buildHelixTraceUrl = (
   return `${env.endpoint.replace(/\/+$/, '')}/dashboards/d/OTelTraceDetails/otel-trace-details?${qs}`;
 };
 
+// Does a span match the waterfall's free-text "Find in spans" query? Matches
+// the span name, its service, and any attribute value (case-insensitive).
+// Extracted from the Waterfall component so the highlight pass and the
+// match-count badge share one definition — they were silently drifting risks
+// otherwise (a query that highlights rows but reports a different count reads
+// as a bug). An empty query matches nothing (the search is inactive), mirroring
+// the dim/highlight logic that only engages when a query is present.
+export const spanMatchesQuery = (span: SpanDetail, query: string): boolean => {
+  if (!query) return false;
+  const q = query.toLowerCase();
+  if (span.name.toLowerCase().includes(q)) return true;
+  if (span.serviceName.toLowerCase().includes(q)) return true;
+  for (const val of Object.values(span.attributes)) {
+    if (val != null && String(val).toLowerCase().includes(q)) return true;
+  }
+  return false;
+};
+
+// How many spans match a "Find in spans" query. Drives the match-count badge
+// next to the waterfall search box so an empty result is explicit ("0 matching")
+// instead of a silently all-dimmed list.
+export const countMatchingSpans = (spans: SpanDetail[], query: string): number => {
+  if (!query) return 0;
+  let n = 0;
+  for (const s of spans) if (spanMatchesQuery(s, query)) n++;
+  return n;
+};
+
+// Is any cross-tab OTel filter engaged? Backs the single "Clear filters" reset
+// in the top bar — the page accumulates service / namespace / container /
+// status / min-duration / search / custom-window filters that each had to be
+// cleared individually, and several apply to tabs that have no UI of their own
+// to clear them. A blank/whitespace search and a zero min-duration count as
+// "not filtering", matching how the URL-state serializer omits them.
+export const hasActiveOtelFilters = (f: {
+  service?: string;
+  namespace?: string;
+  container?: string;
+  status?: string;
+  minMs?: number;
+  search?: string;
+  customRange?: boolean;
+}): boolean =>
+  !!f.service ||
+  !!f.namespace ||
+  !!f.container ||
+  !!f.status ||
+  (f.minMs ?? 0) > 0 ||
+  !!(f.search && f.search.trim()) ||
+  !!f.customRange;
+
 // Detect N+1 pattern: 5+ spans with the same db.operation + db.name.
 export const detectNPlusOne = (spans: SpanDetail[]): { operation: string; dbName: string; count: number } | null => {
   const buckets = new Map<string, number>();
