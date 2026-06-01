@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // otelStore.js is CommonJS (module.exports). createRequire bridges to it
 // from this .mjs test file so we don't have to rewrite the source.
 const require = createRequire(import.meta.url);
 const { OtelStore, extractSpans, TRACE_CAP } = require('../otelStore');
+const Database = require('better-sqlite3');
 
 const makeSpan = (overrides = {}) => {
   const start = overrides.startTimeNs ?? 1_000_000_000;
@@ -61,6 +65,16 @@ describe('OtelStore', () => {
       expect(store.getTrace(id(overflow - 1))).toBeNull();
       expect(store.getTrace(id(overflow))).not.toBeNull();
       expect(store.getTrace(id(total - 1))).not.toBeNull();
+    });
+  });
+
+  describe('pragmas', () => {
+    it('opens with incremental auto_vacuum', () => {
+      expect(store.db.pragma('auto_vacuum', { simple: true })).toBe(2); // INCREMENTAL
+    });
+    it('uses in-memory temp store and a 16 MB page cache', () => {
+      expect(store.db.pragma('temp_store', { simple: true })).toBe(2);     // MEMORY
+      expect(store.db.pragma('cache_size', { simple: true })).toBe(-16000); // ~16 MB
     });
   });
 
@@ -500,6 +514,28 @@ describe('namespace/container filtering', () => {
     const { namespaces, containers } = store.listFilterValues();
     expect(namespaces).toEqual(['prod']);
     expect(containers.sort()).toEqual(['cart-a', 'inv-a']);
+  });
+});
+
+describe('auto_vacuum conversion', () => {
+  it('converts a pre-existing NONE database to INCREMENTAL', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'otelstore-'));
+    const dbPath = path.join(dir, 'legacy.db');
+    // Seed a DB in auto_vacuum=NONE with a table so the mode is committed.
+    const seed = new Database(dbPath);
+    seed.pragma('auto_vacuum = NONE');
+    seed.exec('CREATE TABLE seed (id INTEGER)');
+    expect(seed.pragma('auto_vacuum', { simple: true })).toBe(0); // NONE
+    seed.close();
+
+    const store = new OtelStore({ dbPath });
+    try {
+      expect(store.db.pragma('auto_vacuum', { simple: true })).toBe(2); // INCREMENTAL
+    } finally {
+      store.stopMaintenance();
+      store.db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

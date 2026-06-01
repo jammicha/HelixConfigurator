@@ -188,6 +188,11 @@ class OtelStore {
     this.events.setMaxListeners(50);
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
+    // Incremental auto-vacuum: eviction's deletes move pages to the freelist,
+    // reclaimed in small non-blocking chunks by _maybeIncrementalVacuum. Set
+    // before any table is created so it applies for free on a new DB; an
+    // existing DB is converted by the one-time VACUUM below.
+    this.db.pragma('auto_vacuum = INCREMENTAL');
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     // Cap WAL growth. Without these, the WAL file can grow unbounded between
@@ -196,8 +201,22 @@ class OtelStore {
     // journal_size_limit truncates the WAL back to 64 MB on each checkpoint.
     this.db.pragma('wal_autocheckpoint = 1000');
     this.db.pragma('journal_size_limit = 67108864'); // 64 MB
+    // Read-path tuning: temp B-trees (GROUP BY/ORDER BY/CTEs) build in RAM;
+    // ~16 MB page cache keeps the hot working set resident.
+    this.db.pragma('temp_store = MEMORY');
+    this.db.pragma('cache_size = -16000');
     this._initSchema();
     this._prepStatements();
+    // Convert a pre-existing FULL/NONE database to incremental auto-vacuum.
+    // The pragma above only takes effect on an existing DB after one VACUUM;
+    // run it here at construct time (before app.listen) so no ingest is
+    // blocked, and the DB is bounded by TRACE_CAP so it's quick.
+    if (this.db.pragma('auto_vacuum', { simple: true }) !== 2) {
+      try { this.db.exec('VACUUM'); }
+      catch (e) { console.warn('[otelStore] auto_vacuum conversion VACUUM failed:', e.message); }
+    }
+    // Wall-clock of the last ingest, for the maintenance quiet-time gate.
+    this._lastIngestAt = 0;
     // One-shot startup eviction — covers the case where an existing DB has
     // accumulated way past the new cap (we discovered 1M+ logs in an
     // unevicted store). Without this, a fresh code drop would have to wait
