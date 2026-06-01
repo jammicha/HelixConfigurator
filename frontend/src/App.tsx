@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Editor, { useMonaco } from '@monaco-editor/react';
-import { Check, Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown } from 'lucide-react';
+import { Settings, Loader2, X, Activity, Container, ExternalLink, BarChart2, Unlink, Server, ChevronDown } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
 import { useLocalStorageState } from './hooks/useLocalStorageState';
 import { useSmartAdd } from './hooks/useSmartAdd';
@@ -41,7 +41,6 @@ const App = () => {
   );
   const [isVerifying, setIsVerifying] = useState(false);
   const [setupError, setSetupError] = useState('');
-  const [telemetryStatus, setTelemetryStatus] = useState('idle');
   const [collectorDiag, setCollectorDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [apiKeyDiag, setApiKeyDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [networkDiag, setNetworkDiag] = useState({ status: 'unknown', error: '', remediation: '' });
@@ -268,7 +267,6 @@ const App = () => {
       setLogs([]);
       setLiveMetrics({ received: 0, sent: 0, failed: 0 });
       setDiagAlert(false);
-      setTelemetryStatus('idle');
       setIsSetupComplete(false);
       setSetupStep(1);
     };
@@ -958,7 +956,6 @@ const App = () => {
     setIsVerifying(true);
     setSetupError('');
     setTraceVerifyResult(null);
-    setTelemetryStatus('idle');
 
     try {
       // Save keys
@@ -1152,7 +1149,6 @@ const App = () => {
         setTraceVerifyResult(null);
         setApiKeyProbe(null);
         setSetupError('');
-        setTelemetryStatus('idle');
         setIsSetupComplete(false);
         setSetupStep(1);
         localStorage.removeItem('helix-configurator.onboarded');
@@ -1243,7 +1239,6 @@ const App = () => {
     // Re-verifying invalidates the previous probe result; clear it so the
     // user isn't left looking at a stale "key was rejected" message.
     setApiKeyProbe(null);
-    setTelemetryStatus('loading');
     try {
       // Pass the Step 3 customer collector (when there's exactly one detected
       // candidate sharing a network with the sidecar) so verify-trace can read
@@ -1263,14 +1258,10 @@ const App = () => {
         remediation: data.remediation,
       });
       if (data.status === 'exported') {
-        setTelemetryStatus('success');
         pushTimelineEvent('verify', 'Synthetic trace reached Helix');
-      } else {
-        setTelemetryStatus('error');
       }
     } catch (err) {
       setTraceVerifyResult({ status: 'error', message: 'Verification request failed' });
-      setTelemetryStatus('error');
     } finally {
       setVerifyingTrace(false);
       // The synthetic trace ticked the receiver counters too. Re-baseline the
@@ -1587,12 +1578,6 @@ ${logsData.logs || '(no logs available)'}
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     showToastMsg('Copied to clipboard');
-  };
-
-  const getStatusColor = () => {
-    if (gatewayStatus === 'running') return 'bg-success';
-    if (gatewayStatus === 'restarting') return 'bg-warning animate-spin rounded-sm';
-    return 'bg-danger';
   };
 
   const renderContainerCard = (container: any, isCore: boolean = false) => {
