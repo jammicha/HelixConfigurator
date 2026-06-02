@@ -95,6 +95,7 @@ function register(app, { otelStore }) {
       spans: trace.spans,
       baseUrl: portalBaseUrl,
       tenantId,
+      spanDashboardUid: (process.env.HELIX_SPAN_DASHBOARD_UID || '').trim(),
     });
     // severity for the response body comes from the built event
     const severity = payload[0].severity;
