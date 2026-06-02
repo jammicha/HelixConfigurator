@@ -6,6 +6,12 @@ services:
     # Stable hostname so the gateway can fan trace data out to
     # http://helix-configurator:3001 over the helix-bridge network.
     container_name: helix-configurator
+    # Give the backend time to checkpoint + close the SQLite store on SIGTERM
+    # before Docker SIGKILLs it. The default 10s grace is too short for a large
+    # store under load: a kill mid-checkpoint corrupts a spans B-tree page, and
+    # the store then self-heals by quarantining it and starting fresh — losing
+    # the accumulated window. 60s lets a clean shutdown finish first.
+    stop_grace_period: 60s
     ports:
       # 8765 matches the bundled install template — avoids colliding with
       # the Vite dev server on 3000.

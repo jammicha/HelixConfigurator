@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { OverviewTab } from './OverviewTab';
 import { useOverview } from '../hooks/useOverview';
+import { useGuardedPoll } from '../hooks/useGuardedPoll';
 import { usePageRefresh } from '../hooks/usePageRefresh';
 import type { StreamMode } from '../hooks/usePageRefresh';
 import { isStreamLive } from '../hooks/usePageRefresh';
@@ -564,6 +565,12 @@ export const OtelDataPage: React.FC = () => {
     container: containerFilter || undefined,
     slowThresholdMs,
   });
+  // Mirror the overview's in-flight state into a ref so the periodic overview
+  // poll (which advances refreshNonce rather than calling a fn) can skip a tick
+  // while a bundle fetch is still running — same anti-pile-up guard as the
+  // other pollers.
+  const ovLoadingRef = useRef(ov.loading);
+  ovLoadingRef.current = ov.loading;
 
   const refreshServices = useCallback(async () => {
     // Two endpoints fetched in parallel: services for the existing dropdown
@@ -683,6 +690,15 @@ export const OtelDataPage: React.FC = () => {
     }
   }, [range, customRange, slowThresholdMs, namespaceFilter, containerFilter, serviceFilter]);
 
+  // Guarded wrappers for the *periodic* pollers: skip a tick when the prior poll
+  // is still in flight, so slow responses can't let interval ticks pile up
+  // against the synchronous-SQLite backend (the runaway queue that gridlocked
+  // the page). User-initiated refreshes call the raw fns directly so they always
+  // run; only the interval/cadence sites below use these.
+  const guardedRefreshTraces = useGuardedPoll(refreshTraces);
+  const guardedRefreshServices = useGuardedPoll(refreshServices);
+  const guardedRefreshOperations = useGuardedPoll(refreshOperations);
+
   // Fetch on initial mount + whenever underlying inputs change. Operations
   // data also feeds the Traces tab's outlier flagging (rows whose duration
   // exceeds 2× p95 of their operation), so the refresh runs regardless of
@@ -698,7 +714,7 @@ export const OtelDataPage: React.FC = () => {
   // Periodic refresh honors the page-wide stream mode (live / 30s / 1m / 5m /
   // paused) — previously this was hardcoded to 60s and ignored the user's
   // stream-mode selection.
-  usePageRefresh(streamMode, refreshOperations);
+  usePageRefresh(streamMode, guardedRefreshOperations);
 
   // Initial load + reload when filters change. customRange is included so
   // clicking a histogram bucket zooms the list into that bucket immediately.
@@ -741,7 +757,7 @@ export const OtelDataPage: React.FC = () => {
     const id = setInterval(() => {
       if (tracesPausedRef.current) return;
       if (streamModeRef.current === 'live' && sseConnectedRef.current) return;
-      refreshTraces();
+      guardedRefreshTraces();
     }, 30_000);
     return () => clearInterval(id);
   }, [serviceFilter, namespaceFilter, containerFilter, range, customRange]);
@@ -753,6 +769,9 @@ export const OtelDataPage: React.FC = () => {
   // sliding even though the trace list was frozen, which felt buggy.
   const pausedAwareRefresh = useCallback(() => {
     if (tracesPausedRef.current) return;
+    // Skip this tick if the previous overview bundle fetch is still in flight,
+    // so slow responses don't stack overview-bundle requests.
+    if (ovLoadingRef.current) return;
     // Bump the nonce so overviewWindow advances; useOverview's effect will
     // pick up the new args and refetch. Avoids calling ov.refresh() directly
     // (which would fetch with the OLD window).
@@ -779,9 +798,9 @@ export const OtelDataPage: React.FC = () => {
   // interval on filter change keeps it bound to the current closure.
   useEffect(() => {
     refreshServices();
-    const id = setInterval(refreshServices, 30_000);
+    const id = setInterval(guardedRefreshServices, 30_000);
     return () => clearInterval(id);
-  }, [refreshServices]);
+  }, [refreshServices, guardedRefreshServices]);
 
   // Realtime SSE — push new traces and errors into the lists without polling.
   // The connection is shared across both tabs; tab switches don't tear it down.
