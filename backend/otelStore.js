@@ -73,7 +73,10 @@ const SPARK_BUCKETS = 24;
 // root rule). On startup, stored traces are re-derived once via the reconcile
 // when the DB's PRAGMA user_version is below this — so a rule change re-processes
 // the store only after the rule actually moves, not on every boot.
-const TRACE_SUMMARY_RULE_VERSION = 1;
+// v2: db_call_count denormalized onto the traces row (see recomputeTrace) so
+// listTraces no longer scans + json_extracts the whole spans table per call.
+// Bumping this backfills the column into existing traces via the reconcile path.
+const TRACE_SUMMARY_RULE_VERSION = 2;
 
 // OTLP/JSON encodes traceId/spanId as lowercase hex strings (per the OTLP
 // spec post-1.0). Older builds may emit base64; tolerate both so we don't
@@ -287,6 +290,11 @@ class OtelStore {
     try {
       if (this.db.pragma('user_version', { simple: true }) < TRACE_SUMMARY_RULE_VERSION) {
         this._reconcileTraceSummaries();
+        // Refresh planner statistics after a full re-derive. The store has
+        // usually grown a lot by now, and listTraces' filtered plans depend on
+        // sqlite_stat1 to choose index-driven (early-LIMIT) plans over full
+        // scans. One-time cost, gated behind the same version bump.
+        try { this.db.exec('ANALYZE'); } catch (e) { console.warn('[otelStore] ANALYZE failed:', e.message); }
         this.db.pragma(`user_version = ${TRACE_SUMMARY_RULE_VERSION}`);
       }
     } catch (e) { console.warn('[otelStore] trace-summary reconcile failed:', e.message); }
@@ -462,8 +470,16 @@ class OtelStore {
     // can scope to the namespace the trace actually lives in. Pre-existing
     // rows get NULL until their next ingest recomputes the summary.
     addColumn('traces', 'service_namespace', 'TEXT');
+    // db_call_count is denormalized from the trace's spans (counted once in
+    // recomputeTrace) so listTraces doesn't scan + json_extract the entire spans
+    // table on every call just to badge DB activity — that full scan dominated
+    // the trace-list query as the store grew. Backfilled via the version bump.
+    addColumn('traces', 'db_call_count', 'INTEGER');
     try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_namespace ON spans(service_namespace)'); } catch {}
     try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_container ON spans(container_name)'); } catch {}
+    // Index the per-span service so the trace-list service filter (EXISTS) and
+    // the per-service entry-span lookup don't full-scan 1.5M+ spans.
+    try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_service ON spans(service_name)'); } catch {}
   }
 
   _prepStatements() {
@@ -493,7 +509,7 @@ class OtelStore {
     `);
     this.recomputeTrace = this.db.prepare(`
       INSERT INTO traces (trace_id, service_name, service_namespace, root_operation, start_time_ns, end_time_ns,
-                          duration_ms, span_count, has_error, received_at)
+                          duration_ms, span_count, has_error, db_call_count, received_at)
       WITH root_span AS (
         -- The trace's ENTRY span — the app's view of where the request enters.
         -- Preference: (1) the earliest SERVER span (kind=2), the real entry
@@ -529,6 +545,12 @@ class OtelStore {
         -- visible via error_count + the in-trace error pills, but don't flag the
         -- whole trace as an error.
         COALESCE((SELECT CASE WHEN status_code >= 2 THEN 1 ELSE 0 END FROM root_span), 0),
+        -- db_call_count: spans in THIS trace carrying a db.system(.name) attr,
+        -- counted once here (scoped to the trace via idx_spans_trace) instead of
+        -- scanning + json_extracting the whole spans table per listTraces call.
+        (SELECT COUNT(*) FROM spans WHERE trace_id = @traceId
+           AND (json_extract(attributes_json, '$."db.system"') IS NOT NULL
+                OR json_extract(attributes_json, '$."db.system.name"') IS NOT NULL)),
         @receivedAt
       ON CONFLICT(trace_id) DO UPDATE SET
         service_name = excluded.service_name,
@@ -539,6 +561,7 @@ class OtelStore {
         duration_ms = excluded.duration_ms,
         span_count = excluded.span_count,
         has_error = excluded.has_error,
+        db_call_count = excluded.db_call_count,
         received_at = excluded.received_at
     `);
     this.insertError = this.db.prepare(`
@@ -991,20 +1014,22 @@ class OtelStore {
     // Filter by participant, not just by root service. Otherwise services
     // that only appear as downstream callees (checkout/payment/email/etc in
     // the OTel demo, where load-generator starts every trace) are invisible.
+    // EXISTS (not `trace_id IN (SELECT …)`) so the planner drives the outer
+    // query from idx_traces_received (newest-first) and early-stops at LIMIT,
+    // probing each candidate trace with an indexed per-trace lookup — instead of
+    // materializing + sorting every matching trace_id, which for the dominant
+    // service is ~the whole store. A trace matches if ANY span carries the
+    // requested service / namespace / container.
     if (service) {
-      where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_name = ?)');
+      where.push('EXISTS (SELECT 1 FROM spans sf WHERE sf.trace_id = t.trace_id AND sf.service_name = ?)');
       params.push(service);
     }
-    // Same participant-subquery shape for namespace/container — both are
-    // resource-level attrs that ride on the span, not on the trace root.
-    // A trace matches if ANY of its spans carry the requested namespace
-    // or container, mirroring how the service filter behaves.
     if (namespace) {
-      where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE service_namespace = ?)');
+      where.push('EXISTS (SELECT 1 FROM spans sf WHERE sf.trace_id = t.trace_id AND sf.service_namespace = ?)');
       params.push(namespace);
     }
     if (container) {
-      where.push('t.trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE container_name = ?)');
+      where.push('EXISTS (SELECT 1 FROM spans sf WHERE sf.trace_id = t.trace_id AND sf.container_name = ?)');
       params.push(container);
     }
     if (sinceMs) { where.push('t.received_at >= ?'); params.push(sinceMs); }
@@ -1024,44 +1049,37 @@ class OtelStore {
     where.push(`EXISTS (SELECT 1 FROM spans s WHERE s.trace_id = t.trace_id
                         AND s.service_name NOT IN (${INTERNAL_SERVICES.map(() => '?').join(',')}))`);
     params.push(...INTERNAL_SERVICES);
-    // Rollups via CTE LEFT JOINs instead of correlated subqueries: the prior
-    // shape executed three SELECTs per result row (200×3 = 600 subqueries per
-    // request, one of them scanning span attribute JSON). The CTE form runs
-    // each rollup exactly once against indexed columns. EXPLAIN QUERY PLAN
-    // shows a single SCAN of traces + index lookups into the CTEs.
-    // When a service is selected, surface that service's *entry span* per
-    // trace — the earliest span belonging to the service, which is its
-    // top-level (server) operation. This lets the row be shown from the
-    // selected service's perspective (operation/duration/status) the way
-    // Helix's per-service trace tables do, instead of always showing the
-    // trace root (which is the load/traffic-generator in the demo). The
-    // service param for this CTE is prepended to the bind list below, since
-    // the CTE's placeholder precedes every WHERE placeholder in the SQL.
-    const svcCte = service
-      ? `, ssp AS (
-           SELECT trace_id, name AS svc_operation, duration_ms AS svc_duration_ms,
-                  status_code AS svc_status_code, start_time_ns AS svc_start_ns,
-                  ROW_NUMBER() OVER (PARTITION BY trace_id
-                                     ORDER BY start_time_ns ASC, span_id ASC) AS rn
-           FROM spans WHERE service_name = ?
-         )`
-      : '';
+    // log/error counts stay as CTE LEFT JOINs (lc/ec) — small tables, cheap. The
+    // db-call count is now read from the denormalized traces.db_call_count column
+    // (computed once in recomputeTrace), replacing a `dc` CTE that scanned +
+    // json_extracted the ENTIRE spans table on every call.
+    //
+    // When a service is selected, surface that service's *entry span* per trace —
+    // its earliest span (top-level/server operation) — so the row reads from the
+    // selected service's perspective instead of the trace root (the load
+    // generator in the demo). Computed as correlated subqueries over the ≤LIMIT
+    // result rows (each scoped to one trace via idx_spans_trace + idx_spans_service)
+    // rather than a ROW_NUMBER() window over EVERY span of that service, which
+    // scanned + sorted ~1.5M rows for the dominant service. The four subqueries
+    // share one entry span (same ORDER BY … LIMIT 1); their placeholders sit in
+    // the SELECT list (before WHERE), so their binds are prepended via svcHeadParams.
+    const svcEntry = (col) =>
+      `(SELECT ${col} FROM spans se WHERE se.trace_id = t.trace_id AND se.service_name = ?
+         ORDER BY se.start_time_ns ASC, se.span_id ASC LIMIT 1)`;
     const svcSelect = service
-      ? ', ssp.svc_operation, ssp.svc_duration_ms, ssp.svc_status_code, ssp.svc_start_ns'
+      ? `, ${svcEntry('se.name')} AS svc_operation`
+        + `, ${svcEntry('se.duration_ms')} AS svc_duration_ms`
+        + `, ${svcEntry('se.status_code')} AS svc_status_code`
+        + `, ${svcEntry('se.start_time_ns')} AS svc_start_ns`
       : '';
-    const svcJoin = service ? ' LEFT JOIN ssp ON ssp.trace_id = t.trace_id AND ssp.rn = 1' : '';
+    const svcHeadParams = service ? [service, service, service, service] : [];
     const sql = `
       WITH lc AS (SELECT trace_id, COUNT(*) AS c FROM log_records GROUP BY trace_id),
-           ec AS (SELECT trace_id, COUNT(*) AS c FROM span_errors GROUP BY trace_id),
-           dc AS (SELECT trace_id, COUNT(*) AS c FROM spans
-                  WHERE json_extract(attributes_json, '$."db.system"') IS NOT NULL
-                     OR json_extract(attributes_json, '$."db.system.name"') IS NOT NULL
-                  GROUP BY trace_id)${svcCte}
+           ec AS (SELECT trace_id, COUNT(*) AS c FROM span_errors GROUP BY trace_id)
       SELECT
         t.*,
         COALESCE(lc.c, 0) AS log_count,
         COALESCE(ec.c, 0) AS error_count,
-        COALESCE(dc.c, 0) AS db_call_count,
         COALESCE(
           (SELECT s.name FROM span_errors e
              JOIN spans s ON s.trace_id = e.trace_id AND s.span_id = e.span_id
@@ -1087,15 +1105,16 @@ class OtelStore {
       FROM traces t
       LEFT JOIN lc ON lc.trace_id = t.trace_id
       LEFT JOIN ec ON ec.trace_id = t.trace_id
-      LEFT JOIN dc ON dc.trace_id = t.trace_id${svcJoin}
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY t.received_at DESC LIMIT ?
     `;
     params.push(Math.min(Math.max(1, limit | 0), TRACE_LIST_MAX));
-    const headParams = service ? [service] : [];
-    const rows = this.db.prepare(sql).all(...headParams, ...params);
+    // svcHeadParams binds the entry-span subqueries in the SELECT list, which
+    // precede every WHERE placeholder in the SQL text.
+    const rows = this.db.prepare(sql).all(...svcHeadParams, ...params);
     return rows.map(r => ({
       ...r,
+      db_call_count: r.db_call_count ?? 0,
       participating_services: r.participating_services ? r.participating_services.split(',') : []
     }));
   }
