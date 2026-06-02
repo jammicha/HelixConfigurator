@@ -469,6 +469,38 @@ describe('buildClassUpdateBody', () => {
 // "Invalid UUID string", so we resolve the id first then PUT by id.
 const { buildClassByNameUrl, buildClassByIdUrl } = require('../routes/situations-payloads');
 
+describe('buildAnomalyEventPayload span enrichment', () => {
+  const errSpans = [
+    span({ spanId: 'a', parentSpanId: null, serviceName: 'frontend', name: 'POST /checkout', startTimeNs: 0 }),
+    span({ spanId: 'c', parentSpanId: 'a', serviceName: 'redis-manual', name: 'Fetch Driver Profile',
+           statusCode: 2, statusMessage: 'errors.errorString', startTimeNs: 100 }),
+  ];
+  const summary = {
+    trace_id: 'abc', service_name: 'frontend', service_namespace: 'JM_OTEL',
+    root_operation: 'POST /checkout', duration_ms: 1864, span_count: 2, has_error: true, start_time_ns: 0,
+  };
+
+  it('adds span id, hot_path, and span_dashboard_url slots when spans + uid are present', () => {
+    const [ev] = buildAnomalyEventPayload({
+      summary, p95Ms: 200, xSource: 'JM_OTEL', spans: errSpans,
+      baseUrl: 'https://acme.onbmc.com', tenantId: '999', spanDashboardUid: 'abc123',
+    });
+    expect(ev.class_slots.probable_cause_span_id).toBe('c');
+    expect(ev.class_slots.hot_path).toBe('frontend/POST /checkout → redis-manual/Fetch Driver Profile ✗');
+    expect(ev.class_slots.span_dashboard_url)
+      .toBe('https://acme.onbmc.com/dashboards/d/abc123/otel-problem-span?orgId=999&var-TraceId=ABC&var-SpanId=c');
+  });
+
+  it('omits span_dashboard_url when no dashboard uid is configured', () => {
+    const [ev] = buildAnomalyEventPayload({
+      summary, p95Ms: 200, xSource: 'JM_OTEL', spans: errSpans,
+      baseUrl: 'https://acme.onbmc.com', tenantId: '999',
+    });
+    expect(ev.class_slots).not.toHaveProperty('span_dashboard_url');
+    expect(ev.class_slots.probable_cause_span_id).toBe('c');
+  });
+});
+
 describe('deriveProbableCause span id', () => {
   it('returns the originating error span id', () => {
     const spans = [

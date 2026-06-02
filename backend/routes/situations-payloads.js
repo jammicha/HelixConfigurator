@@ -63,7 +63,7 @@ function splitApiKey(apiKey) {
   return { tenantId: parts[0].trim(), accessKey: parts[1].trim(), accessSecretKey: parts[2].trim() };
 }
 
-function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource, spans, baseUrl, tenantId }) {
+function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource, spans, baseUrl, tenantId, spanDashboardUid }) {
   const hasError = !!summary.has_error;
   const isOutlier = typeof p95Ms === 'number' && p95Ms > 0 && summary.duration_ms > p95Ms * 2;
   const severity = hasError ? 'CRITICAL' : isOutlier ? 'MAJOR' : 'MINOR';
@@ -81,6 +81,10 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     : null;
   const traceUrl = hasSpans
     ? buildHelixTraceUrlFromSummary({ baseUrl, tenantId, source: (xSource || '').trim(), summary })
+    : '';
+  const hotPath = (hasSpans && cause) ? buildHotPath(spans, cause.probable_cause_span_id) : '';
+  const spanDashboardUrl = hasSpans
+    ? buildSpanDashboardUrl({ baseUrl, tenantId, summary, spanId: cause.probable_cause_span_id, dashboardUid: (spanDashboardUid || '').trim() })
     : '';
 
   // Name the cause whenever an originating error span was found — including a
@@ -113,6 +117,8 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
   }
   if (hasSpans && blast && blast.affected_services) detailLines.push(`Affected services: ${blast.affected_services}.`);
   if (hasSpans && traceUrl) detailLines.push(`Open trace: ${traceUrl}`);
+  if (hasSpans && hotPath) detailLines.push(`Path to failure: ${hotPath}.`);
+  if (hasSpans && spanDashboardUrl) detailLines.push(`Open the failing span: ${spanDashboardUrl}`);
   const details = detailLines.filter(Boolean).join('\n');
 
   const enrichedSlots = {};
@@ -127,6 +133,9 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     if (blast.component_count) enrichedSlots.component_count = String(blast.component_count);
     if (traceUrl) enrichedSlots.trace_url = traceUrl;
     if (priority) enrichedSlots.priority = priority;
+    if (cause.probable_cause_span_id) enrichedSlots.probable_cause_span_id = cause.probable_cause_span_id;
+    if (hotPath) enrichedSlots.hot_path = hotPath;
+    if (spanDashboardUrl) enrichedSlots.span_dashboard_url = spanDashboardUrl;
   }
 
   return [{
