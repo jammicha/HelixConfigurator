@@ -4,7 +4,7 @@ const require = createRequire(import.meta.url);
 const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
-  deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace,
+  deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace, buildHotPath,
   buildHelixTraceUrlFromSummary,
 } = require('../routes/situations-payloads');
 
@@ -242,6 +242,23 @@ describe('priorityForTrace', () => {
     expect(priorityForTrace({ hasError: false, anomalyFactor: 5, blastCount: 1 })).toBe('PRIORITY_3');
     expect(priorityForTrace({ hasError: false, anomalyFactor: 2, blastCount: 1 })).toBe('PRIORITY_4');
     expect(priorityForTrace({ hasError: false, anomalyFactor: null, blastCount: 1 })).toBe('PRIORITY_5');
+  });
+});
+
+describe('buildHotPath', () => {
+  it('traces the ancestor chain root→…→error span, marking the failure', () => {
+    const spans = [
+      span({ spanId: 'a', parentSpanId: null, serviceName: 'frontend', name: 'POST /checkout' }),
+      span({ spanId: 'b', parentSpanId: 'a', serviceName: 'driver', name: 'GetDriver' }),
+      span({ spanId: 'c', parentSpanId: 'b', serviceName: 'redis-manual', name: 'Fetch Driver Profile' }),
+    ];
+    expect(buildHotPath(spans, 'c'))
+      .toBe('frontend/POST /checkout → driver/GetDriver → redis-manual/Fetch Driver Profile ✗');
+  });
+
+  it('returns empty string for an unknown or missing span id', () => {
+    expect(buildHotPath([span({ spanId: 'a' })], 'nope')).toBe('');
+    expect(buildHotPath([span({ spanId: 'a' })], '')).toBe('');
   });
 });
 

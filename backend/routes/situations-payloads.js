@@ -220,6 +220,27 @@ function blastRadius(spans) {
   return { affected_services: affected, component_count: distinct.length };
 }
 
+// Ancestor chain from the originating error span up to the root, in call order
+// (root → … → error span) as "service/operation" per hop, the failure marked
+// with ✗. Deterministic; '' when the span isn't in the trace.
+function buildHotPath(spans, originSpanId) {
+  if (!Array.isArray(spans) || !originSpanId) return '';
+  const byId = new Map(spans.map(s => [s.spanId, s]));
+  const chain = [];
+  const seen = new Set();
+  let cur = byId.get(originSpanId);
+  while (cur && !seen.has(cur.spanId)) {
+    seen.add(cur.spanId);
+    chain.push(cur);
+    cur = cur.parentSpanId ? byId.get(cur.parentSpanId) : null;
+  }
+  if (chain.length === 0) return '';
+  chain.reverse();
+  return chain
+    .map((s, i) => `${s.serviceName || '?'}/${s.name || '?'}` + (i === chain.length - 1 ? ' ✗' : ''))
+    .join(' → ');
+}
+
 // Duration as a multiple of the operation's p95 baseline (1 decimal); null when
 // no baseline is available (manual/baseline sends).
 function anomalyFactor(durationMs, p95Ms) {
@@ -343,7 +364,7 @@ function buildClassByIdUrl(base, id) {
 module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
-  deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace,
+  deriveProbableCause, blastRadius, buildHotPath, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary,
   buildClassByNameUrl, buildClassByIdUrl,
 };
