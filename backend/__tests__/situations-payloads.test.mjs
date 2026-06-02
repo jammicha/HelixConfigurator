@@ -6,6 +6,7 @@ const {
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace, buildHotPath,
   buildHelixTraceUrlFromSummary,
+  buildSpanDashboardUrl,
 } = require('../routes/situations-payloads');
 
 // A span shaped exactly like otelStore.getTrace().spans[]: .attributes and
@@ -301,6 +302,35 @@ describe('buildHelixTraceUrlFromSummary', () => {
     expect(buildHelixTraceUrlFromSummary({ ...base, tenantId: '', summary })).toBe('');
     expect(buildHelixTraceUrlFromSummary({ ...base, summary: { ...summary, trace_id: '' } })).toBe('');
     expect(buildHelixTraceUrlFromSummary({ ...base, baseUrl: 'https://your-tenant.onbmc.com', summary })).toBe('');
+  });
+});
+
+describe('buildSpanDashboardUrl', () => {
+  it('builds a uid + trace + span deep link', () => {
+    expect(buildSpanDashboardUrl({
+      baseUrl: 'https://acme.onbmc.com', tenantId: '999', dashboardUid: 'abc123',
+      summary: { trace_id: 'deadBEEF' }, spanId: 'span-1',
+    })).toBe('https://acme.onbmc.com/dashboards/d/abc123/otel-problem-span?orgId=999&var-TraceId=DEADBEEF&var-SpanId=span-1');
+  });
+
+  it('returns empty without a dashboard uid or span id', () => {
+    const base = { baseUrl: 'https://acme.onbmc.com', tenantId: '9', summary: { trace_id: 't' } };
+    expect(buildSpanDashboardUrl({ ...base, spanId: 's', dashboardUid: '' })).toBe('');
+    expect(buildSpanDashboardUrl({ ...base, spanId: '', dashboardUid: 'x' })).toBe('');
+  });
+
+  it('returns empty for the install-bundle placeholder endpoint', () => {
+    expect(buildSpanDashboardUrl({
+      baseUrl: 'https://your-tenant.onbmc.com', tenantId: '9',
+      summary: { trace_id: 't' }, spanId: 's', dashboardUid: 'x',
+    })).toBe('');
+  });
+
+  it('url-encodes a dashboard uid containing special characters', () => {
+    expect(buildSpanDashboardUrl({
+      baseUrl: 'https://acme.onbmc.com', tenantId: '999', dashboardUid: 'my dash/v2',
+      summary: { trace_id: 'abc' }, spanId: 's1',
+    })).toBe('https://acme.onbmc.com/dashboards/d/my%20dash%2Fv2/otel-problem-span?orgId=999&var-TraceId=ABC&var-SpanId=s1');
   });
 });
 

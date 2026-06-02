@@ -290,6 +290,22 @@ function buildHelixTraceUrlFromSummary({ baseUrl, tenantId, source, summary }) {
   return `${String(baseUrl).replace(/\/+$/, '')}/dashboards/d/OTelTraceDetails/otel-trace-details?${qs}`;
 }
 
+// Deep-link to the custom "OTel Problem Span" dashboard whose single Text panel
+// iframes the configurator's waterfall scrolled to the failing span. Mirrors
+// buildHelixTraceUrlFromSummary but targets a configured dashboard UID and adds
+// var-SpanId. '' when uid/spanId missing or the endpoint is still the placeholder.
+function buildSpanDashboardUrl({ baseUrl, tenantId, summary, spanId, dashboardUid }) {
+  if (!baseUrl || !tenantId || !dashboardUid || !spanId || !summary || !summary.trace_id) return '';
+  if (/\/\/your-tenant\.onbmc\.com\b/i.test(baseUrl)) return '';
+  const params = new URLSearchParams({
+    orgId: tenantId,
+    'var-TraceId': String(summary.trace_id).toUpperCase(),
+    'var-SpanId': String(spanId),
+  });
+  const qs = params.toString().replace(/\+/g, '%20');
+  return `${String(baseUrl).replace(/\/+$/, '')}/dashboards/d/${encodeURIComponent(dashboardUid)}/otel-problem-span?${qs}`;
+}
+
 // Schema mirrors a policy exported from the BMC AIOps UI (the only reliable
 // source — the REST docs were wrong/incomplete). Two non-obvious requirements:
 //   • selectorCriteriaList items have NO surrounding parens — "( class equals
@@ -365,6 +381,6 @@ module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   deriveProbableCause, blastRadius, buildHotPath, anomalyFactor, priorityForTrace,
-  buildHelixTraceUrlFromSummary,
+  buildHelixTraceUrlFromSummary, buildSpanDashboardUrl,
   buildClassByNameUrl, buildClassByIdUrl,
 };
