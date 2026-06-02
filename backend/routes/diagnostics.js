@@ -19,6 +19,12 @@ const { analyzeCollectorErrorLog } = require('../exportErrorScan');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 
+// Synthetic diagnostic traces (inject-trace, inject-trace-verify) carry an
+// explicit OTel namespace so Helix groups them on their own. Without it Helix
+// falls back to the X-Source header, landing these internal health checks
+// inside the customer's namespace and cluttering the AIOps topology/demo.
+const DIAGNOSTIC_NAMESPACE = 'Helix-Configurator-Internal';
+
 // Module-scope mutable state. activeLogProcesses is exported via
 // closeActiveLogProcesses() so the index.js shutdown handler can drain it.
 let debugTimer = null;
@@ -600,7 +606,10 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   app.post('/api/diagnostics/inject-trace', async (req, res) => {
     const payload = {
       resourceSpans: [{
-        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'helix-gateway' } }] },
+        resource: { attributes: [
+          { key: 'service.name', value: { stringValue: 'helix-gateway' } },
+          { key: 'service.namespace', value: { stringValue: DIAGNOSTIC_NAMESPACE } },
+        ] },
         scopeSpans: [{
           spans: [{
             traceId: '4bfb019245ced524157085c0a2825c71',
@@ -674,7 +683,10 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
 
     const payload = {
       resourceSpans: [{
-        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'helix-configurator-verify' } }] },
+        resource: { attributes: [
+          { key: 'service.name', value: { stringValue: 'helix-configurator-verify' } },
+          { key: 'service.namespace', value: { stringValue: DIAGNOSTIC_NAMESPACE } },
+        ] },
         scopeSpans: [{
           spans: [{
             traceId, spanId,
