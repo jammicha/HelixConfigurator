@@ -33,6 +33,9 @@ function buildClassDefinition() {
       { name: 'affected_services', dataType: 'STRING', enum: false },
       { name: 'component_count', dataType: 'STRING', enum: false },
       { name: 'trace_url', dataType: 'STRING', enum: false },
+      { name: 'probable_cause_span_id', dataType: 'STRING', enum: false },
+      { name: 'hot_path', dataType: 'STRING', enum: false },
+      { name: 'span_dashboard_url', dataType: 'STRING', enum: false },
       { name: 'priority', dataType: 'STRING', enum: false },
     ],
   };

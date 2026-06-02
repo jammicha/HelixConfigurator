@@ -519,6 +519,18 @@ describe('deriveProbableCause span id', () => {
   });
 });
 
+describe('class definition new span slots', () => {
+  it('registers the three new span attributes', () => {
+    const names = buildClassDefinition().attributes.map(a => a.name);
+    expect(names).toEqual(expect.arrayContaining(['probable_cause_span_id', 'hot_path', 'span_dashboard_url']));
+  });
+  it('class update body keeps the new slots and still drops the built-in priority', () => {
+    const names = buildClassUpdateBody().attributes.map(a => a.name);
+    expect(names).toContain('hot_path');
+    expect(names).not.toContain('priority');
+  });
+});
+
 describe('class URL builders (non-destructive slot update)', () => {
   const base = 'https://t.onbmc.com';
   it('resolves a class by name with idType=name (GET)', () => {
