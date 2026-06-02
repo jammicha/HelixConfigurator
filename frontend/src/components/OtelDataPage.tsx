@@ -85,10 +85,10 @@ const HeaderUserMenu: React.FC = () => {
 
 
 const readUrlState = () => {
-  if (typeof window === 'undefined') return { service: '', namespace: '', container: '', status: '' as '' | TraceStatus, range: '1h' as TimeRange, q: '', minMs: 0, selected: null as string | null };
+  if (typeof window === 'undefined') return { service: '', namespace: '', container: '', status: '' as '' | TraceStatus, range: '15m' as TimeRange, q: '', minMs: 0, selected: null as string | null };
   const p = new URLSearchParams(window.location.search);
-  const range = (p.get('range') as TimeRange) || '1h';
-  const validRange = TIME_RANGES.some(r => r.value === range) ? range : '1h';
+  const range = (p.get('range') as TimeRange) || '15m';
+  const validRange = TIME_RANGES.some(r => r.value === range) ? range : '15m';
   const status = p.get('status') as '' | TraceStatus;
   const validStatus = (['', 'error', 'slow', 'ok', 'outlier'].includes(status) ? status : '') as '' | TraceStatus;
   const minMsRaw = parseInt(p.get('minMs') || '0', 10);
@@ -181,7 +181,7 @@ export const OtelDataPage: React.FC = () => {
   const ALLOWED_MODES: StreamMode[] = ['live', '30s', '1m', '5m', 'paused'];
   const [streamMode, setStreamMode] = useLocalStorageState<StreamMode>(
     'helix-otel.streamMode',
-    'live',
+    '30s',
     (v): v is StreamMode => typeof v === 'string' && ALLOWED_MODES.includes(v as StreamMode),
   );
   // Derived: are we paused for the purposes of SSE merge / poll skipping?
