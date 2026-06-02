@@ -366,6 +366,14 @@ class OtelStore {
   // ingest has landed recently — so reclaim never adds latency to a burst.
   _maybeIncrementalVacuum() {
     if (Date.now() - this._lastIngestAt < VACUUM_QUIET_MS) return;
+    // Refresh planner statistics opportunistically in the same ingest-quiet
+    // window. PRAGMA optimize re-ANALYZEs only tables that changed enough to
+    // matter (a cheap no-op otherwise), so listTraces' filtered plans keep
+    // choosing the selective per-trace index as the store grows past whatever the
+    // last ANALYZE saw — e.g. the empty fresh store created by a corruption
+    // self-heal, whose stats would otherwise steer the planner into full scans.
+    try { this.db.pragma('optimize'); }
+    catch (e) { console.warn('[otelStore] PRAGMA optimize failed:', e.message); }
     try {
       if (!this.db.pragma('freelist_count', { simple: true })) return;
       this.db.pragma(`incremental_vacuum(${INC_VACUUM_PAGES})`);
@@ -477,9 +485,18 @@ class OtelStore {
     addColumn('traces', 'db_call_count', 'INTEGER');
     try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_namespace ON spans(service_namespace)'); } catch {}
     try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_container ON spans(container_name)'); } catch {}
-    // Index the per-span service so the trace-list service filter (EXISTS) and
-    // the per-service entry-span lookup don't full-scan 1.5M+ spans.
+    // idx_spans_service serves service-only lookups (listServices, filter values).
     try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_service ON spans(service_name)'); } catch {}
+    // The trace-list service filter (EXISTS) and per-service entry-span subqueries
+    // key on trace_id FIRST (highly selective) so they seek one trace's spans
+    // rather than scanning every span of a service — the dominant 'frontend'
+    // service is ~all of them. Crucially, with empty planner stats (e.g. a fresh
+    // store right after a self-heal) SQLite would otherwise pick idx_spans_service
+    // and scan ~all spans per result row (measured: ~1.5s on a 72k-span store).
+    // This composite covers the WHERE (trace_id, service_name) AND the ORDER BY
+    // (start_time_ns, span_id), so the planner picks it regardless of stats — it
+    // both narrows by trace_id and avoids the sort.
+    try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_trace_svc ON spans(trace_id, service_name, start_time_ns, span_id)'); } catch {}
   }
 
   _prepStatements() {
