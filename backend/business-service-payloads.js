@@ -4,6 +4,13 @@
 const stripSlash = (s) => String(s || '').replace(/\/+$/, '');
 const isPlaceholder = (url) => /\/\/your-tenant\.onbmc\.com\b/i.test(url || '');
 
+// The "Add Dynamic content" blueprint users pick in AIOps to bind an OTel
+// namespace. Defined once here (the source of truth) so the step text and the
+// UI's inline doc-link target the exact same label — the frontend linkifies
+// blueprintLabel using blueprintDocsUrl rather than matching a magic string.
+const BLUEPRINT_LABEL = 'Default Blueprint for OTel Service';
+const BLUEPRINT_DOCS_URL = 'https://docs.helixops.ai/bin/IT-Operations-Management/Operations-Management/BMC-Helix-AIOps/aiops262/Using-OpenTelemetry-to-identify-application-issues/Ingesting-data-from-OpenTelemetry/#configureCollector';
+
 // Guided-bind payload: where to go in AIOps, the namespace-overview dashboard to
 // eyeball the rollup afterward, and the exact click-path. The dashboard URL
 // mirrors the existing OTelNamespaceOverview pattern (helix-link.js / App.tsx).
@@ -28,11 +35,11 @@ function buildBindInstructions({ endpoint, namespace, xSource = '', tenantId = '
   const steps = [
     `Open BMC Helix AIOps${aiopsUrl ? ' (link below)' : ''} and go to Services.`,
     `Create a new Business Service, or open the one this app belongs under. (If X-Source "${xSource}" already auto-created a service, open that one.)`,
-    `Edit the service → Add Dynamic content → "Default Blueprint for OTel Service".`,
+    `Edit the service → Add Dynamic content → "${BLUEPRINT_LABEL}".`,
     `Select the OpenTelemetry namespace "${ns}" (add others if needed), then Save.`,
     `Copy the Business Service's URL from your browser and paste it back here to capture its key.`,
   ];
-  return { namespace: ns, steps, aiopsUrl, dashboardUrl };
+  return { namespace: ns, steps, aiopsUrl, dashboardUrl, blueprintLabel: BLUEPRINT_LABEL, blueprintDocsUrl: BLUEPRINT_DOCS_URL };
 }
 
 // Collapse the otelStore namespace list for the Link UI. The un-namespaced
@@ -79,4 +86,4 @@ function extractServiceKey(input) {
   return trimmed.split(/[?#\s]/)[0];
 }
 
-module.exports = { buildBindInstructions, extractServiceKey, collapseNamespaces };
+module.exports = { buildBindInstructions, extractServiceKey, collapseNamespaces, BLUEPRINT_LABEL, BLUEPRINT_DOCS_URL };

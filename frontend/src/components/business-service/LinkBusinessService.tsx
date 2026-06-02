@@ -83,6 +83,22 @@ export const LinkBusinessService: React.FC<Props> = ({ context, currentKey, onCa
 
   if (phase === 'guide') {
     const ins = bs.instructions;
+    // Linkify the blueprint label inline (e.g. "Default Blueprint for OTel
+    // Service") to its docs page. Label + URL come from the server so we don't
+    // match a magic string that could drift from the step text.
+    const renderStep = (text: string): React.ReactNode => {
+      const label = ins?.blueprintLabel;
+      const href = ins?.blueprintDocsUrl;
+      const at = label && href ? text.indexOf(label) : -1;
+      if (at === -1 || !label || !href) return text;
+      return (
+        <>
+          {text.slice(0, at)}
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">{label}</a>
+          {text.slice(at + label.length)}
+        </>
+      );
+    };
     return (
       <div className="space-y-3">
         <button onClick={() => { setPhase('detect'); bs.reset(); }} className="text-tiny text-gray-400 hover:text-gray-200 underline">← Pick a different namespace</button>
@@ -91,7 +107,7 @@ export const LinkBusinessService: React.FC<Props> = ({ context, currentKey, onCa
         {ins && (
           <>
             <ol className="list-decimal ml-5 space-y-1.5 text-sm text-gray-300">
-              {ins.steps.map((s, i) => <li key={i}>{s}</li>)}
+              {ins.steps.map((s, i) => <li key={i}>{renderStep(s)}</li>)}
             </ol>
             {ins.aiopsUrl && (
               <a href={ins.aiopsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-link hover:underline">

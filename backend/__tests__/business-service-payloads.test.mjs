@@ -15,6 +15,11 @@ describe('buildBindInstructions', () => {
     expect(r.steps[2]).toContain('Default Blueprint for OTel Service');
     expect(r.steps[3]).toContain('checkout');
     expect(r.steps[4]).toContain('paste it back');
+    // Blueprint label + docs URL ride along so the UI can linkify the exact
+    // phrase in step 3 without matching a magic string.
+    expect(r.blueprintLabel).toBe('Default Blueprint for OTel Service');
+    expect(r.steps[2]).toContain(r.blueprintLabel);
+    expect(r.blueprintDocsUrl).toMatch(/^https:\/\/docs\.helixops\.ai\/.*#configureCollector$/);
   });
   it('falls back to X_SOURCE when namespace is empty', () => {
     const r = buildBindInstructions({ endpoint: 'https://acme.onbmc.com', namespace: '', xSource: 'fallback-src' });

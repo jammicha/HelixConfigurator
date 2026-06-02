@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 
 export type NamespaceRow = { namespace: string; traceCount: number; lastSeen: number; fallback: boolean };
-export type BindInstructions = { namespace: string; steps: string[]; aiopsUrl: string; dashboardUrl: string };
+export type BindInstructions = { namespace: string; steps: string[]; aiopsUrl: string; dashboardUrl: string; blueprintLabel?: string; blueprintDocsUrl?: string };
 
 export type UseBusinessServiceLink = {
   namespaces: NamespaceRow[];
