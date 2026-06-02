@@ -162,6 +162,7 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
 // an actual exception event wins over one that only reports error status.
 function deriveProbableCause(spans) {
   const empty = {
+    probable_cause_span_id: '',
     probable_cause_service: '', probable_cause_operation: '',
     error_type: '', error_message: '', code_location: '',
   };
@@ -190,6 +191,7 @@ function deriveProbableCause(spans) {
   }
 
   return {
+    probable_cause_span_id: origin.spanId || '',
     probable_cause_service: origin.serviceName || '',
     probable_cause_operation: origin.name || '',
     error_type: errorType,

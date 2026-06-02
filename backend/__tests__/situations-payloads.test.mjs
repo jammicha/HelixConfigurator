@@ -184,6 +184,7 @@ describe('deriveProbableCause', () => {
   it('returns all-empty for a clean (latency-only) trace', () => {
     const c = deriveProbableCause([span({ name: 'GET /ok' }), span({ name: 'GET /ok2' })]);
     expect(c).toEqual({
+      probable_cause_span_id: '',
       probable_cause_service: '', probable_cause_operation: '',
       error_type: '', error_message: '', code_location: '',
     });
@@ -420,6 +421,24 @@ describe('buildClassUpdateBody', () => {
 // target the UUID — ?idType=name fixes GET yet PUT-by-name still 500s
 // "Invalid UUID string", so we resolve the id first then PUT by id.
 const { buildClassByNameUrl, buildClassByIdUrl } = require('../routes/situations-payloads');
+
+describe('deriveProbableCause span id', () => {
+  it('returns the originating error span id', () => {
+    const spans = [
+      span({ spanId: 'root', serviceName: 'frontend', name: 'POST /checkout', startTimeNs: 0 }),
+      span({ spanId: 'bad', parentSpanId: 'root', serviceName: 'redis-manual', name: 'Fetch Driver Profile',
+             statusCode: 2, statusMessage: 'errors.errorString', startTimeNs: 100 }),
+    ];
+    const cause = deriveProbableCause(spans);
+    expect(cause.probable_cause_span_id).toBe('bad');
+    expect(cause.probable_cause_service).toBe('redis-manual');
+    expect(cause.probable_cause_operation).toBe('Fetch Driver Profile');
+  });
+
+  it('returns empty span id when there is no error span', () => {
+    expect(deriveProbableCause([span({ statusCode: 0 })]).probable_cause_span_id).toBe('');
+  });
+});
 
 describe('class URL builders (non-destructive slot update)', () => {
   const base = 'https://t.onbmc.com';
