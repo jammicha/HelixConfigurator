@@ -1283,7 +1283,7 @@ export const OtelDataPage: React.FC = () => {
                     </div>
                   )}
                   <div className="px-3 py-2 border-t border-gray-800 text-tiny text-gray-500 leading-relaxed">
-                    Use when traces stop arriving despite the Stream pill showing Live. Common when the OTel demo collector's <code className="font-mono text-gray-400">memory_limiter</code> trips after long runs.
+                    Use when traces stop arriving despite the Stream pill showing Live.
                   </div>
                   {/* Bundles the currently-rendered traces (capped sample) +
                       all visible logs/errors + active filters + a redacted
