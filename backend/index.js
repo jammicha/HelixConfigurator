@@ -42,17 +42,6 @@ app.get(/^\/aiops(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
 });
 
-// Embed surface for the Helix-dashboard iframe. Served like the SPA, but with an
-// explicit permissive frame-ancestors so it stays framable by the Helix portal
-// even if a CSP/helmet layer is added later. Must precede the general /otel-data
-// route below. (No X-Frame-Options is set anywhere today; the removeHeader is a
-// belt-and-suspenders guard for a future helmet default of SAMEORIGIN.)
-app.get(/^\/otel-data\/embed(\/.*)?$/, (req, res) => {
-  res.set('Content-Security-Policy', "frame-ancestors 'self' https:");
-  res.removeHeader('X-Frame-Options');
-  res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
-});
-
 // SPA fallback for the View OTel Data route.
 app.get(/^\/otel-data(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));

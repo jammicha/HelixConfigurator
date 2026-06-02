@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Activity, AlertTriangle, Clock, Database, Repeat, Server } from 'lucide-react';
 import type { LogRecord, SpanDetail, TraceDetail } from '../types';
 import { useSlowThreshold } from '../SlowThresholdContext';
@@ -177,7 +177,7 @@ const ServiceBreakdownPanel: React.FC<{
   );
 };
 
-export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[]; focusSpanId?: string | null }> = ({ detail, logs, focusSpanId }) => {
+export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = ({ detail, logs }) => {
   const { spans, summary } = detail;
   const slowThresholdMs = useSlowThreshold();
   const [criticalPathOnly, setCriticalPathOnly] = useState(false);
@@ -186,12 +186,6 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[]; focus
   const [spanSearchQuery, setSpanSearchQuery] = useState('');
   const [hoveredService, setHoveredService] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!focusSpanId) return;
-    const el = document.querySelector(`[data-span-id="${CSS.escape(focusSpanId)}"]`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [focusSpanId, detail]);
 
   // Match count for the "Find in spans" box — shared matcher with the page-
   // level helper so the highlight pass and this count can't disagree.
@@ -203,7 +197,6 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[]; focus
   const isAnySearchOrFilterActive = !!spanSearchQuery || !!selectedService || !!hoveredService;
 
   const isSpanHighlighted = (span: SpanDetail): boolean => {
-    if (focusSpanId && span.spanId === focusSpanId) return true;
     if (spanSearchQuery && spanMatchesQuery(span, spanSearchQuery)) return true;
     const activeSvc = selectedService || hoveredService;
     if (activeSvc && span.serviceName === activeSvc) return true;

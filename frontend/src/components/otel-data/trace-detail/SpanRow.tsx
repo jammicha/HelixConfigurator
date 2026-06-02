@@ -99,7 +99,7 @@ export const SpanRow: React.FC<{
       : 'adapt-badge-info';
 
   return (
-    <div data-span-id={span.spanId} className={`group transition-all duration-200 ${open ? 'bg-gray-900/60' : ''} ${isDimmed ? 'opacity-40' : ''}`}>
+    <div className={`group transition-all duration-200 ${open ? 'bg-gray-900/60' : ''} ${isDimmed ? 'opacity-40' : ''}`}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
