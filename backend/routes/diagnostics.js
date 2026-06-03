@@ -19,8 +19,8 @@ const { analyzeCollectorErrorLog } = require('../exportErrorScan');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 
-// Synthetic diagnostic traces (inject-trace, inject-trace-verify) carry an
-// explicit OTel namespace so Helix groups them on their own. Without it Helix
+// Synthetic diagnostic traces (inject-trace) carry an explicit OTel namespace
+// so Helix groups them on their own. Without it Helix
 // falls back to the X-Source header, landing these internal health checks
 // inside the customer's namespace and cluttering the AIOps topology/demo.
 const DIAGNOSTIC_NAMESPACE = 'Helix-Configurator-Internal';
@@ -270,9 +270,8 @@ function encodeOtlpProbeTracesPayload() {
 // `status` is one of: 'valid' | 'rejected' | 'tenant-error' | 'helix-error'
 //                    | 'network-error'
 //
-// Extracted from the /api/diagnostics/apikey-probe route so that other
-// routes (e.g. /api/diagnostics/test-connection) can probe with in-request
-// credentials rather than process.env values.
+// Used by /api/diagnostics/test-connection (Step 1's "Test connection") to
+// probe Helix with in-request credentials rather than process.env values.
 // ---------------------------------------------------------------------------
 async function runOtlpProbe(endpoint, apiKey) {
   const url = `${endpoint}/v1/traces`;
@@ -662,184 +661,6 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     }
   });
 
-  // POST inject a synthetic trace and verify it actually exported to Helix.
-  // Used by the wizard's "Verify Telemetry Flow" — proves the gateway→Helix
-  // path independent of whether the user's app is instrumented yet.
-  app.post('/api/diagnostics/inject-trace-verify', async (req, res) => {
-    const targetContainer = TARGET_CONTAINER();
-    const otlpUrl = `http://${targetContainer}:4318/v1/traces`;
-    const traceId = crypto.randomBytes(16).toString('hex');
-    const spanId = crypto.randomBytes(8).toString('hex');
-
-    // Optional: the Step 3-selected customer collector. When provided, the
-    // poll loop also reads its helix-targeted exporter counters so the
-    // verdict can distinguish "stuck at customer side, gateway unreachable"
-    // from "stuck at gateway side, BMC slow." When omitted, the route falls
-    // back to its prior gateway-only behavior.
-    const customerCollector = (req.body && typeof req.body.collectorName === 'string'
-      && /^[a-zA-Z0-9_.-]+$/.test(req.body.collectorName))
-      ? req.body.collectorName : null;
-
-    let baseline;
-    try {
-      baseline = await fetchCounters(targetContainer);
-    } catch (e) {
-      return res.status(503).json({
-        error: 'Gateway metrics endpoint unreachable',
-        details: e.message,
-        remediation: 'The gateway is not running or not responding on :8888. Start it from the dashboard.',
-      });
-    }
-    // Customer baseline is best-effort — missing data here just means we
-    // skip the dual-side analysis later, not that the verify call fails.
-    const customerBaseline = customerCollector
-      ? await fetchCustomerCollectorCounters(customerCollector)
-      : null;
-
-    const payload = {
-      resourceSpans: [{
-        resource: { attributes: [
-          { key: 'service.name', value: { stringValue: 'helix-configurator-verify' } },
-          { key: 'service.namespace', value: { stringValue: DIAGNOSTIC_NAMESPACE } },
-        ] },
-        scopeSpans: [{
-          spans: [{
-            traceId, spanId,
-            name: 'configurator-verify-trace',
-            kind: 1,
-            startTimeUnixNano: Date.now() * 1000000,
-            endTimeUnixNano: (Date.now() + 100) * 1000000,
-            status: { code: 1 },
-          }],
-        }],
-      }],
-    };
-
-    try {
-      await axios.post(otlpUrl, payload, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 3000,
-      });
-    } catch (e) {
-      return res.status(502).json({
-        error: 'Trace injection failed at gateway receiver',
-        details: e.message,
-        remediation: 'The gateway accepted no telemetry on :4318. Check that the gateway is running and the OTLP HTTP receiver is enabled.',
-      });
-    }
-
-    // Poll the gateway sent/failed counters for up to 20s, and (when a
-    // customer collector was named) the customer's helix-exporter counters
-    // alongside. We're looking for a delta — either the trace exported
-    // (gateway sent went up), Helix rejected it (gateway failed went up),
-    // the customer side is queueing (customer queue/failed grew while
-    // gateway counters stayed flat), or nothing moved (true timeout).
-    //
-    // The 5s → 15s → 20s history: original 5s false-failed when Helix took
-    // a beat to ack; 15s caught most cases; 20s splits the difference with
-    // the TODO ask (30s) — 90th-percentile real traces should land in
-    // 10-15s, leaving a healthy margin without making the user wait forever
-    // on a stalled pipeline.
-    const deadline = Date.now() + 20000;
-    let lastQueueSize = null;
-    let lastCustomer = customerBaseline;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 500));
-      try {
-        const now = await fetchCounters(targetContainer);
-        const sentDelta = now.sent - baseline.sent;
-        const failedDelta = now.failed - baseline.failed;
-        if (sentDelta > 0) {
-          return res.json({
-            status: 'exported',
-            sentDelta, failedDelta,
-            message: `Synthetic trace reached Helix (sent +${sentDelta})`,
-          });
-        }
-        if (failedDelta > 0) {
-          return res.json({
-            status: 'rejected',
-            sentDelta, failedDelta,
-            message: `Helix rejected the trace (failed +${failedDelta})`,
-            remediation: 'The gateway forwarded the trace but Helix rejected it. Verify HELIX_API_KEY and that the tenant is reachable.',
-          });
-        }
-        // Track the sending_queue size on the bmchelix exporter so the timeout
-        // verdict can call out "queue is backed up" vs "Helix is silent".
-        const q = await fetchHelixQueueSize(targetContainer);
-        if (q != null) lastQueueSize = q;
-        // Refresh the customer-side snapshot if we have one. Only useful in
-        // the timeout-verdict logic below — a customer-side delta is a
-        // tiebreaker for "where did the trace get stuck," not a success
-        // signal in its own right.
-        if (customerCollector) {
-          const cur = await fetchCustomerCollectorCounters(customerCollector);
-          if (cur) lastCustomer = cur;
-        }
-      } catch { /* metrics blip — keep polling */ }
-    }
-
-    // Timeout path. Three-way disambiguation:
-    //   queued_customer  → customer exporter queue grew OR send_failed grew
-    //                      while gateway counters stayed flat. The trace
-    //                      never left the customer side.
-    //   queued_gateway   → gateway queue > 0 and nothing customer-side moved
-    //                      worse. Trace is sitting in the gateway's outbound
-    //                      queue waiting on Helix.
-    //   pending          → nothing observable moved anywhere. Fallback.
-    //
-    // We only branch into queued_customer when we have both baseline and
-    // current snapshots; otherwise the customer state is "unknown" and the
-    // gateway-side verdict stands.
-    const customerDelta = (customerBaseline && lastCustomer) ? {
-      sent: lastCustomer.sent - customerBaseline.sent,
-      failed: lastCustomer.failed - customerBaseline.failed,
-      queueSize: lastCustomer.queueSize,
-      queueSizeDelta: (customerBaseline.queueSize != null && lastCustomer.queueSize != null)
-        ? lastCustomer.queueSize - customerBaseline.queueSize
-        : null,
-    } : null;
-    const customerStuck = customerDelta && (
-      (customerDelta.failed > 0) ||
-      (customerDelta.queueSizeDelta != null && customerDelta.queueSizeDelta > 0) ||
-      (customerDelta.queueSize != null && customerDelta.queueSize > 0)
-    );
-
-    if (customerStuck) {
-      return res.json({
-        status: 'queued_customer',
-        customer: customerDelta,
-        queueSize: lastQueueSize,
-        message: `Trace is stuck at \`${customerCollector}\` — helix-gateway looks unreachable from it.`,
-        remediation: 'The collector is queueing or failing to send. Check Step 3: confirm the collector and helix-gateway share a network, and that the collector can resolve "helix-gateway" via DNS. Then restart the collector.',
-      });
-    }
-    if (lastQueueSize != null && lastQueueSize > 0) {
-      return res.json({
-        status: 'queued_gateway',
-        queueSize: lastQueueSize,
-        customer: customerDelta,
-        message: `Trace is queued at the gateway (${lastQueueSize} item${lastQueueSize === 1 ? '' : 's'} pending) — Helix hasn't acknowledged yet`,
-        remediation: 'Helix is slow to accept or briefly unreachable. The gateway will keep retrying; watch the Sent counter for the next minute.',
-      });
-    }
-    if (lastQueueSize === 0) {
-      return res.json({
-        status: 'pending',
-        queueSize: 0,
-        customer: customerDelta,
-        message: 'Gateway drained the queue but Helix returned no acknowledgement within 20s',
-        remediation: 'The trace left the gateway but no success counter moved. Verify the tenant is configured to accept your X-Source, and that HELIX_API_KEY has the right role.',
-      });
-    }
-    res.json({
-      status: 'pending',
-      customer: customerDelta,
-      message: 'Trace accepted by gateway but no exporter delta within 20s',
-      remediation: 'Open Diagnostic Health Check and watch the Sent/Dropped counters for the next minute.',
-    });
-  });
-
   // GET live metrics parsing.
   app.get('/api/diagnostics/metrics/live', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
@@ -1220,49 +1041,6 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     }
   });
 
-  // POST authoritative API key probe — bypass the gateway and post a minimal
-  // synthetic OTLP traces payload directly to ${HELIX_ENDPOINT}/v1/traces with
-  // X-Api-Key/X-Source set. The HTTP response is the source of truth for "is
-  // this key currently accepted by Helix?", independent of whether the gateway
-  // is up or the customer's collector is wired in.
-  //
-  // Surfaced from Step 4 when the existing "Verify gateway → Helix" check
-  // fails, so the user can disambiguate "key rejected" from "pipeline broken".
-  app.post('/api/diagnostics/apikey-probe', async (req, res) => {
-    try {
-      const envPath = path.join(__dirname, '../../.env');
-      const envContent = fs.readFileSync(envPath, 'utf8');
-      const vars = {};
-      envContent.split('\n').forEach(line => {
-        const [key, ...value] = line.split('=');
-        if (key && value) vars[key.trim()] = value.join('=').trim();
-      });
-
-      const endpoint = (vars.HELIX_ENDPOINT || '').replace(/\/$/, '');
-      const apiKey = vars.HELIX_API_KEY || '';
-      if (!endpoint) {
-        return res.json({ status: 'misconfigured', message: 'HELIX_ENDPOINT is not set in .env' });
-      }
-      if (!/^[^:]+::[^:]+::[^:]+$/.test(apiKey)) {
-        return res.json({
-          status: 'invalid-format',
-          message: 'HELIX_API_KEY must match TenantID::AccessKey::SecretKey',
-        });
-      }
-      if (apiKey.startsWith('FAKE-KEY-')) {
-        return res.json({
-          status: 'placeholder',
-          message: 'HELIX_API_KEY is the demo placeholder (FAKE-KEY-…). Replace it with a real tenant key before probing.',
-        });
-      }
-
-      const result = await runOtlpProbe(endpoint, apiKey);
-      res.json(result);
-    } catch (e) {
-      res.status(500).json({ status: 'error', message: `Probe setup failed: ${e.message}` });
-    }
-  });
-
   // POST probe Helix reachability with in-request credentials. Accepts
   // { endpoint, apiKey } in the body and delegates to runOtlpProbe. Used by
   // Step 1's Test Connection button to let users probe Helix with what they've
@@ -1277,7 +1055,6 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     }
     try {
       // Strip trailing slash so the probe URL doesn't become https://foo//v1/traces
-      // — matches the apikey-probe route's normalization for consistency.
       const result = await runOtlpProbe(endpoint.replace(/\/$/, ''), apiKey);
       res.json(result);
     } catch (e) {

@@ -69,6 +69,28 @@ const ERROR_CAP = 5_000;
 // bloating the /api/operations payload.
 const SPARK_BUCKETS = 24;
 
+// Resource metrics (CPU/mem per trace) — the small allowlist of OTLP runtime
+// metric names the viewer joins to a trace. Kept narrow on purpose: high-volume
+// app metrics shouldn't land in the in-memory ring. Add spellings here if a
+// runtime emits an alternate semconv name.
+const RESOURCE_METRIC_NAMES = new Set([
+  'process.cpu.utilization', // gauge, 0..1 fraction
+  'process.memory.usage',    // bytes (RSS)
+]);
+
+// Ring retention: drop points older than this (<=0 disables age pruning, used
+// by tests). Default 1h — comfortably covers any trace still in the store.
+const METRICS_RETENTION_MS = 60 * 60 * 1000;
+// Per-series point cap (most-recent kept) and a defensive ceiling on distinct
+// (namespace,service) series. Both bound memory regardless of producer volume.
+const METRICS_MAX_POINTS_PER_SERIES = 2000;
+const METRICS_MAX_SERIES = 1000;
+// Context pad around a trace's window when slicing the series. Runtime metrics
+// sample every ~10s while most traces are sub-second, so an exact-window slice
+// would return <=1 point — pad to ~90s each side so the sparkline shows a real
+// trend with the trace moment inside it.
+const METRICS_CONTEXT_PAD_NS = 90 * 1e9;
+
 // Bumped whenever the trace-summary derivation rule changes (e.g. the entry-span
 // root rule). On startup, stored traces are re-derived once via the reconcile
 // when the DB's PRAGMA user_version is below this — so a rule change re-processes
@@ -110,6 +132,13 @@ const flattenAttributes = (attrs) => {
   }
   return out;
 };
+
+// The join key between a trace and its resource metrics: service identity only,
+// because service.name (+ namespace) is the one resource attribute a trace and
+// an app-emitted metric reliably share in every environment (Docker, K8s, VM).
+// NUL-separated so a namespace containing the service name can't collide.
+const metricResourceKey = (namespace, service) =>
+  `${namespace || ''}\u0000${service || 'unknown_service'}`;
 
 // OTLP body → an array of normalized spans, grouped by trace.
 // We tolerate spans arriving across multiple POSTs for the same trace; each
@@ -193,6 +222,40 @@ const extractLogRecords = (body) => {
   return out;
 };
 
+// OTLP metrics body → flat normalized points for the in-memory ring. Only the
+// RESOURCE_METRIC_NAMES allowlist is kept; gauge and sum data points are read
+// (histograms/summaries ignored), values from asDouble or asInt. Mirrors
+// extractSpans/extractLogRecords in shape and tolerance.
+const extractMetricPoints = (body) => {
+  const out = [];
+  const resourceMetrics = body && body.resourceMetrics;
+  if (!Array.isArray(resourceMetrics)) return out;
+  for (const rm of resourceMetrics) {
+    const resourceAttrs = flattenAttributes(rm.resource && rm.resource.attributes);
+    const serviceName = resourceAttrs['service.name'] || 'unknown_service';
+    const serviceNamespace = resourceAttrs['service.namespace'] || null;
+    const resourceKey = metricResourceKey(serviceNamespace, serviceName);
+    const scopeMetrics = rm.scopeMetrics || rm.instrumentationLibraryMetrics || [];
+    for (const sm of scopeMetrics) {
+      const metrics = sm.metrics || [];
+      for (const m of metrics) {
+        if (!m || !RESOURCE_METRIC_NAMES.has(m.name)) continue;
+        const dps = (m.gauge && m.gauge.dataPoints) || (m.sum && m.sum.dataPoints) || [];
+        for (const dp of dps) {
+          const tsNs = Number(dp.timeUnixNano || 0);
+          if (!tsNs) continue;
+          const value = dp.asDouble !== undefined ? dp.asDouble
+            : dp.asInt !== undefined ? Number(dp.asInt)
+            : undefined;
+          if (value === undefined || !Number.isFinite(value)) continue;
+          out.push({ resourceKey, metricName: m.name, tsNs, value });
+        }
+      }
+    }
+  }
+  return out;
+};
+
 const buildErrorRecords = (span) => {
   // Prefer exception events over the generic span.error fallback. OTel SDKs
   // commonly do BOTH when an exception is caught (record the event AND set
@@ -226,7 +289,7 @@ const buildErrorRecords = (span) => {
 };
 
 class OtelStore {
-  constructor({ dbPath, retentionMs, maxTraces } = {}) {
+  constructor({ dbPath, retentionMs, maxTraces, metricsRetentionMs, metricsMaxPoints } = {}) {
     this.events = new EventEmitter();
     this.events.setMaxListeners(50);
     this.dbPath = dbPath;
@@ -235,6 +298,12 @@ class OtelStore {
     // ceiling; both fall back to the module defaults.
     this.retentionMs = Number.isFinite(retentionMs) ? retentionMs : TRACE_RETENTION_MS;
     this.maxTraces = Number.isFinite(maxTraces) && maxTraces > 0 ? maxTraces : TRACE_CAP;
+    // Resource-metrics ring: Map<resourceKey, Map<metricName, {tsNs,value}[]>>.
+    // In-memory only — never written to SQLite, so it can't affect the store's
+    // self-heal/corruption path. Retention overridable per store (tests).
+    this.metricsRetentionMs = Number.isFinite(metricsRetentionMs) ? metricsRetentionMs : METRICS_RETENTION_MS;
+    this.metricsMaxPoints = Number.isFinite(metricsMaxPoints) && metricsMaxPoints > 0 ? metricsMaxPoints : METRICS_MAX_POINTS_PER_SERIES;
+    this.metricsRing = new Map();
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     // Verify the store's integrity before trusting it. A corrupt page in the
     // spans B-tree (observed after a hard kill mid-checkpoint) makes every
@@ -1170,6 +1239,77 @@ class OtelStore {
     }));
   }
 
+  // Append normalized metric points (from extractMetricPoints) into the ring,
+  // pruning each touched series by age + per-series cap. O(points); no I/O.
+  ingestMetricPoints(points) {
+    if (!Array.isArray(points) || points.length === 0) return;
+    const cutoffNs = this.metricsRetentionMs > 0
+      ? (Date.now() - this.metricsRetentionMs) * 1e6
+      : null;
+    for (const p of points) {
+      if (!p || !p.resourceKey || !p.metricName) continue;
+      if (!Number.isFinite(p.tsNs) || !Number.isFinite(p.value)) continue;
+      let byMetric = this.metricsRing.get(p.resourceKey);
+      if (!byMetric) { byMetric = new Map(); this.metricsRing.set(p.resourceKey, byMetric); }
+      let arr = byMetric.get(p.metricName);
+      if (!arr) { arr = []; byMetric.set(p.metricName, arr); }
+      arr.push({ tsNs: p.tsNs, value: p.value });
+      // Points arrive in roughly ascending time order; prune the stale prefix.
+      if (cutoffNs !== null) {
+        let i = 0;
+        while (i < arr.length && arr[i].tsNs < cutoffNs) i++;
+        if (i > 0) arr.splice(0, i);
+      }
+      if (arr.length > this.metricsMaxPoints) arr.splice(0, arr.length - this.metricsMaxPoints);
+    }
+    // Defensive series ceiling — drop the oldest-inserted series if exceeded.
+    // Rarely hit (distinct services are few); guards against a pathological key.
+    if (this.metricsRing.size > METRICS_MAX_SERIES) {
+      const overflow = this.metricsRing.size - METRICS_MAX_SERIES;
+      let n = 0;
+      for (const k of this.metricsRing.keys()) {
+        if (n++ >= overflow) break;
+        this.metricsRing.delete(k);
+      }
+    }
+  }
+
+  // Join a trace to its service's CPU/memory series over the trace window plus a
+  // context pad. Returns null if the trace is unknown, else { window, cpu,
+  // memory, empty }. cpu/memory each carry sorted points + peak + at-trace value.
+  getResourceSeries(traceId) {
+    const summary = this.selectTraceSummary.get(traceId);
+    if (!summary) return null;
+    const startNs = summary.start_time_ns;
+    const endNs = summary.end_time_ns;
+    const fromNs = startNs - METRICS_CONTEXT_PAD_NS;
+    const toNs = endNs + METRICS_CONTEXT_PAD_NS;
+    const byMetric = this.metricsRing.get(metricResourceKey(summary.service_namespace, summary.service_name));
+    const build = (name, unit) => {
+      const raw = (byMetric && byMetric.get(name)) || [];
+      const points = raw
+        .filter(p => p.tsNs >= fromNs && p.tsNs <= toNs)
+        .sort((a, b) => a.tsNs - b.tsNs)
+        .map(p => ({ tsNs: p.tsNs, value: p.value }));
+      let peak = null;
+      let atTrace = null;
+      for (const p of points) {
+        if (peak === null || p.value > peak) peak = p.value;
+        if (p.tsNs <= endNs) atTrace = p.value; // last sample at/before trace end
+      }
+      if (atTrace === null && points.length) atTrace = points[points.length - 1].value;
+      return { points, peak, atTrace, unit };
+    };
+    const cpu = build('process.cpu.utilization', 'ratio');
+    const memory = build('process.memory.usage', 'bytes');
+    return {
+      window: { startNs, endNs },
+      cpu,
+      memory,
+      empty: cpu.points.length === 0 && memory.points.length === 0,
+    };
+  }
+
   getTrace(traceId) {
     const summary = this.selectTraceSummary.get(traceId);
     if (!summary) return null;
@@ -1896,4 +2036,4 @@ OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace,
   };
 };
 
-module.exports = { OtelStore, extractSpans, extractLogRecords, latencySparkline, TRACE_CAP, TRACE_LIST_MAX, TRACE_RETENTION_MS };
+module.exports = { OtelStore, extractSpans, extractLogRecords, extractMetricPoints, metricResourceKey, latencySparkline, TRACE_CAP, TRACE_LIST_MAX, TRACE_RETENTION_MS };

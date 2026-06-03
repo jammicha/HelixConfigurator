@@ -110,8 +110,6 @@ const App = () => {
   const [isYamlOpen, setIsYamlOpen] = useState(true);
   const [showApiKey, setShowApiKey] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmRequest | null>(null);
-  const [verifyingTrace, setVerifyingTrace] = useState(false);
-  const [traceVerifyResult, setTraceVerifyResult] = useState<{ status: string; message: string; remediation?: string } | null>(null);
   // Result of Step 1's recreate call. Used only to surface a recreate
   // failure on Step 3/4 ("env changes may not have taken effect"). Network
   // wiring is Step 3's job now and no longer flows through this state.
@@ -134,7 +132,7 @@ const App = () => {
   const [k8sApplyResult, setK8sApplyResult] = useState<'applied' | 'failed' | null>(null);
   // App → Gateway verifier: poll the gateway's receiver counters and show
   // deltas since Step 2 was opened. Lets the user see real spans/metrics/logs
-  // arriving from their app, not just the synthetic trace from the gateway.
+  // arriving from their app.
   type ReceiverCounters = { acceptedSpans: number; acceptedMetricPoints: number; acceptedLogRecords: number };
   const [receiverBaseline, setReceiverBaseline] = useState<ReceiverCounters | null>(null);
   const [receiverNow, setReceiverNow] = useState<ReceiverCounters | null>(null);
@@ -145,16 +143,6 @@ const App = () => {
   // receiver counters) so the wizard's "Gateway not running" affordance reacts
   // snappily without us having to chase the dashboard's 5s cadence.
   const [restartingGateway, setRestartingGateway] = useState(false);
-  // Step 4 fallback: when the verify-trace check fails, the user can probe the
-  // API key authoritatively (bypass the gateway, POST directly to Helix) to
-  // disambiguate "key rejected" from "pipeline broken".
-  const [apiKeyProbe, setApiKeyProbe] = useState<{
-    status: string;
-    message: string;
-    remediation?: string;
-    httpStatus?: number;
-  } | null>(null);
-  const [probingApiKey, setProbingApiKey] = useState(false);
 
   const [envVars, setEnvVars] = useState({
     HELIX_ENDPOINT: '',
@@ -669,7 +657,6 @@ const App = () => {
   const handleInitialize = async () => {
     setIsVerifying(true);
     setSetupError('');
-    setTraceVerifyResult(null);
 
     try {
       // Save keys
@@ -860,8 +847,6 @@ const App = () => {
         refreshDetectedCollectors(true);
         setStep3Tab('detected');
         setK8sApplyResult(null);
-        setTraceVerifyResult(null);
-        setApiKeyProbe(null);
         setSetupError('');
         setIsSetupComplete(false);
         setSetupStep(1);
@@ -908,28 +893,6 @@ const App = () => {
 
   const smartAdd = useSmartAdd({ setupStep, isSetupComplete, detectedCollectors, refreshDetectedCollectors });
 
-  // Step 4 fallback: probe the API key directly against Helix. Called from
-  // the Verify result panel when verify-trace returned a non-success status.
-  const handleProbeApiKey = async () => {
-    if (probingApiKey) return;
-    setProbingApiKey(true);
-    setApiKeyProbe(null);
-    try {
-      const res = await fetch('/api/diagnostics/apikey-probe', { method: 'POST' });
-      const data = await res.json();
-      setApiKeyProbe({
-        status: data.status || 'error',
-        message: data.message || 'Probe finished without a status',
-        remediation: data.remediation,
-        httpStatus: data.httpStatus,
-      });
-    } catch (err: any) {
-      setApiKeyProbe({ status: 'error', message: err?.message || 'Probe request failed' });
-    } finally {
-      setProbingApiKey(false);
-    }
-  };
-
   // Step 4 in-wizard remediation: restart the helix-gateway container when
   // the polled status shows it's not running. The 2s tick will pick up the
   // new state — we just flip the local 'restarting' flag for the button.
@@ -941,51 +904,6 @@ const App = () => {
       await fetch('/api/lifecycle/restart', { method: 'POST' });
     } catch { /* tick will surface the failure state */ }
     finally { setRestartingGateway(false); }
-  };
-
-  // Step 2 verification: inject a synthetic trace through the gateway and watch
-  // for the sent counter to move. Proves gateway→Helix independent of whether
-  // the user's app is instrumented yet.
-  const handleVerifyTelemetry = async () => {
-    if (verifyingTrace) return;
-    setVerifyingTrace(true);
-    setTraceVerifyResult(null);
-    // Re-verifying invalidates the previous probe result; clear it so the
-    // user isn't left looking at a stale "key was rejected" message.
-    setApiKeyProbe(null);
-    try {
-      // Pass the Step 3 customer collector (when there's exactly one detected
-      // candidate sharing a network with the sidecar) so verify-trace can read
-      // its helix-exporter counters too. Without this, "stuck at customer
-      // side" and "stuck at gateway side" look identical from the verdict.
-      const bridgedCollector = detectedCollectors.find(c => c.sharesNetworkWithSidecar);
-      const verifyBody = bridgedCollector ? { collectorName: bridgedCollector.name } : undefined;
-      const res = await fetch('/api/diagnostics/inject-trace-verify', {
-        method: 'POST',
-        headers: verifyBody ? { 'Content-Type': 'application/json' } : undefined,
-        body: verifyBody ? JSON.stringify(verifyBody) : undefined,
-      });
-      const data = await res.json();
-      setTraceVerifyResult({
-        status: data.status || (res.ok ? 'pending' : 'error'),
-        message: data.message || data.error || 'Verification finished',
-        remediation: data.remediation,
-      });
-      if (data.status === 'exported') {
-        pushTimelineEvent('verify', 'Synthetic trace reached Helix');
-      }
-    } catch (err) {
-      setTraceVerifyResult({ status: 'error', message: 'Verification request failed' });
-    } finally {
-      setVerifyingTrace(false);
-      // The synthetic trace ticked the receiver counters too. Re-baseline the
-      // App→Gateway pane so its deltas reflect only the user's app traffic
-      // going forward, not the verify ping we just injected.
-      try {
-        const r = await fetch('/api/diagnostics/receiver-counters');
-        if (r.ok) setReceiverBaseline(await r.json());
-      } catch { /* non-fatal */ }
-    }
   };
 
   const finishOnboarding = () => {
@@ -1386,14 +1304,7 @@ const App = () => {
                   gatewayStatus={gatewayStatus}
                   restartingGateway={restartingGateway}
                   onRestartGateway={handleRestartGateway}
-                  apiKeyProbe={apiKeyProbe}
-                  probingApiKey={probingApiKey}
-                  onProbeApiKey={handleProbeApiKey}
-                  traceVerifyResult={traceVerifyResult}
-                  verifyingTrace={verifyingTrace}
-                  envVars={envVars}
                   onJumpToStep={setSetupStep}
-                  onVerifyTelemetry={handleVerifyTelemetry}
                   onLaunchDashboard={() => setSetupStep(5)}
                 />
               )}

@@ -165,6 +165,31 @@ const metricDataPoint = ({ serviceName, latencyMs, errored, startMs }) => ({
   asDouble: latencyMs,
 });
 
+// Synthetic process-level resource metrics so the trace drawer's Resources panel
+// lights up from the baked-in simulator. CPU utilization (0..1) + memory RSS
+// (bytes) as gauges, one data point per trace, on the same resource (service.name
+// + namespace) as the spans so the viewer's service.name join lines up.
+const clamp01 = (x) => Math.max(0.02, Math.min(0.99, x));
+const MB = 1024 * 1024;
+const processMetricsResource = (serviceName, { cpuUtil, memBytes, atMs }) => {
+  const ts = String(BigInt(Math.round(atMs)) * 1_000_000n);
+  const dp = (value, asInt) => ({
+    attributes: [{ key: 'service.name', value: { stringValue: serviceName } }],
+    timeUnixNano: ts,
+    ...(asInt ? { asInt: String(Math.round(value)) } : { asDouble: value }),
+  });
+  return {
+    resource: resourceForService(serviceName),
+    scopeMetrics: [{
+      scope: { name: 'Helix-Configurator-Demo' },
+      metrics: [
+        { name: 'process.cpu.utilization', unit: '1', gauge: { dataPoints: [dp(cpuUtil, false)] } },
+        { name: 'process.memory.usage', unit: 'By', gauge: { dataPoints: [dp(memBytes, true)] } },
+      ],
+    }],
+  };
+};
+
 // Build the sequential 3-attempt stripe-mock span list for Pattern G.
 // successLatency lets the caller decide whether the successful retry is the
 // normal log-normal sample or a stripe-slowdown (Pattern A) tail.
@@ -517,8 +542,17 @@ const generateTrace = () => {
     },
   ];
 
-  // Metrics: per-service latency observations as a sum metric (one data point
-  // per trace; aggregation happens server-side when we batch).
+  // Metrics: the existing per-service latency gauge, plus synthetic process
+  // CPU/memory so the trace drawer's Resources panel lights up. checkout-web is
+  // the trace root (the service the panel shows) and reads hotter when this trace
+  // is slow or errored — reinforcing the "slow trace AND high CPU" story.
+  const PROC_SERVICES = ['checkout-web', 'cart-api', 'inventory-db', 'payment-service', 'notification-svc'];
+  const rootCpu = clamp01(0.30 + rootLatency / 600 + (injectInventoryError ? 0.30 : 0) + (Math.random() - 0.5) * 0.1);
+  const processResources = PROC_SERVICES.map((svc) => processMetricsResource(svc, {
+    cpuUtil: svc === 'checkout-web' ? rootCpu : clamp01(0.18 + Math.random() * 0.45),
+    memBytes: (180 + Math.random() * 220) * MB + (svc === 'checkout-web' ? 60 * MB : 0),
+    atMs: rootStartMs,
+  }));
   const metricResources = [
     {
       resource: resourceForService('checkout-web'),
@@ -536,6 +570,7 @@ const generateTrace = () => {
         }],
       }],
     },
+    ...processResources,
   ];
 
   return {
