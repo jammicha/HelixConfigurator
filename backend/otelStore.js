@@ -69,6 +69,15 @@ const ERROR_CAP = 5_000;
 // bloating the /api/operations payload.
 const SPARK_BUCKETS = 24;
 
+// Resource metrics (CPU/mem per trace) — the small allowlist of OTLP runtime
+// metric names the viewer joins to a trace. Kept narrow on purpose: high-volume
+// app metrics shouldn't land in the in-memory ring. Add spellings here if a
+// runtime emits an alternate semconv name.
+const RESOURCE_METRIC_NAMES = new Set([
+  'process.cpu.utilization', // gauge, 0..1 fraction
+  'process.memory.usage',    // bytes (RSS)
+]);
+
 // Bumped whenever the trace-summary derivation rule changes (e.g. the entry-span
 // root rule). On startup, stored traces are re-derived once via the reconcile
 // when the DB's PRAGMA user_version is below this — so a rule change re-processes
@@ -110,6 +119,13 @@ const flattenAttributes = (attrs) => {
   }
   return out;
 };
+
+// The join key between a trace and its resource metrics: service identity only,
+// because service.name (+ namespace) is the one resource attribute a trace and
+// an app-emitted metric reliably share in every environment (Docker, K8s, VM).
+// NUL-separated so a namespace containing the service name can't collide.
+const metricResourceKey = (namespace, service) =>
+  `${namespace || ''}\u0000${service || 'unknown_service'}`;
 
 // OTLP body → an array of normalized spans, grouped by trace.
 // We tolerate spans arriving across multiple POSTs for the same trace; each
@@ -187,6 +203,40 @@ const extractLogRecords = (body) => {
           attributes: flattenAttributes(r.attributes),
           timeUnixNano: Number(r.timeUnixNano || r.observedTimeUnixNano || 0),
         });
+      }
+    }
+  }
+  return out;
+};
+
+// OTLP metrics body → flat normalized points for the in-memory ring. Only the
+// RESOURCE_METRIC_NAMES allowlist is kept; gauge and sum data points are read
+// (histograms/summaries ignored), values from asDouble or asInt. Mirrors
+// extractSpans/extractLogRecords in shape and tolerance.
+const extractMetricPoints = (body) => {
+  const out = [];
+  const resourceMetrics = body && body.resourceMetrics;
+  if (!Array.isArray(resourceMetrics)) return out;
+  for (const rm of resourceMetrics) {
+    const resourceAttrs = flattenAttributes(rm.resource && rm.resource.attributes);
+    const serviceName = resourceAttrs['service.name'] || 'unknown_service';
+    const serviceNamespace = resourceAttrs['service.namespace'] || null;
+    const resourceKey = metricResourceKey(serviceNamespace, serviceName);
+    const scopeMetrics = rm.scopeMetrics || rm.instrumentationLibraryMetrics || [];
+    for (const sm of scopeMetrics) {
+      const metrics = sm.metrics || [];
+      for (const m of metrics) {
+        if (!m || !RESOURCE_METRIC_NAMES.has(m.name)) continue;
+        const dps = (m.gauge && m.gauge.dataPoints) || (m.sum && m.sum.dataPoints) || [];
+        for (const dp of dps) {
+          const tsNs = Number(dp.timeUnixNano || 0);
+          if (!tsNs) continue;
+          const value = dp.asDouble !== undefined ? dp.asDouble
+            : dp.asInt !== undefined ? Number(dp.asInt)
+            : undefined;
+          if (value === undefined || !Number.isFinite(value)) continue;
+          out.push({ resourceKey, metricName: m.name, tsNs, value });
+        }
       }
     }
   }
@@ -1896,4 +1946,4 @@ OtelStore.prototype.insights = function ({ sinceMs, untilMs, service, namespace,
   };
 };
 
-module.exports = { OtelStore, extractSpans, extractLogRecords, latencySparkline, TRACE_CAP, TRACE_LIST_MAX, TRACE_RETENTION_MS };
+module.exports = { OtelStore, extractSpans, extractLogRecords, extractMetricPoints, metricResourceKey, latencySparkline, TRACE_CAP, TRACE_LIST_MAX, TRACE_RETENTION_MS };
