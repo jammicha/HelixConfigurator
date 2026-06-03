@@ -7,7 +7,7 @@ import { colorForService } from './palette';
 import { LogLine } from './LogLine';
 import { SpanRow } from './SpanRow';
 import { FlameView } from './FlameView';
-import { ResourcesPanel } from './ResourcesPanel';
+import { useTraceResources, ResourceCell } from './ResourcesPanel';
 
 const SummaryCell: React.FC<{
   label: string;
@@ -180,6 +180,10 @@ const ServiceBreakdownPanel: React.FC<{
 
 export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = ({ detail, logs }) => {
   const { spans, summary } = detail;
+  // Resource utilization (CPU/mem) folded into the summary strip as two extra
+  // cells when the trace's service emitted process.* in the window.
+  const resources = useTraceResources(summary.trace_id);
+  const showResources = !!resources && !resources.empty;
   const slowThresholdMs = useSlowThreshold();
   const [criticalPathOnly, setCriticalPathOnly] = useState(false);
   const [errorsOnly, setErrorsOnly] = useState(false);
@@ -485,11 +489,13 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
   return (
     <div className="px-6 py-5">
       {/* Trace summary row */}
-      <div className="grid grid-cols-4 gap-4 mb-5">
+      <div className={showResources ? 'grid grid-cols-6 gap-4 mb-5' : 'grid grid-cols-4 gap-4 mb-5'}>
         <SummaryCell label="Service" value={summary.service_name} icon={<Server className="w-3.5 h-3.5" />} />
         <SummaryCell label="Duration" value={formatDuration(summary.duration_ms)} icon={<Clock className="w-3.5 h-3.5" />} tone={summary.duration_ms > slowThresholdMs ? 'warning' : undefined} />
         <SummaryCell label="Spans" value={String(summary.span_count)} icon={<Activity className="w-3.5 h-3.5" />} />
         <SummaryCell label="Status" value={summary.has_error ? 'Error' : 'OK'} icon={<AlertTriangle className="w-3.5 h-3.5" />} tone={summary.has_error ? 'danger' : 'success'} />
+        {resources && !resources.empty && <ResourceCell kind="cpu" series={resources.cpu} />}
+        {resources && !resources.empty && <ResourceCell kind="memory" series={resources.memory} />}
       </div>
 
       {nPlusOne && (
@@ -505,10 +511,6 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
           </div>
         </div>
       )}
-
-      {/* Resource utilization for this trace's service — sampled around the
-          trace window. Self-contained: fetches /api/traces/:id/resources. */}
-      <ResourcesPanel traceId={summary.trace_id} />
 
       {serviceBreakdown.length > 0 && (
         <ServiceBreakdownPanel
