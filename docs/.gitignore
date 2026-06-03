@@ -1,0 +1,18 @@
+# docs/ is version-controlled, but only Markdown documentation is tracked.
+#
+# Everything else here stays on local disk only: the demo deck and its
+# generator (artifacts/), the Python virtualenv (venv/), the .env template,
+# and any other non-Markdown files. Their content is captured in
+# COMPREHENSIVE-GUIDE.md, so nothing is lost from version control.
+
+# Ignore everything by default...
+*
+# ...but let git descend into subdirectories...
+!*/
+# ...and keep Markdown docs plus this ignore file.
+!*.md
+!.gitignore
+
+# Never track the build virtualenv (it contains vendored *.md files that the
+# whitelist above would otherwise pick up).
+venv/

@@ -12,5 +12,6 @@ dummy-config.yaml
 .claude/
 data/
 backend/data/
-docs/
+# docs/ is version-controlled. docs/.gitignore scopes it to Markdown only
+# (decks, the build virtualenv, and other artifacts stay local).
 prompt.txt

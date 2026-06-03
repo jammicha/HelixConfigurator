@@ -81,12 +81,13 @@ This builds the configurator image, starts the OpenTelemetry Collector (`helix-g
   ```
   Then open `http://localhost:8765` locally.
 
-On first run, the UI walks you through a four-step onboarding wizard:
+On first run, the UI walks you through a five-step onboarding wizard:
 
-1. **Configure** — capture credentials (endpoint, API key, X-Source) and save + restart the gateway. The wizard validates each field as you type and auto-rebuilds the canonical `tenant::seg1::seg2` key from a pasted Helix-portal bundle.
+1. **Configure** — capture credentials (endpoint, API key, X-Source) and save + restart the gateway. The wizard validates each field as you type and auto-rebuilds the canonical `tenant::seg1::seg2` key from a pasted Helix-portal bundle. A **Test connection** button probes the typed endpoint and API key against Helix before you commit them.
 2. **Exporter** — paste-ready snippets for adding `helix-gateway` as an `otlphttp` exporter to your existing collector's pipelines. When a single OTel collector is detected on the host, **Smart-add** offers to read its config, compute the merge, preview the diff, and apply it for you (with a `.helix-bak` and an automatic container restart). See [Smart-add](#smart-add) below.
 3. **Connect** — ensures `helix-gateway` shares a Docker network with your collector. Surfaces the result of the auto-bridge attempt from Step 1 and offers one-click attach to any detected collector network, with a manual fallback. Detects Kubernetes-based collectors and offers a one-click apply of the K8s Attribute Enrichment template.
-4. **Verify** — live span/metric/log counters since the step opened, a synthetic `Gateway → Helix` round-trip check, app-side OTel export error detection, and a launch button for the dashboard.
+4. **Verify** — live span/metric/log counters since the step opened, app-side OTel export error detection, and a launch button for the dashboard. This step is read-only observation (the *Next* button is always enabled); validating your key and endpoint now happens up front via Step 1's **Test connection** rather than a synthetic round-trip.
+5. **Link Service** — a guided flow that links the app's OTel namespace to a BMC Helix AIOps Business Service and captures its `BUSINESS_SERVICE_KEY`, so trace deep-links and *Send to AIOps* pin to a single service instead of fanning across everything that shares a `service.name`. The same flow is available later as a dashboard card. See [Bind the namespaces to a Business Service (in AIOps)](#bind-the-namespaces-to-a-business-service-in-aiops).
 
 The stepper at the top is clickable for any step you've completed, so you can jump back to fix something without losing state.
 
