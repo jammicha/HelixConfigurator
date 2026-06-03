@@ -979,6 +979,40 @@ class OtelStore {
     this.deleteTrace.run(traceId);
   }
 
+  // Wipe every stored trace, span, log, and error in one transaction — the
+  // "clean data slate" the reset-onboarding handler defers to (that route
+  // deliberately leaves trace data intact). Runs in-process against the live
+  // better-sqlite3 handle, so it's safe on a running store; never shell out to
+  // the sqlite3 CLI against the live file — a concurrent writer corrupts it and
+  // trips the self-heal quarantine. Returns the row counts removed.
+  //
+  // Scope is intentionally local: this only clears what THIS configurator
+  // stored for its own viewer / onboarding "detect" list. It does not touch the
+  // Helix tenant, whose copy is retention-bound server-side.
+  clearAll() {
+    const count = (t) => this.db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
+    const cleared = {
+      traces: count('traces'),
+      spans: count('spans'),
+      errors: count('span_errors'),
+      logs: count('log_records'),
+    };
+    // Children before parents — correct even if foreign_keys is ever enabled.
+    this.db.transaction(() => {
+      this.db.exec(
+        'DELETE FROM span_errors; DELETE FROM log_records; DELETE FROM spans; DELETE FROM traces;',
+      );
+    })();
+    // Reclaim immediately rather than waiting for the incremental-vacuum timer:
+    // truncate the WAL, then hand the freed pages back to the OS. Best-effort —
+    // a reclaim hiccup must not surface as a failed clear; the rows are gone.
+    try { this.db.pragma('wal_checkpoint(TRUNCATE)'); }
+    catch (e) { console.warn('[otelStore] clearAll checkpoint failed:', e.message); }
+    try { this.db.pragma('incremental_vacuum'); }
+    catch (e) { console.warn('[otelStore] clearAll vacuum failed:', e.message); }
+    return cleared;
+  }
+
   _evictIfNeeded() {
     // Primary retention is time-based: drop anything older than the horizon so
     // the window holds "the last N hours", not "the last N traces". Indexed

@@ -7,6 +7,80 @@ import otelStoreModule from './otelStore.js';
 
 const { OtelStore } = otelStoreModule;
 
+// clearAll() is the "clean data slate" the dashboard exposes — it must empty
+// every table (traces/spans/errors/logs), report what it removed, leave the
+// store queryable, and be idempotent on an already-empty store.
+describe('OtelStore clearAll', () => {
+  let tmpDir = null;
+  let store = null;
+
+  afterEach(() => {
+    if (store) {
+      try { store.stopMaintenance(); } catch { /* noop */ }
+      try { store.db.close(); } catch { /* noop */ }
+      store = null;
+    }
+    if (tmpDir) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      tmpDir = null;
+    }
+  });
+
+  it('wipes every table, reports the counts removed, and stays queryable', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otelstore-'));
+    store = new OtelStore({ dbPath: path.join(tmpDir, 'otel-store.db') });
+
+    const now = Date.now();
+    const traceId = 'a'.repeat(32);
+    const spanId = 'b'.repeat(16);
+    // Real ingest paths populate traces + spans and log_records...
+    store.ingestSpans([{
+      traceId, spanId, parentSpanId: '',
+      serviceName: 'frontend', serviceNamespace: 'hotrod',
+      name: 'GET /dispatch', kind: 2,
+      startTimeNs: now * 1000, endTimeNs: now * 1000 + 5000, durationMs: 5,
+      statusCode: 1, statusMessage: null, attributes: {}, events: [],
+    }]);
+    store.ingestLogs([{
+      traceId, spanId, serviceName: 'frontend',
+      severity: 'ERROR', body: 'kaboom', attributes: {}, timeUnixNano: now * 1000,
+    }]);
+    // ...and a direct insert guarantees span_errors has a row without depending
+    // on the error-extraction heuristics.
+    store.db.prepare(
+      `INSERT INTO span_errors (trace_id, span_id, service_name, exception_type, message, stack, ts_ns, received_at)
+       VALUES (@trace_id, @span_id, @service_name, @exception_type, @message, @stack, @ts_ns, @received_at)`,
+    ).run({
+      trace_id: traceId, span_id: spanId, service_name: 'frontend',
+      exception_type: 'Error', message: 'boom', stack: null, ts_ns: now * 1000, received_at: now,
+    });
+
+    const tableCount = (t) => store.db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
+    // Precondition: all four tables hold data.
+    expect(store.listTraces({}).length).toBeGreaterThan(0);
+    expect(store.listNamespaces().length).toBeGreaterThan(0);
+    for (const t of ['traces', 'spans', 'span_errors', 'log_records']) {
+      expect(tableCount(t)).toBeGreaterThan(0);
+    }
+
+    const cleared = store.clearAll();
+
+    // Reports exactly what it removed.
+    expect(cleared).toEqual({ traces: 1, spans: 1, errors: 1, logs: 1 });
+
+    // Store is genuinely empty but still answers queries (not torn down).
+    expect(store.listTraces({})).toEqual([]);
+    expect(store.listServices({})).toEqual([]);
+    expect(store.listNamespaces()).toEqual([]);
+    for (const t of ['traces', 'spans', 'span_errors', 'log_records']) {
+      expect(tableCount(t)).toBe(0);
+    }
+
+    // Idempotent: clearing an empty store reports all zeros.
+    expect(store.clearAll()).toEqual({ traces: 0, spans: 0, errors: 0, logs: 0 });
+  });
+});
+
 // Regression coverage for the corrupt-store self-heal (otelStore._openVerified).
 // A corrupt page in the spans B-tree used to make every Traces-tab query throw
 // "database disk image is malformed" forever, while Logs/Errors (which never

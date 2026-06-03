@@ -401,6 +401,21 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     res.json({ gatewayStatus, gatewayExitCode, throughput, recentErrors });
   });
 
+  // POST clear the local OTel store — wipes all stored traces, spans, logs, and
+  // errors. This is the "clean data slate" the reset-onboarding handler defers
+  // to (that route intentionally leaves trace data intact). Local only: it does
+  // not touch the Helix tenant, whose copy is retention-bound server-side.
+  // Powers the OTel data page's Diagnostics → "Clear stored data" action.
+  app.post('/api/diagnostics/clear-otel-store', (req, res) => {
+    try {
+      const cleared = otelStore.clearAll();
+      res.json({ ok: true, cleared });
+    } catch (e) {
+      errorLog.push('otel-store.clear', e.message);
+      res.status(500).json({ error: 'Failed to clear the OTel store', details: e.message });
+    }
+  });
+
   // POST deep verification of the Step 3 bridge. Step 3 today shows green
   // purely on a topology check (does the customer collector share a network
   // with helix-gateway?). That misses two real failure modes:

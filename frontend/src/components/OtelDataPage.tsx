@@ -9,6 +9,7 @@ import {
   Loader2,
   RefreshCw,
   Server,
+  Trash2,
   Wrench,
   X,
 } from 'lucide-react';
@@ -165,6 +166,7 @@ export const OtelDataPage: React.FC = () => {
   // current host state.
   const [detectedCollectors, setDetectedCollectors] = useState<Array<{ name: string; image: string }>>([]);
   const [diagOpen, setDiagOpen] = useState(false);
+  const [clearingStore, setClearingStore] = useState(false);
   const [restartingName, setRestartingName] = useState<string | null>(null);
   const [restartResult, setRestartResult] = useState<{ name: string; ok: boolean; message: string } | null>(null);
   // Diagnostics → "Export to JSON". Bundles a sampled subset of the current
@@ -767,6 +769,36 @@ export const OtelDataPage: React.FC = () => {
   // re-poll cadence. Auto-pauses when the tab is hidden, and now also
   // when the stream is manually paused — otherwise the chart kept
   // sliding even though the trace list was frozen, which felt buggy.
+  // Wipe the local OTel store via the diagnostics endpoint, then pull every
+  // panel back from the now-empty store so the page reflects the clean slate
+  // immediately instead of showing stale rows until the next poll. Guarded by a
+  // confirm — destructive, and local-only (the Helix tenant keeps its own copy).
+  const clearStore = async () => {
+    if (clearingStore) return;
+    if (!window.confirm(
+      'Clear all locally-stored OTel data (traces, spans, logs, errors)?\n\n'
+      + 'This only wipes the configurator’s own viewer and the onboarding "detect" '
+      + 'list. It does not touch your Helix tenant. New traffic repopulates the store.',
+    )) return;
+    setClearingStore(true);
+    try {
+      const res = await fetch('/api/diagnostics/clear-otel-store', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.warn('clear-otel-store failed:', data);
+      }
+    } catch (e) {
+      console.warn('clear-otel-store threw:', e);
+    }
+    // Refetch from the empty store so the UI doesn't show stale rows.
+    setRefreshNonce(n => n + 1);
+    await Promise.allSettled([
+      refreshTraces(), refreshServices(), refreshErrors(), refreshLogs(), refreshOperations(),
+    ]);
+    setDiagOpen(false);
+    setClearingStore(false);
+  };
+
   const pausedAwareRefresh = useCallback(() => {
     if (tracesPausedRef.current) return;
     // Skip this tick if the previous overview bundle fetch is still in flight,
@@ -1306,6 +1338,25 @@ export const OtelDataPage: React.FC = () => {
                         </span>
                       )}
                     </button>
+                  </div>
+                  {/* Clear the local trace store — the "clean data slate" for a
+                      fresh demo or to drop residual data from an earlier config.
+                      Local only: the Helix tenant keeps its own retention-bound
+                      copy, so this won't change the tenant's topology. */}
+                  <div className="px-3 py-2 border-t border-gray-800">
+                    <button
+                      type="button"
+                      onClick={clearStore}
+                      disabled={clearingStore}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-tiny rounded bg-gray-800 hover:bg-gray-700 text-danger-text font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                      title="Wipe all locally-stored traces, spans, logs, and errors. Does not affect your Helix tenant."
+                    >
+                      {clearingStore ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      {clearingStore ? 'Clearing…' : 'Clear stored data'}
+                    </button>
+                    <div className="mt-1.5 text-tiny text-gray-500 leading-relaxed">
+                      Local viewer + onboarding “detect” only — your Helix tenant keeps its own copy.
+                    </div>
                   </div>
                 </div>
               )}
