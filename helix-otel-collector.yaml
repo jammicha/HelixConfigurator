@@ -22,6 +22,7 @@ exporters:
   otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs
+    metrics_endpoint: http://helix-configurator:3001/api/otlp/metrics
     encoding: json
     compression: none
     tls:
@@ -55,6 +56,7 @@ service:
         - batch
       exporters:
         - otlphttp/bmchelix
+        - otlphttp/helix_local_viewer
     logs:
       receivers:
         - otlp
