@@ -27,7 +27,7 @@ const TEMPLATES_DIR = path.join(__dirname, '../templates');
 app.use(cors({ credentials: true }));
 // Raw body for OTLP ingest — must come BEFORE express.json() so the stream
 // isn't consumed by the JSON parser. Cap at 32MB to absorb large batches.
-app.use(['/api/otlp/traces', '/api/otlp/logs'], express.raw({
+app.use(['/api/otlp/traces', '/api/otlp/logs', '/api/otlp/metrics'], express.raw({
   type: '*/*',
   limit: '32mb',
 }));
