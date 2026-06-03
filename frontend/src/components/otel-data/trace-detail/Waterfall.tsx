@@ -7,6 +7,7 @@ import { colorForService } from './palette';
 import { LogLine } from './LogLine';
 import { SpanRow } from './SpanRow';
 import { FlameView } from './FlameView';
+import { ResourcesPanel } from './ResourcesPanel';
 
 const SummaryCell: React.FC<{
   label: string;
@@ -504,6 +505,10 @@ export const Waterfall: React.FC<{ detail: TraceDetail; logs: LogRecord[] }> = (
           </div>
         </div>
       )}
+
+      {/* Resource utilization for this trace's service — sampled around the
+          trace window. Self-contained: fetches /api/traces/:id/resources. */}
+      <ResourcesPanel traceId={summary.trace_id} />
 
       {serviceBreakdown.length > 0 && (
         <ServiceBreakdownPanel
