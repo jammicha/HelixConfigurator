@@ -1,22 +1,17 @@
 import React from 'react';
 import { Check } from 'lucide-react';
 
-const STEPS = [
-  { n: 1, label: 'Configure' },
-  { n: 2, label: 'Exporter' },
-  { n: 3, label: 'Connect' },
-  { n: 4, label: 'Verify' },
-  { n: 5, label: 'Link Service' },
-];
+type WizardStep = { n: number; label: string };
 
 type Props = {
   current: number;
+  steps: WizardStep[];
   onJump: (step: number) => void;
 };
 
-export const Stepper: React.FC<Props> = ({ current, onJump }) => (
+export const Stepper: React.FC<Props> = ({ current, steps, onJump }) => (
   <div className="flex items-center justify-between gap-2 px-1">
-    {STEPS.map((s, idx) => {
+    {steps.map((s, idx) => {
       const isCurrent = current === s.n;
       const isCompleted = current > s.n;
       const clickable = s.n <= current;
@@ -43,7 +38,7 @@ export const Stepper: React.FC<Props> = ({ current, onJump }) => (
               {s.label}
             </span>
           </button>
-          {idx < STEPS.length - 1 && (
+          {idx < steps.length - 1 && (
             <span className={`flex-1 h-px ${current > s.n ? 'bg-success/60' : 'bg-gray-800'}`} />
           )}
         </React.Fragment>

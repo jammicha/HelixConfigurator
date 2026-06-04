@@ -20,6 +20,7 @@ type Props = {
   onTestConnection: () => void;
   testConnectionResult: { status: string; message: string; remediation?: string; httpStatus?: number; latencyMs?: number } | null;
   testingConnection: boolean;
+  primaryLabel?: string;
 };
 
 // Per-field validation. Returns null when valid, or a short user-facing error.
@@ -58,6 +59,7 @@ export const Step1: React.FC<Props> = ({
   onTestConnection,
   testConnectionResult,
   testingConnection,
+  primaryLabel = 'Save & initialize →',
 }) => {
   const errors = {
     HELIX_ENDPOINT: validateEndpoint(envVars.HELIX_ENDPOINT),
@@ -205,7 +207,7 @@ export const Step1: React.FC<Props> = ({
         title={!canSubmit ? 'Fix the field errors above before continuing' : ''}
         className="w-full bg-primary hover:bg-primary-hover disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded font-semibold transition-all"
       >
-        {isVerifying ? 'Saving…' : 'Save & initialize →'}
+        {isVerifying ? 'Saving…' : primaryLabel}
       </button>
     </div>
   );
