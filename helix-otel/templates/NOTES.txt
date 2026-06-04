@@ -1,0 +1,16 @@
+Helix OTel gateway installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+1) Point your apps at the gateway (in-cluster):
+     OTEL_EXPORTER_OTLP_ENDPOINT=http://{{ .Values.gateway.name }}:4318
+   (gRPC on :4317, Prometheus metrics on :8888)
+
+{{- if .Values.viewer.enabled }}
+
+2) View OTel Data locally (port-forward the viewer):
+     kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Values.viewer.name }} 3001:3001
+   then open http://localhost:3001/otel-data
+
+   If the viewer pod is ImagePullBackOff on a local cluster, load the image first:
+     kind load docker-image {{ .Values.viewer.image.repository }}:{{ .Values.viewer.image.tag }}
+     # or:  minikube image load {{ .Values.viewer.image.repository }}:{{ .Values.viewer.image.tag }}
+{{- end }}

@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.gateway.name }}
+  labels:
+    {{- include "helix-otel.labels" . | nindent 4 }}
+    {{- include "helix-otel.gateway.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      {{- include "helix-otel.gateway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "helix-otel.gateway.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ .Files.Get "config/gateway-collector.yaml" | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          args: ["--config=/etc/otelcol-contrib/config.yaml"]
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+            - { name: metrics, containerPort: 8888 }
+            - { name: health, containerPort: 13133 }
+          env:
+            - name: HELIX_ENDPOINT
+              value: {{ .Values.helix.endpoint | quote }}
+            - name: X_SOURCE
+              value: {{ .Values.helix.xSource | quote }}
+            - name: HELIX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.name }}-helix
+                  key: HELIX_API_KEY
+          livenessProbe:
+            httpGet: { path: /, port: 13133 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /, port: 13133 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol-contrib/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Values.gateway.name }}
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.gateway.name }}
+  labels:
+    {{- include "helix-otel.labels" . | nindent 4 }}
+    {{- include "helix-otel.gateway.selectorLabels" . | nindent 4 }}
+data:
+  config.yaml: |
+{{ .Files.Get "config/gateway-collector.yaml" | indent 4 }}

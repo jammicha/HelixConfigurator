@@ -152,6 +152,21 @@ Grouping namespaces under a Business Service is **AIOps console config, not the 
 2. **Add Dynamic content → Default Blueprint for OTel Service**, then **select the OpenTelemetry namespace(s)** to include — a single Business Service can bind **several** namespaces.
 3. **Save.** The **CI Topology** tab then shows the instrumented apps grouped by namespace under that one service, and health and Situations roll up to it.
 
+## Generate a Kubernetes chart
+
+From the dashboard, **Generate K8s deployment** emits a self-contained Helm chart
+(`helix-otel/`) wired to your Helix tenant from the current config:
+
+```bash
+unzip helix-otel-chart.zip
+helm install helix ./helix-otel --set helix.apiKey=<TenantID::AccessKey::SecretKey>
+```
+
+Point apps at `http://helix-gateway:4318`. The local viewer (on by default) is reached with
+`kubectl port-forward svc/helix-viewer 3001:3001`. On a local cluster, load the viewer image
+once with `kind load docker-image helix-configurator:latest` (or `minikube image load …`).
+Disable the viewer by unchecking it before download (or `--set viewer.enabled=false`).
+
 ## Features
 
 After onboarding, the dashboard provides:
