@@ -70,6 +70,21 @@ describe('GET /api/k8s/chart/preview', () => {
     expect(res.status).toBe(400);
     fs.writeFileSync(configPath, FIXTURE); // restore
   });
+
+  it('does not crash at register or preview when the chart skeleton is missing (regression)', async () => {
+    // Guards the bug where listChartFiles ran eagerly at register() and threw
+    // ENOENT — crashing the whole backend at startup — when helix-otel/ wasn't
+    // present (e.g. not copied into the Docker image).
+    const app = express();
+    const { register } = require('../routes/k8s.js');
+    expect(() => register(app, { configPath, projectRoot: '/no/such/dir' })).not.toThrow();
+    const res = await request(app).get('/api/k8s/chart/preview?viewer=true');
+    expect(res.status).toBe(200);
+    expect(res.body.files).toEqual(expect.arrayContaining([
+      'helix-otel/values.yaml',
+      'helix-otel/config/gateway-collector.yaml',
+    ]));
+  });
 });
 
 describe('GET /api/k8s/chart', () => {

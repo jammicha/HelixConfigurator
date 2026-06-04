@@ -13,24 +13,37 @@ const INSTALL_COMMAND = 'helm install helix ./helix-otel --set helix.apiKey=<Ten
 
 // Recursively list all files under <projectRoot>/helix-otel/ as relative paths
 // like `helix-otel/Chart.yaml`, then append the two generated-file paths.
-// Computed once per register() call since the skeleton is static.
+// Lazy + memoized (the skeleton is static) and GUARDED: if the skeleton dir is
+// missing (e.g. not copied into the Docker image), it logs and falls back to the
+// generated files rather than throwing — route registration must never crash the
+// whole backend at startup over one optional feature's file listing.
+const chartFilesCache = new Map();
 function listChartFiles(projectRoot) {
-  const skeletonRoot = path.join(projectRoot, 'helix-otel');
-  const entries = fsSync.readdirSync(skeletonRoot, { recursive: true });
-  const skeletonFiles = entries
-    .map(e => path.join('helix-otel', e).replace(/\\/g, '/'))
-    .filter(p => fsSync.statSync(path.join(projectRoot, p)).isFile());
+  if (chartFilesCache.has(projectRoot)) return chartFilesCache.get(projectRoot);
   const generated = [
     'helix-otel/values.yaml',
     'helix-otel/config/gateway-collector.yaml',
   ];
-  return [...new Set([...skeletonFiles, ...generated])].sort();
+  let skeletonFiles = [];
+  try {
+    const skeletonRoot = path.join(projectRoot, 'helix-otel');
+    skeletonFiles = fsSync.readdirSync(skeletonRoot, { recursive: true })
+      .map(e => path.join('helix-otel', e).replace(/\\/g, '/'))
+      .filter(p => {
+        try { return fsSync.statSync(path.join(projectRoot, p)).isFile(); }
+        catch { return false; }
+      });
+  } catch (e) {
+    console.warn(`k8s: chart skeleton missing at ${path.join(projectRoot, 'helix-otel')} (${e.code || e.message}); chart generation will be unavailable.`);
+  }
+  const result = [...new Set([...skeletonFiles, ...generated])].sort();
+  chartFilesCache.set(projectRoot, result);
+  return result;
 }
 
 const wantsViewer = (req) => String(req.query.viewer ?? 'true').toLowerCase() !== 'false';
 
 function register(app, { configPath, projectRoot }) {
-  const chartFiles = listChartFiles(projectRoot);
   // Build the two generated files from live state, or send an error response.
   // Returns null after responding on failure.
   async function generate(req, res) {
@@ -66,7 +79,7 @@ function register(app, { configPath, projectRoot }) {
       values: files.values,
       gatewayConfig: files.gatewayConfig,
       installCommand: INSTALL_COMMAND,
-      files: chartFiles,
+      files: listChartFiles(projectRoot),
     });
   });
 
