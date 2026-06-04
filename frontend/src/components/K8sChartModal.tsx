@@ -3,7 +3,7 @@ import { Download, Loader2, X } from 'lucide-react';
 import { useEscClose } from '../hooks/useEscClose';
 import { SnippetBlock } from './SnippetBlock';
 
-type Preview = { values: string; gatewayConfig: string; installCommand: string; files: string[] };
+type Preview = { values: string; gatewayConfig: string; installCommand: string; files: string[]; keyEmbedded: boolean };
 type Props = { isOpen: boolean; onClose: () => void };
 
 // "Generate Kubernetes deployment" — previews and downloads a self-contained
@@ -11,6 +11,7 @@ type Props = { isOpen: boolean; onClose: () => void };
 export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
   useEscClose(isOpen, onClose);
   const [viewerEnabled, setViewerEnabled] = useState(true);
+  const [handoff, setHandoff] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +21,7 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/k8s/chart/preview?viewer=${viewerEnabled}`)
+    fetch(`/api/k8s/chart/preview?viewer=${viewerEnabled}&handoff=${handoff}`)
       .then(async r => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`);
         return r.json();
@@ -29,7 +30,7 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
       .catch(e => { if (!cancelled) setError(String(e.message || e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [isOpen, viewerEnabled]);
+  }, [isOpen, viewerEnabled, handoff]);
 
   if (!isOpen) return null;
   return (
@@ -57,6 +58,11 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
             Include the local &quot;View OTel Data&quot; viewer (Deployment + PVC)
           </label>
 
+          <label className="flex items-center gap-3 text-sm text-gray-300">
+            <input type="checkbox" checked={handoff} onChange={e => setHandoff(e.target.checked)} className="accent-primary w-4 h-4" />
+            Generating this for someone else (omit my key)
+          </label>
+
           <div className="flex items-center gap-3 text-sm text-gray-500">
             <input type="checkbox" checked={false} disabled className="w-4 h-4" />
             Use the OpenTelemetry Operator <span className="text-tiny px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">coming soon</span>
@@ -70,6 +76,11 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
               <div>
                 <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">Install</p>
                 <SnippetBlock text={preview.installCommand} />
+                {preview.keyEmbedded && (
+                  <p className="text-tiny text-[#fcd34d] mb-2">
+                    ⚠ This command contains your live Helix key — it runs locally and is never written into the downloaded chart.
+                  </p>
+                )}
               </div>
               <details>
                 <summary className="text-sm text-gray-300 cursor-pointer select-none">Preview values.yaml</summary>

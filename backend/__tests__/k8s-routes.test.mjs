@@ -39,14 +39,21 @@ const binaryParser = (res, cb) => {
   res.on('end', () => cb(null, Buffer.concat(chunks)));
 };
 
+let origApiKey;
 beforeAll(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'k8s-route-'));
   configPath = path.join(tmpDir, 'helix-otel-collector.yaml');
   fs.writeFileSync(configPath, FIXTURE);
   process.env.HELIX_ENDPOINT = 'https://helix.example/otlp';
   process.env.X_SOURCE = 'acme-otel';
+  origApiKey = process.env.HELIX_API_KEY;
+  process.env.HELIX_API_KEY = 'TENANT::ACCESS::SECRET';
 });
-afterAll(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+afterAll(() => {
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  if (origApiKey === undefined) delete process.env.HELIX_API_KEY;
+  else process.env.HELIX_API_KEY = origApiKey;
+});
 
 describe('GET /api/k8s/chart/preview', () => {
   it('returns generated values, gateway config, install command and file list', async () => {
@@ -57,6 +64,9 @@ describe('GET /api/k8s/chart/preview', () => {
       .toBe('http://helix-viewer:3001/api/otlp/traces');
     expect(res.body.installCommand).toMatch(/helm install helix \.\/helix-otel/);
     expect(res.body.installCommand).toMatch(/existingSecret/);
+    // Default: the live key is pre-filled into the create-secret command.
+    expect(res.body.installCommand).toContain("HELIX_API_KEY='TENANT::ACCESS::SECRET'");
+    expect(res.body.keyEmbedded).toBe(true);
     expect(res.body.files).toContain('helix-otel/templates/gateway-deployment.yaml');
   });
 
@@ -70,6 +80,14 @@ describe('GET /api/k8s/chart/preview', () => {
     const res = await request(makeApp()).get('/api/k8s/chart/preview');
     expect(res.status).toBe(400);
     fs.writeFileSync(configPath, FIXTURE); // restore
+  });
+
+  it('handoff mode omits the real key (placeholder only)', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?handoff=true');
+    expect(res.status).toBe(200);
+    expect(res.body.keyEmbedded).toBe(false);
+    expect(res.body.installCommand).toContain('<TenantID::AccessKey::SecretKey>');
+    expect(res.body.installCommand).not.toContain('TENANT::ACCESS::SECRET');
   });
 
   it('does not crash at register or preview when the chart skeleton is missing (regression)', async () => {

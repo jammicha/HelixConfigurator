@@ -168,6 +168,10 @@ kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID:
 helm install helix ./helix-otel --set helix.existingSecret=helix-key
 ```
 
+The **Generate K8s deployment** dialog pre-fills that `kubectl create secret` command with your
+actual key (from the configurator's `.env`) so you can copy-paste it directly — tick *"Generating
+this for someone else"* to get a placeholder instead.
+
 > The chart also accepts `--set helix.apiKey=…` for throwaway demos, but that value lands in your
 > shell history *and* Helm's in-cluster release storage (`helm get values` reveals it) — prefer
 > `existingSecret`, and in production populate the Secret from a manager (External Secrets / Vault /

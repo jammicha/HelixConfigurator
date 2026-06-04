@@ -9,11 +9,21 @@ const path = require('path');
 const archiver = require('archiver');
 const { buildChartFiles, streamChartArchive } = require('../k8sChart');
 
-const INSTALL_COMMAND = [
-  '# Create a Secret with your Helix key, then install referencing it:',
-  "kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID::AccessKey::SecretKey>'",
-  'helm install helix ./helix-otel --set helix.existingSecret=helix-key',
-].join('\n');
+const KEY_PLACEHOLDER = '<TenantID::AccessKey::SecretKey>';
+
+// Build the create-secret + install command pair shown in the dashboard. When not
+// in handoff mode and a live key is configured, the actual key is embedded so the
+// user can copy-paste without hunting for it. The key only ever appears in this
+// command (rendered in the authed UI) — never in the chart values or the zip.
+function buildInstallCommand({ handoff }) {
+  const key = handoff ? KEY_PLACEHOLDER : (process.env.HELIX_API_KEY || KEY_PLACEHOLDER);
+  return [
+    '# 1) Create a Secret with your Helix key:',
+    `kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='${key}'`,
+    '# 2) Install the chart, referencing that Secret:',
+    'helm install helix ./helix-otel --set helix.existingSecret=helix-key',
+  ].join('\n');
+}
 
 // Recursively list all files under <projectRoot>/helix-otel/ as relative paths
 // like `helix-otel/Chart.yaml`, then append the two generated-file paths.
@@ -46,6 +56,7 @@ function listChartFiles(projectRoot) {
 }
 
 const wantsViewer = (req) => String(req.query.viewer ?? 'true').toLowerCase() !== 'false';
+const wantsHandoff = (req) => String(req.query.handoff) === 'true';
 
 function register(app, { configPath, projectRoot }) {
   // Build the two generated files from live state, or send an error response.
@@ -78,11 +89,13 @@ function register(app, { configPath, projectRoot }) {
   app.get('/api/k8s/chart/preview', async (req, res) => {
     const files = await generate(req, res);
     if (!files) return;
+    const handoff = wantsHandoff(req);
     res.json({
       viewerEnabled: wantsViewer(req),
       values: files.values,
       gatewayConfig: files.gatewayConfig,
-      installCommand: INSTALL_COMMAND,
+      installCommand: buildInstallCommand({ handoff }),
+      keyEmbedded: !handoff && !!process.env.HELIX_API_KEY,
       files: listChartFiles(projectRoot),
     });
   });
