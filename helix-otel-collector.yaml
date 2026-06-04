@@ -10,15 +10,23 @@ processors:
     timeout: 1s
     send_batch_size: 1024
 exporters:
+  # Auth headers are sourced from .env at OTel collector startup via
+  # ${env:VAR} substitution — secrets stay out of the committed YAML.
   otlphttp/bmchelix:
     endpoint: ${env:HELIX_ENDPOINT}
     headers:
       X-Api-Key: ${env:HELIX_API_KEY}
       X-Source: ${env:X_SOURCE}
+    # Sending queue tuned for sustained burst throughput to Helix.
+    # num_consumers = parallel HTTP workers shipping batches; queue_size is
+    # bounded so the collector won't OOM under prolonged backpressure.
     sending_queue:
       enabled: true
       num_consumers: 100
       queue_size: 10000
+  # Fan-out: traces, logs, and metrics also flow to the configurator backend so
+  # the local "View OTel Data" page can render waterfalls, errors, DB insight,
+  # and the per-trace Resources panel. Don't remove this — /otel-data depends on it.
   otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs
