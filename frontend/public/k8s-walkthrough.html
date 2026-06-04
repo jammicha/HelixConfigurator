@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deploy the Helix OTel gateway to Kubernetes — Walkthrough</title>
+  <!--
+    Self-contained local walkthrough served by the Helix Configurator
+    (frontend/public/ → served at /k8s-walkthrough.html in dev and prod).
+    No external assets, so it works fully offline. The "Full walkthrough"
+    link in the Generate-K8s step opens this page instead of an online doc.
+  -->
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #11161f;
+      --panel-2: #0d1117;
+      --border: #232a36;
+      --text: #e6edf3;
+      --muted: #9aa4b2;
+      --faint: #6b7585;
+      --accent: #8b7cf6;
+      --accent-2: #5b3df5;
+      --ok: #3fb950;
+      --warn: #d8a657;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); }
+    body {
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 40px 24px 96px; }
+    header.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+    header.brand img { height: 26px; }
+    header.brand .sep { color: var(--faint); }
+    header.brand .kicker { color: var(--muted); font-size: 13px; letter-spacing: .02em; }
+    h1 { font-size: 28px; line-height: 1.25; margin: 0 0 8px; }
+    .lede { color: var(--muted); font-size: 16px; margin: 0 0 8px; }
+    h2 {
+      font-size: 19px; margin: 40px 0 12px; padding-top: 18px;
+      border-top: 1px solid var(--border);
+    }
+    h2 .num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 6px; margin-right: 10px;
+      background: var(--accent-2); color: #fff; font-size: 14px; font-weight: 600;
+      vertical-align: middle;
+    }
+    h3 { font-size: 15px; margin: 22px 0 8px; color: var(--text); }
+    p { margin: 10px 0; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: "SF Mono", "Source Code Pro", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 13px; background: var(--panel-2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 5px; color: #cdd6e4;
+    }
+    pre {
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px 16px; overflow-x: auto; margin: 12px 0;
+    }
+    pre code { background: none; border: none; padding: 0; font-size: 13px; color: #cdd6e4; }
+    .muted { color: var(--muted); }
+    .faint { color: var(--faint); font-size: 13px; }
+    ul { margin: 10px 0; padding-left: 22px; }
+    li { margin: 6px 0; }
+    .callout {
+      border: 1px solid var(--border); border-left: 3px solid var(--accent);
+      background: var(--panel); border-radius: 8px; padding: 12px 16px; margin: 16px 0;
+      font-size: 14px;
+    }
+    .callout.warn { border-left-color: var(--warn); }
+    .callout .label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--faint); font-weight: 600; margin-bottom: 4px;
+    }
+    .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin: 24px 0 8px; }
+    .toc .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 600; margin-bottom: 8px; }
+    .toc ol { margin: 0; padding-left: 20px; color: var(--muted); }
+    .toc a { color: var(--muted); }
+    .toc a:hover { color: var(--accent); }
+    kbd { background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="brand">
+      <img src="/bmc-logo.svg" alt="BMC Helix" onerror="this.style.display='none'" />
+      <span class="sep">/</span>
+      <span class="kicker">Helix OTel Configurator</span>
+    </header>
+
+    <h1>Deploy the Helix OTel gateway to Kubernetes</h1>
+    <p class="lede">
+      The configurator generates a self-contained Helm chart — the Helix OTel gateway (and an optional
+      local viewer) pre-wired to your Helix tenant. You <code>helm install</code> it in your cluster, then
+      point your apps at the gateway&rsquo;s in-cluster Service. This is the full walkthrough behind the
+      in-app <em>Generate&nbsp;Kubernetes&nbsp;deployment</em> step.
+    </p>
+
+    <div class="toc">
+      <div class="label">On this page</div>
+      <ol>
+        <li><a href="#generate">Generate &amp; download the chart</a></li>
+        <li><a href="#secret">Create the Helix API-key secret</a></li>
+        <li><a href="#install">Install with Helm</a></li>
+        <li><a href="#point">Point your apps at the gateway</a></li>
+        <li><a href="#verify">Verify telemetry is flowing</a></li>
+        <li><a href="#options">Options &amp; flags</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ol>
+    </div>
+
+    <h2 id="generate"><span class="num">1</span>Generate &amp; download the chart</h2>
+    <p>
+      In the configurator&rsquo;s <strong>Generate</strong> step (or the dashboard&rsquo;s
+      <em>Generate&nbsp;Kubernetes&nbsp;deployment</em> action), choose whether to include the local viewer,
+      then click <strong>Download chart (.zip)</strong>. Unzip it and run the rest of these steps from the
+      folder that now holds <code>helix-otel/</code>:
+    </p>
+    <pre><code>unzip helix-otel-chart.zip
+cd helix-otel-chart   # the folder containing helix-otel/</code></pre>
+    <p class="muted">
+      The chart is pre-wired from your saved configuration: your <code>HELIX_ENDPOINT</code> and
+      <code>X_SOURCE</code> are baked into <code>values.yaml</code>, and your live collector pipeline becomes
+      the gateway&rsquo;s ConfigMap. Your API key is <strong>never</strong> written into the chart — it is
+      supplied at install time (next step).
+    </p>
+
+    <h2 id="secret"><span class="num">2</span>Create the Helix API-key secret</h2>
+    <p>
+      Create a Kubernetes Secret holding your Helix API key. The chart references it by name, so the key
+      stays out of the chart files and your version control:
+    </p>
+    <pre><code>kubectl create secret generic helix-key \
+  --from-literal=HELIX_API_KEY='&lt;TenantID&gt;::&lt;AccessKey&gt;::&lt;SecretKey&gt;'</code></pre>
+    <p class="muted">
+      The configurator pre-fills this command with your live key (run it locally; it&rsquo;s never sent
+      anywhere). If you&rsquo;re generating the chart for someone else, tick
+      <em>&ldquo;Generating this for someone else (omit my key)&rdquo;</em> and the command ships with a
+      placeholder for them to fill in.
+    </p>
+    <div class="callout">
+      <div class="label">Already manage secrets your way?</div>
+      Point the chart at an existing Secret instead of creating one:
+      <code>--set helix.existingSecret=&lt;your-secret-name&gt;</code> (it must expose a
+      <code>HELIX_API_KEY</code> key).
+    </div>
+
+    <h2 id="install"><span class="num">3</span>Install with Helm</h2>
+    <pre><code>helm install helix ./helix-otel --set helix.existingSecret=helix-key</code></pre>
+    <p>Install into a specific namespace by adding <code>-n &lt;namespace&gt;</code> (create it first if needed):</p>
+    <pre><code>kubectl create namespace observability
+helm install helix ./helix-otel -n observability \
+  --set helix.existingSecret=helix-key</code></pre>
+    <p class="muted">
+      This brings up the gateway <code>Deployment</code> + <code>Service</code> (named
+      <code>helix-gateway</code>, listening on <code>4317</code>/<code>4318</code> with metrics on
+      <code>8888</code>), and — unless you disabled it — the local viewer
+      (<code>helix-viewer</code>) on a small PVC.
+    </p>
+
+    <h2 id="point"><span class="num">4</span>Point your apps at the gateway</h2>
+    <p>
+      A Kubernetes Service gives the gateway a stable in-cluster DNS name — no bridging required. Point your
+      instrumented apps (or your own collector) at it.
+    </p>
+
+    <h3>Option A · App sends OTLP directly</h3>
+    <p>Set this on your application&rsquo;s Deployment (replace <code>&lt;namespace&gt;</code> with where you installed the chart):</p>
+    <pre><code>OTEL_EXPORTER_OTLP_ENDPOINT=http://helix-gateway.&lt;namespace&gt;.svc.cluster.local:4318</code></pre>
+    <p class="faint">Apps running in the gateway&rsquo;s own namespace can use the short form <code>http://helix-gateway:4318</code>.</p>
+
+    <h3>Option B · You run your own collector</h3>
+    <p>Add the gateway as an exporter in your collector&rsquo;s ConfigMap, then roll it out:</p>
+    <pre><code>exporters:
+  otlphttp/helix_gateway:
+    endpoint: "http://helix-gateway.&lt;namespace&gt;.svc.cluster.local:4318"
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:  { exporters: [..., otlphttp/helix_gateway] }
+    metrics: { exporters: [..., otlphttp/helix_gateway] }
+    logs:    { exporters: [..., otlphttp/helix_gateway] }</code></pre>
+    <pre><code>kubectl rollout restart deployment/&lt;your-collector&gt;</code></pre>
+
+    <h3>Onboarding more than one app?</h3>
+    <p>
+      The gateway uses a shared <code>X-Source</code> header for everything it forwards. To keep apps
+      separate in Helix, give each one a distinct <code>service.namespace</code> so they appear as individual
+      OTel Namespaces rolling up to one Business Service:
+    </p>
+    <pre><code>OTEL_SERVICE_NAME=&lt;service-name&gt;
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=&lt;app&gt;,deployment.environment=&lt;env&gt;</code></pre>
+
+    <h2 id="verify"><span class="num">5</span>Verify telemetry is flowing</h2>
+    <p>The configurator is generate-only — it doesn&rsquo;t reach into your cluster — so verify from your own <code>kubectl</code> and in Helix.</p>
+    <h3>Gateway pods are up</h3>
+    <pre><code>kubectl get pods -l app.kubernetes.io/part-of=helix-otel -n &lt;namespace&gt;</code></pre>
+    <h3>Watch it locally (if you included the viewer)</h3>
+    <pre><code>kubectl port-forward svc/helix-viewer 3001:3001 -n &lt;namespace&gt;</code></pre>
+    <p class="faint">Then open <code>http://localhost:3001/otel-data</code>.</p>
+    <h3>See it in Helix</h3>
+    <p>Open your tenant&rsquo;s <strong>OTel Namespace Overview</strong> dashboard — traces, metrics, and logs from your apps should appear within a couple of minutes of pointing them at the gateway.</p>
+
+    <h2 id="options"><span class="num">★</span>Options &amp; flags</h2>
+    <ul>
+      <li><strong>Local viewer</strong> — on by default (a Deployment + PVC). Disable it with <code>--set viewer.enabled=false</code>, or untick it before downloading.</li>
+      <li><strong>Existing secret</strong> — <code>--set helix.existingSecret=&lt;name&gt;</code> to reference a Secret you manage yourself.</li>
+      <li><strong>Override the baked endpoint/source</strong> at install — <code>--set helix.endpoint=… --set helix.xSource=…</code>.</li>
+      <li><strong>OpenTelemetry Operator flavor</strong> — <em>coming soon</em>: an <code>OpenTelemetryCollector</code> CR + zero-code auto-instrumentation, for clusters that already run the Operator.</li>
+    </ul>
+
+    <h2 id="troubleshooting"><span class="num">?</span>Troubleshooting</h2>
+    <h3>Viewer pod stuck in <code>ImagePullBackOff</code> on a local cluster</h3>
+    <p>The viewer uses the local configurator image. On <code>kind</code>/<code>minikube</code>, load it into the cluster first:</p>
+    <pre><code>kind load docker-image helix-configurator:latest
+# or:
+minikube image load helix-configurator:latest</code></pre>
+    <div class="callout warn">
+      <div class="label">OpenShift / restricted Pod Security</div>
+      The gateway runs fully non-root and passes the restricted Pod Security Standard. The local viewer
+      image currently runs as root — on OpenShift or a <code>restricted</code>-PSA namespace it needs a
+      non-root image rebuild or a namespace exception. If that&rsquo;s a blocker, install with
+      <code>--set viewer.enabled=false</code> and use Helix (or port-forward from a permissive namespace)
+      to view data.
+    </div>
+
+  </div>
+</body>
+</html>

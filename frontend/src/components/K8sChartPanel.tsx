@@ -62,7 +62,7 @@ export const K8sChartPanel: React.FC = () => {
           <div className="flex items-center justify-between">
             <p className="text-tiny uppercase tracking-wide text-gray-500">Install steps</p>
             <a
-              href="https://github.com/jammicha/HelixConfigurator#generate-a-kubernetes-chart"
+              href="/k8s-walkthrough.html"
               target="_blank" rel="noopener noreferrer"
               className="text-tiny text-[#8b7cf6] hover:underline"
             >Full walkthrough ↗</a>
