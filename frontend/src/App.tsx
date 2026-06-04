@@ -16,6 +16,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { ToastStack } from './components/ToastStack';
 import { ConfirmDialog, ConfirmRequest } from './components/ConfirmDialog';
 import { TemplatesModal } from './components/TemplatesModal';
+import { K8sChartModal } from './components/K8sChartModal';
 import { RawMetricsModal } from './components/RawMetricsModal';
 import { Stepper } from './components/wizard/Stepper';
 import { Step1 } from './components/wizard/Step1';
@@ -127,6 +128,7 @@ const App = () => {
   // Wizard redesign — Step 3 + Step 4 state.
   const [gatewayConfigOpen, setGatewayConfigOpen] = useState(false);
   const [gatewayConfigText, setGatewayConfigText] = useState<string>('');
+  const [showK8sChart, setShowK8sChart] = useState(false);
   const [step3Tab, setStep3Tab] = useState<'detected' | 'manual'>('detected');
   const [k8sApplying, setK8sApplying] = useState<boolean>(false);
   const [k8sApplyResult, setK8sApplyResult] = useState<'applied' | 'failed' | null>(null);
@@ -1435,6 +1437,7 @@ const App = () => {
                 onConfigChange={(v) => { setConfig(v); clearEditorMarkers(); }}
                 editorRef={editorRef}
                 onSaveShortcut={() => handleUpdateConfigRef.current()}
+                onOpenK8sChart={() => setShowK8sChart(true)}
               />
             </>
           )}
@@ -1471,6 +1474,7 @@ const App = () => {
         onApply={handleApplyTemplate}
         onClose={closeTemplates}
       />
+      <K8sChartModal isOpen={showK8sChart} onClose={() => setShowK8sChart(false)} />
 
       <RawMetricsModal
         isOpen={isRawMetricsOpen}
