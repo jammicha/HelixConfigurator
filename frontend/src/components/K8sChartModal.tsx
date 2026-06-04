@@ -73,8 +73,21 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
           {preview && !loading && (
             <>
+              <div className="flex items-center justify-between">
+                <p className="text-tiny uppercase tracking-wide text-gray-500">Install steps</p>
+                <a
+                  href="https://github.com/jammicha/HelixConfigurator#generate-a-kubernetes-chart"
+                  target="_blank" rel="noopener noreferrer"
+                  className="text-tiny text-[#8b7cf6] hover:underline"
+                >Full walkthrough ↗</a>
+              </div>
               <div>
-                <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">1 · Create the secret</p>
+                <p className="text-sm text-gray-300">
+                  <span className="text-gray-500">1 ·</span> Download &amp; unzip the chart — click <span className="text-gray-200">Download chart (.zip)</span> below, then <code className="text-tiny bg-gray-1000 px-1 py-0.5 rounded">unzip helix-otel-chart.zip</code>. Run the next steps from the folder that now holds <code className="text-tiny bg-gray-1000 px-1 py-0.5 rounded">helix-otel/</code>.
+                </p>
+              </div>
+              <div>
+                <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">2 · Create the secret</p>
                 <SnippetBlock text={preview.secretCommand} />
                 {preview.keyEmbedded && (
                   <p className="text-tiny text-[#fcd34d] mb-2">
@@ -83,7 +96,7 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 )}
               </div>
               <div>
-                <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">2 · Install the chart</p>
+                <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">3 · Install the chart</p>
                 <SnippetBlock text={preview.installCommand} />
               </div>
               <details>

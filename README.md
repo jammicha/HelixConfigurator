@@ -154,34 +154,44 @@ Grouping namespaces under a Business Service is **AIOps console config, not the 
 
 ## Generate a Kubernetes chart
 
-From the dashboard, **Generate K8s deployment** emits a self-contained Helm chart
-(`helix-otel/`) wired to your Helix tenant from the current config:
+From the dashboard, **Quick actions → Generate Kubernetes deployment** emits a self-contained Helm
+chart (`helix-otel/`) pre-wired to your Helix tenant from the current config. Deploy it in four steps:
 
+**1. Download & unzip** the `.zip` from the dialog — this creates a `helix-otel/` folder; run the
+rest from wherever it unzipped:
 ```bash
-unzip helix-otel-chart.zip
+unzip ~/Downloads/helix-otel-chart.zip
 ```
 
-**Provide the Helix API key** — reference a Secret you create, so the key never passes through Helm:
-
+**2. Create the Secret** with your Helix key. The dialog pre-fills this command with your *actual*
+key (from the configurator's `.env`) so you can copy-paste it — tick *"Generating this for someone
+else"* to get a placeholder instead:
 ```bash
 kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID::AccessKey::SecretKey>'
+```
+
+**3. Install the chart**, referencing that Secret:
+```bash
 helm install helix ./helix-otel --set helix.existingSecret=helix-key
 ```
 
-The **Generate K8s deployment** dialog pre-fills that `kubectl create secret` command with your
-actual key (from the configurator's `.env`) so you can copy-paste it directly — tick *"Generating
-this for someone else"* to get a placeholder instead.
+**4. Verify & view** — wait for the pods, point apps at the gateway, open the local viewer:
+```bash
+kubectl get pods                                 # wait for helix-gateway + helix-viewer = Running
+# apps in-cluster send to:  http://helix-gateway:4318
+kubectl port-forward svc/helix-viewer 3001:3001  # then open http://localhost:3001/otel-data
+```
 
-> The chart also accepts `--set helix.apiKey=…` for throwaway demos, but that value lands in your
-> shell history *and* Helm's in-cluster release storage (`helm get values` reveals it) — prefer
-> `existingSecret`, and in production populate the Secret from a manager (External Secrets / Vault /
-> Sealed Secrets). The chart expects the key under `HELIX_API_KEY` (override with
+> **Secrets:** the chart also accepts `--set helix.apiKey=…` for throwaway demos, but that value
+> lands in your shell history *and* Helm's in-cluster release storage (`helm get values` reveals it)
+> — prefer `existingSecret`, and in production populate the Secret from a manager (External Secrets /
+> Vault / Sealed Secrets). The chart expects the key under `HELIX_API_KEY` (override with
 > `--set helix.existingSecretKey=…`).
 
-Point apps at `http://helix-gateway:4318`. The local viewer (on by default) is reached with
-`kubectl port-forward svc/helix-viewer 3001:3001`. On a local cluster, load the viewer image
-once with `kind load docker-image helix-configurator:latest` (or `minikube image load …`).
-Disable the viewer by unchecking it before download (or `--set viewer.enabled=false`).
+> **Viewer image:** the viewer runs your `helix-configurator:latest` image. Docker Desktop and
+> OrbStack Kubernetes share the local image store, so a `docker build` is enough. On kind/minikube,
+> load it first — `kind load docker-image helix-configurator:latest` (or `minikube image load …`).
+> Disable the viewer entirely by unticking it before download (or `--set viewer.enabled=false`).
 
 ## Features
 
