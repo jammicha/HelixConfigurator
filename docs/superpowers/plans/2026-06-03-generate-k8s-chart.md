@@ -61,7 +61,9 @@ processors:
 exporters:
   otlphttp/bmchelix:
     endpoint: \${env:HELIX_ENDPOINT}
-    headers: { X-Api-Key: \${env:HELIX_API_KEY}, X-Source: \${env:X_SOURCE} }
+    headers:
+      X-Api-Key: \${env:HELIX_API_KEY}
+      X-Source: \${env:X_SOURCE}
   otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs
@@ -345,7 +347,8 @@ import { buildChartFiles } from '../k8sChart/index.js';
 
 const COLLECTOR = `
 exporters:
-  otlphttp/bmchelix: { endpoint: \${env:HELIX_ENDPOINT} }
+  otlphttp/bmchelix:
+    endpoint: \${env:HELIX_ENDPOINT}
   otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs
@@ -781,7 +784,8 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..'); // worktree root (cont
 
 const FIXTURE = `
 exporters:
-  otlphttp/bmchelix: { endpoint: \${env:HELIX_ENDPOINT} }
+  otlphttp/bmchelix:
+    endpoint: \${env:HELIX_ENDPOINT}
   otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs
