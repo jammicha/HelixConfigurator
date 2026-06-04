@@ -11,18 +11,17 @@ const { buildChartFiles, streamChartArchive } = require('../k8sChart');
 
 const KEY_PLACEHOLDER = '<TenantID::AccessKey::SecretKey>';
 
-// Build the create-secret + install command pair shown in the dashboard. When not
-// in handoff mode and a live key is configured, the actual key is embedded so the
-// user can copy-paste without hunting for it. The key only ever appears in this
-// command (rendered in the authed UI) — never in the chart values or the zip.
-function buildInstallCommand({ handoff }) {
+// Build the two install commands shown in the dashboard as separate, individually
+// copyable steps. When not in handoff mode and a live key is configured, the actual
+// key is embedded in the create-secret command so the user can copy-paste without
+// hunting for it. The key only ever appears there (rendered in the authed UI) —
+// never in the chart values or the downloaded zip.
+function buildCommands({ handoff }) {
   const key = handoff ? KEY_PLACEHOLDER : (process.env.HELIX_API_KEY || KEY_PLACEHOLDER);
-  return [
-    '# 1) Create a Secret with your Helix key:',
-    `kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='${key}'`,
-    '# 2) Install the chart, referencing that Secret:',
-    'helm install helix ./helix-otel --set helix.existingSecret=helix-key',
-  ].join('\n');
+  return {
+    secretCommand: `kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='${key}'`,
+    installCommand: 'helm install helix ./helix-otel --set helix.existingSecret=helix-key',
+  };
 }
 
 // Recursively list all files under <projectRoot>/helix-otel/ as relative paths
@@ -90,11 +89,13 @@ function register(app, { configPath, projectRoot }) {
     const files = await generate(req, res);
     if (!files) return;
     const handoff = wantsHandoff(req);
+    const { secretCommand, installCommand } = buildCommands({ handoff });
     res.json({
       viewerEnabled: wantsViewer(req),
       values: files.values,
       gatewayConfig: files.gatewayConfig,
-      installCommand: buildInstallCommand({ handoff }),
+      secretCommand,
+      installCommand,
       keyEmbedded: !handoff && !!process.env.HELIX_API_KEY,
       files: listChartFiles(projectRoot),
     });

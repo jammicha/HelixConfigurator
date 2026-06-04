@@ -3,7 +3,7 @@ import { Download, Loader2, X } from 'lucide-react';
 import { useEscClose } from '../hooks/useEscClose';
 import { SnippetBlock } from './SnippetBlock';
 
-type Preview = { values: string; gatewayConfig: string; installCommand: string; files: string[]; keyEmbedded: boolean };
+type Preview = { values: string; gatewayConfig: string; secretCommand: string; installCommand: string; files: string[]; keyEmbedded: boolean };
 type Props = { isOpen: boolean; onClose: () => void };
 
 // "Generate Kubernetes deployment" — previews and downloads a self-contained
@@ -74,13 +74,17 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {preview && !loading && (
             <>
               <div>
-                <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">Install</p>
-                <SnippetBlock text={preview.installCommand} />
+                <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">1 · Create the secret</p>
+                <SnippetBlock text={preview.secretCommand} />
                 {preview.keyEmbedded && (
                   <p className="text-tiny text-[#fcd34d] mb-2">
-                    ⚠ This command contains your live Helix key — it runs locally and is never written into the downloaded chart.
+                    ⚠ Contains your live Helix key — it runs locally and is never written into the downloaded chart.
                   </p>
                 )}
+              </div>
+              <div>
+                <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">2 · Install the chart</p>
+                <SnippetBlock text={preview.installCommand} />
               </div>
               <details>
                 <summary className="text-sm text-gray-300 cursor-pointer select-none">Preview values.yaml</summary>
