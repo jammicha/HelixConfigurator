@@ -1,6 +1,6 @@
 # Generate K8s chart — Phase 1 design
 
-> **Spec** · Created 2026-06-03 · Status: **Draft for review**
+> **Spec** · Created 2026-06-03 · Status: **Implemented** (feat/generate-k8s-chart)
 > Decision: [`2026-06-03-kubernetes-deployment-decision-design.md`](2026-06-03-kubernetes-deployment-decision-design.md) (approved)
 > Source brief: [`docs/handoffs/01-local-to-kubernetes.md`](../../handoffs/01-local-to-kubernetes.md)
 > Build branch: `feat/generate-k8s-chart`
