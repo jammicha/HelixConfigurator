@@ -188,10 +188,20 @@ kubectl port-forward svc/helix-viewer 3001:3001  # then open http://localhost:30
 > Vault / Sealed Secrets). The chart expects the key under `HELIX_API_KEY` (override with
 > `--set helix.existingSecretKey=…`).
 
-> **Viewer image:** the viewer runs your `helix-configurator:latest` image. Docker Desktop and
-> OrbStack Kubernetes share the local image store, so a `docker build` is enough. On kind/minikube,
-> load it first — `kind load docker-image helix-configurator:latest` (or `minikube image load …`).
-> Disable the viewer entirely by unticking it before download (or `--set viewer.enabled=false`).
+> **Viewer image:** the viewer runs a locally-built `helix-configurator:latest` — nothing publishes
+> it to a registry, so a local cluster can't pull it and the pod `ImagePullBackOff`s (it tries
+> `docker.io/library/helix-configurator:latest`, which 404s) until the image is loaded into *that
+> cluster's* store. Since the viewer is optional, the simplest fix is to leave it out —
+> `--set viewer.enabled=false` (or untick it before download): the gateway is the real payload, and a
+> live Helix deployment shows telemetry in Helix's own UI, not this bundled viewer. To run the local
+> viewer anyway, load the image into your cluster's runtime:
+> - **kind:** `kind load docker-image helix-configurator:latest`
+> - **minikube:** `minikube image load helix-configurator:latest`
+> - **Docker Desktop:** its newer Kubernetes runs on containerd (node `desktop-control-plane`) and
+>   won't see a plain `docker build`. Enable **Settings → General → "Use containerd for pulling and
+>   storing images"**, then rebuild `docker build -t helix-configurator:latest .` so the cluster can
+>   use locally-built images.
+> - **OrbStack:** shares its image store with its Kubernetes, so a `docker build` is enough.
 
 ## Features
 
