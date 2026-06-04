@@ -20,11 +20,12 @@ exporters:
   otlphttp/helix_local_viewer:
     traces_endpoint: http://helix-configurator:3001/api/otlp/traces
     logs_endpoint: http://helix-configurator:3001/api/otlp/logs
+    metrics_endpoint: http://helix-configurator:3001/api/otlp/metrics
     tls: { insecure: true }
 service:
   pipelines:
     traces:  { receivers: [otlp], processors: [batch], exporters: [otlphttp/bmchelix, otlphttp/helix_local_viewer] }
-    metrics: { receivers: [otlp], processors: [batch], exporters: [otlphttp/bmchelix] }
+    metrics: { receivers: [otlp], processors: [batch], exporters: [otlphttp/bmchelix, otlphttp/helix_local_viewer] }
     logs:    { receivers: [otlp], processors: [batch], exporters: [otlphttp/bmchelix, otlphttp/helix_local_viewer] }
 `;
 
@@ -34,6 +35,7 @@ describe('transformCollectorConfig', () => {
     const v = out.exporters[VIEWER_EXPORTER_KEY];
     expect(v.traces_endpoint).toBe('http://helix-viewer:3001/api/otlp/traces');
     expect(v.logs_endpoint).toBe('http://helix-viewer:3001/api/otlp/logs');
+    expect(v.metrics_endpoint).toBe('http://helix-viewer:3001/api/otlp/metrics');
     // Helix exporter and pipelines untouched.
     expect(out.exporters['otlphttp/bmchelix'].endpoint).toBe('${env:HELIX_ENDPOINT}');
     expect(out.service.pipelines.traces.exporters).toContain(VIEWER_EXPORTER_KEY);
