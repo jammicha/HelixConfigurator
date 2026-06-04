@@ -14,8 +14,6 @@ type Props = {
   // Invoked by the editor's Ctrl/Cmd+S binding. Kept separate from onSave so
   // the caller can route it through a ref and avoid a stale-closure save.
   onSaveShortcut: () => void;
-  // Opens the "Generate Kubernetes deployment" modal.
-  onOpenK8sChart: () => void;
 };
 
 // Collapsible Monaco editor for the gateway YAML, with Load Template / Save
@@ -30,7 +28,6 @@ export const GatewayConfigEditor = ({
   onConfigChange,
   editorRef,
   onSaveShortcut,
-  onOpenK8sChart,
 }: Props) => (
   <div className={`adapt-card flex flex-col ${isOpen ? 'h-[500px]' : ''}`}>
     <div className="flex items-center justify-between">
@@ -43,12 +40,6 @@ export const GatewayConfigEditor = ({
       </button>
       {isOpen && (
         <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-          <button
-            onClick={onOpenK8sChart}
-            className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded text-tiny font-semibold transition-colors"
-          >
-            Generate K8s deployment
-          </button>
           <button
             onClick={onLoadTemplate}
             className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-4 py-1.5 rounded text-sm font-semibold transition-colors"

@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, Stethoscope, ClipboardList, Boxes, Loader2 } from 'lucide-react';
+import { RefreshCw, Stethoscope, ClipboardList, Boxes, Ship, Loader2 } from 'lucide-react';
 
 type Props = {
   onReverifyTelemetry: () => void;
@@ -14,6 +14,9 @@ type Props = {
 
   // Services toggle state — label + active styling.
   isServicesOpen: boolean;
+
+  // Opens the "Generate Kubernetes deployment" modal.
+  onGenerateK8s: () => void;
 };
 
 export const QuickActions: React.FC<Props> = ({
@@ -25,6 +28,7 @@ export const QuickActions: React.FC<Props> = ({
   isTogglingDiag,
   isDiagnosticEnabled,
   isServicesOpen,
+  onGenerateK8s,
 }) => {
   const baseBtn =
     'border py-2.5 px-3 rounded text-sm font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed';
@@ -57,6 +61,9 @@ export const QuickActions: React.FC<Props> = ({
         </button>
         <button onClick={onOpenServices} className={`${baseBtn} ${isServicesOpen ? active : idle}`}>
           <Boxes className="w-4 h-4" /> {isServicesOpen ? 'Hide services' : 'Discovered services'}
+        </button>
+        <button onClick={onGenerateK8s} className={`${baseBtn} ${idle} col-span-4`}>
+          <Ship className="w-4 h-4" /> Generate Kubernetes deployment
         </button>
       </div>
     </div>

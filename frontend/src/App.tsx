@@ -1356,6 +1356,7 @@ const App = () => {
                   row below so they don't compete with primary-action space. */}
               <QuickActions
                 onReverifyTelemetry={handleQuickVerifyTelemetry}
+                onGenerateK8s={() => setShowK8sChart(true)}
                 onToggleDiagnostics={handleToggleDiagnostics}
                 onCopySupportBundle={handleCopySupportBundle}
                 onOpenServices={handleOpenServices}
@@ -1437,7 +1438,6 @@ const App = () => {
                 onConfigChange={(v) => { setConfig(v); clearEditorMarkers(); }}
                 editorRef={editorRef}
                 onSaveShortcut={() => handleUpdateConfigRef.current()}
-                onOpenK8sChart={() => setShowK8sChart(true)}
               />
             </>
           )}
