@@ -1,5 +1,5 @@
 # Build stage for Frontend
-FROM node:20-slim AS frontend-build
+FROM node:22-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm install
@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Final stage
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /app
 COPY backend/package*.json ./backend/
 RUN apt-get update && apt-get install -y python3 make g++ && \

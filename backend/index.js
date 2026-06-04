@@ -5,7 +5,7 @@ const path = require('path');
 const Docker = require('dockerode');
 const { OtelStore } = require('./otelStore');
 const { makeContainerLogs } = require('./util');
-require('dotenv').config({ path: path.join(__dirname, '../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
 const VERSION = require('./package.json').version;
 
