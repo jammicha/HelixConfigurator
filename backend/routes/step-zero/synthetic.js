@@ -72,8 +72,8 @@ const defaultReadEnv = () => {
 
 // Real sender: POST traces/logs/metrics to either the gateway (full
 // pipeline → Helix + local viewer) or the configurator's own ingest
-// endpoint (local fallback). Metrics are silently skipped on the local
-// path — the local viewer doesn't have a metrics endpoint today.
+// endpoint (local fallback). Metrics now flow on both paths — the local
+// viewer's /api/otlp/metrics feeds the trace drawer's Resources panel.
 const defaultSend = async ({ destination, payload }) => {
   const isGateway = destination === 'gateway';
   const tracesUrl = isGateway
@@ -82,7 +82,7 @@ const defaultSend = async ({ destination, payload }) => {
   const logsUrl = isGateway
     ? `http://${TARGET_CONTAINER()}:4318/v1/logs`
     : `${SELF_BASE()}/api/otlp/logs`;
-  const metricsUrl = isGateway ? `http://${TARGET_CONTAINER()}:4318/v1/metrics` : null;
+  const metricsUrl = isGateway ? `http://${TARGET_CONTAINER()}:4318/v1/metrics` : `${SELF_BASE()}/api/otlp/metrics`;
 
   const headers = { 'Content-Type': 'application/json' };
   // Best-effort: each signal posts independently. A trace landing without

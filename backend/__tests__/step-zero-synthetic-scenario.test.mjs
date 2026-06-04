@@ -390,3 +390,40 @@ describe('stripe retry-storm error RCA enrichment', () => {
     expect(checked).toBeGreaterThan(5); // ~2% of 2000 ≈ 40
   });
 });
+
+describe('generateTrace process.* resource metrics (Resources panel)', () => {
+  const svcOf = (rm) => rm.resource.attributes.find((a) => a.key === 'service.name')?.value?.stringValue;
+  const nsOf = (rm) => rm.resource.attributes.find((a) => a.key === 'service.namespace')?.value?.stringValue;
+  const metricNames = (rm) => rm.scopeMetrics.flatMap((sm) => sm.metrics).map((m) => m.name);
+
+  it('emits process.cpu.utilization (0..1) + process.memory.usage (bytes) for root service checkout-web', () => {
+    const t = generateTrace();
+    const cw = t.metrics.resourceMetrics.find(
+      (rm) => svcOf(rm) === 'checkout-web' && metricNames(rm).includes('process.cpu.utilization'),
+    );
+    expect(cw, 'checkout-web should carry a process.* resource').toBeTruthy();
+    expect(nsOf(cw)).toBe('Helix-Configurator-Demo'); // the join namespace
+
+    const byName = Object.fromEntries(cw.scopeMetrics.flatMap((sm) => sm.metrics).map((m) => [m.name, m]));
+    const cpuDp = byName['process.cpu.utilization'].gauge.dataPoints[0];
+    const cpu = cpuDp.asDouble ?? Number(cpuDp.asInt);
+    expect(cpu).toBeGreaterThanOrEqual(0);
+    expect(cpu).toBeLessThanOrEqual(1);
+
+    const memDp = byName['process.memory.usage'].gauge.dataPoints[0];
+    expect(memDp.asDouble ?? Number(memDp.asInt)).toBeGreaterThan(0);
+
+    // Timestamped ~now so it lands in the trace's ±90s window / live view.
+    const tsMs = Number(BigInt(cpuDp.timeUnixNano) / 1_000_000n);
+    expect(Math.abs(tsMs - Date.now())).toBeLessThan(60_000);
+  });
+
+  it('round-trips through extractMetricPoints to a checkout-web series (real consumer + join key)', async () => {
+    const otel = (await import('../otelStore.js')).default;
+    const points = otel.extractMetricPoints(generateTrace().metrics);
+    const key = otel.metricResourceKey('Helix-Configurator-Demo', 'checkout-web');
+    const cw = points.filter((p) => p.resourceKey === key);
+    expect(cw.some((p) => p.metricName === 'process.cpu.utilization')).toBe(true);
+    expect(cw.some((p) => p.metricName === 'process.memory.usage')).toBe(true);
+  });
+});

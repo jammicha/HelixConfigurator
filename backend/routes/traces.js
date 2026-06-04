@@ -336,6 +336,20 @@ function register(app, { otelStore, docker }) {
     res.json(trace);
   });
 
+  // Per-trace resource utilization (CPU/mem) for the Resources panel. Joins the
+  // trace's service to the in-memory metrics ring over the trace window plus a
+  // context pad. 404 when the trace is unknown; `empty: true` when the service
+  // emitted no process.* in the window (the panel renders an empty state).
+  app.get('/api/traces/:traceId/resources', (req, res) => {
+    const { traceId } = req.params;
+    if (!/^[0-9a-fA-F]{1,64}$/.test(traceId)) {
+      return res.status(400).json({ error: 'Invalid trace id' });
+    }
+    const resources = otelStore.getResourceSeries(traceId.toLowerCase());
+    if (!resources) return res.status(404).json({ error: 'Not found' });
+    res.json(resources);
+  });
+
   app.get('/api/logs', (req, res) => {
     const { severity, q, sinceMs, untilMs, limit } = req.query;
     res.json({

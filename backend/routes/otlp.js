@@ -3,7 +3,7 @@
 // the gateway speaks plain HTTP from inside the helix-bridge network, and
 // requiring the UI session cookie would block it.
 const zlib = require('zlib');
-const { extractSpans, extractLogRecords } = require('../otelStore');
+const { extractSpans, extractLogRecords, extractMetricPoints } = require('../otelStore');
 
 // Decode an OTLP/HTTP request body. The gateway is configured for JSON +
 // no compression, but we still tolerate gzip in case the user wires their
@@ -54,6 +54,23 @@ function register(app, { otelStore }) {
       res.json({});
     } catch (e) {
       console.error('OTLP logs ingest error:', e.message);
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // POST /api/otlp/metrics — receives OTLP metrics from helix-gateway's
+  // metrics-pipeline fan-out. Only allowlisted process.* runtime metrics are
+  // kept (extractMetricPoints), landing in an in-memory ring the trace drawer's
+  // Resources panel queries by service identity. Public, like the other OTLP
+  // routes — the gateway speaks plain HTTP from inside helix-bridge.
+  app.post('/api/otlp/metrics', (req, res) => {
+    try {
+      const body = decodeOtlpBody(req);
+      const points = extractMetricPoints(body);
+      otelStore.ingestMetricPoints(points);
+      res.json({});
+    } catch (e) {
+      console.error('OTLP metrics ingest error:', e.message);
       res.status(400).json({ error: e.message });
     }
   });
