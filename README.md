@@ -161,21 +161,17 @@ From the dashboard, **Generate K8s deployment** emits a self-contained Helm char
 unzip helix-otel-chart.zip
 ```
 
-**Provide the Helix API key — one of two ways:**
+**Provide the Helix API key** — reference a Secret you create, so the key never passes through Helm:
 
 ```bash
-# Recommended — reference a Secret you create, so the key never passes through Helm:
 kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID::AccessKey::SecretKey>'
 helm install helix ./helix-otel --set helix.existingSecret=helix-key
-
-# Quick demo alternative — pass the key through Helm:
-helm install helix ./helix-otel --set helix.apiKey=<TenantID::AccessKey::SecretKey>
 ```
 
-> `--set helix.apiKey` is convenient, but the value lands in your shell history *and* in Helm's
-> in-cluster release storage (`helm get values` reveals it). For anything past a throwaway demo use
-> `existingSecret` — and in production, populate that Secret from a manager (External Secrets /
-> Vault / Sealed Secrets). The chart expects the key under `HELIX_API_KEY` (override with
+> The chart also accepts `--set helix.apiKey=…` for throwaway demos, but that value lands in your
+> shell history *and* Helm's in-cluster release storage (`helm get values` reveals it) — prefer
+> `existingSecret`, and in production populate the Secret from a manager (External Secrets / Vault /
+> Sealed Secrets). The chart expects the key under `HELIX_API_KEY` (override with
 > `--set helix.existingSecretKey=…`).
 
 Point apps at `http://helix-gateway:4318`. The local viewer (on by default) is reached with
