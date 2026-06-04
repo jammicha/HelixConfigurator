@@ -1246,7 +1246,7 @@ const App = () => {
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
           {!isSetupComplete ? (
             !target ? (
-              <TargetSelector onSelect={(t) => setTarget(t)} />
+              <TargetSelector onSelect={(t) => { setTarget(t); setSetupStep(1); }} />
             ) : (
             <div className="max-w-5xl mx-auto space-y-4">
               <h1 className="text-xl font-semibold text-center text-gray-100">Welcome to Helix Configurator</h1>

@@ -30,7 +30,7 @@ export const Step3K8s: React.FC<Props> = ({ onBack, onNext }) => {
           className="mt-1 w-full max-w-xs bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 text-sm focus:outline-none focus:border-link block"
           placeholder="default"
         />
-        <p className="text-tiny text-gray-500 mt-1">The namespace you <code className="font-mono">helm install</code>ed into (the <code className="font-mono">-n</code> flag).</p>
+        <p className="text-tiny text-gray-500 mt-1">Installed into a non-default namespace? Enter it here (the <code className="font-mono">-n</code> flag you passed to <code className="font-mono">helm install</code>).</p>
       </div>
 
       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Option A · App sends OTLP directly</p>
