@@ -27,7 +27,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@v7
         with:
           images: ghcr.io/jammicha/helixconfigurator
           tags: |
