@@ -1,0 +1,17 @@
+{{- if .Values.viewer.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.viewer.name }}-data
+  labels:
+    {{- include "helix-otel.labels" . | nindent 4 }}
+    {{- include "helix-otel.viewer.selectorLabels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.viewer.persistence.size | quote }}
+  {{- if .Values.viewer.persistence.storageClass }}
+  storageClassName: {{ .Values.viewer.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}
