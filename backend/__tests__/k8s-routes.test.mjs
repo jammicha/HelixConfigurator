@@ -95,5 +95,14 @@ describe('GET /api/k8s/chart', () => {
     expect(yaml.load(zip.getEntry('helix-otel/values.yaml').getData().toString())).toBeTruthy();
     expect(yaml.load(zip.getEntry('helix-otel/config/gateway-collector.yaml').getData().toString())).toBeTruthy();
     expect(yaml.load(zip.getEntry('helix-otel/Chart.yaml').getData().toString()).name).toBe('helix-otel');
+
+    // Preview file list must match the zip's file entries exactly.
+    const fileEntries = new AdmZip(res.body).getEntries()
+      .filter(e => !e.isDirectory)
+      .map(e => e.entryName)
+      .sort();
+    const preview = await request(makeApp()).get('/api/k8s/chart/preview?viewer=true');
+    expect(preview.body.files).toContain('helix-otel/templates/gateway-deployment.yaml');
+    expect(preview.body.files.slice().sort()).toEqual(fileEntries);
   });
 });

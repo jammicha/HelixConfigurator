@@ -3,33 +3,40 @@
 // it as JSON) built from live configurator state. Generate-only — no cluster calls.
 // Reuses the archiver streaming pattern from routes/demo.js. Registered under
 // requireAuth (an authed dashboard action).
-const fs = require('fs').promises;
+const fsPromises = require('fs').promises;
+const fsSync = require('fs');
+const path = require('path');
 const archiver = require('archiver');
 const { buildChartFiles, streamChartArchive } = require('../k8sChart');
 
 const INSTALL_COMMAND = 'helm install helix ./helix-otel --set helix.apiKey=<TenantID::AccessKey::SecretKey>';
-const CHART_FILES = [
-  'helix-otel/Chart.yaml',
-  'helix-otel/values.yaml',
-  'helix-otel/config/gateway-collector.yaml',
-  'helix-otel/templates/gateway-configmap.yaml',
-  'helix-otel/templates/gateway-deployment.yaml',
-  'helix-otel/templates/gateway-service.yaml',
-  'helix-otel/templates/secret.yaml',
-  'helix-otel/templates/viewer-deployment.yaml',
-  'helix-otel/templates/viewer-service.yaml',
-  'helix-otel/templates/viewer-pvc.yaml',
-];
+
+// Recursively list all files under <projectRoot>/helix-otel/ as relative paths
+// like `helix-otel/Chart.yaml`, then append the two generated-file paths.
+// Computed once per register() call since the skeleton is static.
+function listChartFiles(projectRoot) {
+  const skeletonRoot = path.join(projectRoot, 'helix-otel');
+  const entries = fsSync.readdirSync(skeletonRoot, { recursive: true });
+  const skeletonFiles = entries
+    .map(e => path.join('helix-otel', e).replace(/\\/g, '/'))
+    .filter(p => fsSync.statSync(path.join(projectRoot, p)).isFile());
+  const generated = [
+    'helix-otel/values.yaml',
+    'helix-otel/config/gateway-collector.yaml',
+  ];
+  return [...new Set([...skeletonFiles, ...generated])].sort();
+}
 
 const wantsViewer = (req) => String(req.query.viewer ?? 'true').toLowerCase() !== 'false';
 
 function register(app, { configPath, projectRoot }) {
+  const chartFiles = listChartFiles(projectRoot);
   // Build the two generated files from live state, or send an error response.
   // Returns null after responding on failure.
   async function generate(req, res) {
     let collectorYaml;
     try {
-      collectorYaml = await fs.readFile(configPath, 'utf8');
+      collectorYaml = await fsPromises.readFile(configPath, 'utf8');
     } catch {
       res.status(500).json({ error: 'Failed to read gateway config' });
       return null;
@@ -59,7 +66,7 @@ function register(app, { configPath, projectRoot }) {
       values: files.values,
       gatewayConfig: files.gatewayConfig,
       installCommand: INSTALL_COMMAND,
-      files: CHART_FILES,
+      files: chartFiles,
     });
   });
 
