@@ -21,6 +21,7 @@ type Props = {
   testConnectionResult: { status: string; message: string; remediation?: string; httpStatus?: number; latencyMs?: number } | null;
   testingConnection: boolean;
   primaryLabel?: string;
+  heading?: string;
 };
 
 // Per-field validation. Returns null when valid, or a short user-facing error.
@@ -60,6 +61,7 @@ export const Step1: React.FC<Props> = ({
   testConnectionResult,
   testingConnection,
   primaryLabel = 'Save & initialize →',
+  heading = 'Step 1: Configure helix-gateway',
 }) => {
   const errors = {
     HELIX_ENDPOINT: validateEndpoint(envVars.HELIX_ENDPOINT),
@@ -76,7 +78,7 @@ export const Step1: React.FC<Props> = ({
       >
         New to OpenTelemetry? <span className="font-semibold underline">Start here</span>
       </a>
-      <h2 className="text-lg font-semibold mb-4 text-gray-200">Step 1: Configure helix-gateway</h2>
+      <h2 className="text-lg font-semibold mb-4 text-gray-200">{heading}</h2>
       <div className="space-y-3 mb-4">
         <div className="space-y-1">
           <label htmlFor="helix-endpoint" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">

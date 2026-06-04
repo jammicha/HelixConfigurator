@@ -4,6 +4,7 @@ import { SnippetBlock } from '../SnippetBlock';
 
 type Props = {
   otelDashboardUrl: string | null;
+  namespace: string;
   onBack: () => void;
   onFinishStep: () => void;
 };
@@ -11,7 +12,7 @@ type Props = {
 // Kubernetes Step 4 — "Verify": generate-only can't read the user's cluster, so
 // this is guidance (kubectl / port-forward) plus the universal "see it in Helix"
 // deep-link. No live counters, nothing gates leaving the step.
-export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, onBack, onFinishStep }) => (
+export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, onBack, onFinishStep }) => (
   <div className="adapt-card">
     <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
     <p className="text-sm text-gray-400 mb-4">
@@ -22,11 +23,11 @@ export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, onBack, onFinishSt
     <div className="space-y-5">
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">1 · Gateway pods are up</p>
-        <SnippetBlock text={`kubectl get pods -l app.kubernetes.io/part-of=helix-otel -n <namespace>`} />
+        <SnippetBlock text={`kubectl get pods -l app.kubernetes.io/part-of=helix-otel -n ${namespace}`} />
       </div>
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">2 · Watch it locally (if you included the viewer)</p>
-        <SnippetBlock text={`kubectl port-forward svc/helix-viewer 3001:3001 -n <namespace>`} />
+        <SnippetBlock text={`kubectl port-forward svc/helix-viewer 3001:3001 -n ${namespace}`} />
         <p className="text-tiny text-gray-500 -mt-4">Then open <code className="font-mono">http://localhost:3001/otel-data</code>.</p>
       </div>
       <div>

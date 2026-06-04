@@ -142,6 +142,9 @@ const App = () => {
   const [gatewayConfigOpen, setGatewayConfigOpen] = useState(false);
   const [gatewayConfigText, setGatewayConfigText] = useState<string>('');
   const [showK8sChart, setShowK8sChart] = useState(false);
+  // Gateway namespace the user enters in the K8s "Point apps" step; lifted here
+  // so Step 4's kubectl commands show the same namespace they typed in Step 3.
+  const [k8sNamespace, setK8sNamespace] = useState('default');
   const [step3Tab, setStep3Tab] = useState<'detected' | 'manual'>('detected');
   const [k8sApplying, setK8sApplying] = useState<boolean>(false);
   const [k8sApplyResult, setK8sApplyResult] = useState<'applied' | 'failed' | null>(null);
@@ -1292,6 +1295,7 @@ const App = () => {
               {setupStep === 1 && (
                 <Step1
                   primaryLabel={target === 'kubernetes' ? 'Save & continue →' : 'Save & initialize →'}
+                  heading={target === 'kubernetes' ? 'Step 1: Configure your Helix connection' : 'Step 1: Configure helix-gateway'}
                   envVars={envVars}
                   setEnvVars={setEnvVars}
                   showApiKey={showApiKey}
@@ -1322,7 +1326,7 @@ const App = () => {
               ))}
 
               {setupStep === 3 && (target === 'kubernetes' ? (
-                <Step3K8s onBack={() => setSetupStep(2)} onNext={() => setSetupStep(4)} />
+                <Step3K8s namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(2)} onNext={() => setSetupStep(4)} />
               ) : (
                 <Step3
                   bridgeStatus={bridgeStatus}
@@ -1346,6 +1350,7 @@ const App = () => {
               {setupStep === 4 && (target === 'kubernetes' ? (
                 <Step4K8s
                   otelDashboardUrl={externalApps.otelDashboardUrl}
+                  namespace={k8sNamespace}
                   onBack={() => setSetupStep(3)}
                   onFinishStep={() => setSetupStep(5)}
                 />

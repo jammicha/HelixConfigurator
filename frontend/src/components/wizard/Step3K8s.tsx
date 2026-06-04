@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { SnippetBlock } from '../SnippetBlock';
 import { NamespaceRecipe } from './NamespaceRecipe';
 import { k8sGatewayEndpoint } from './wizardTargets';
 
-type Props = { onBack: () => void; onNext: () => void };
+type Props = { namespace: string; onNamespaceChange: (ns: string) => void; onBack: () => void; onNext: () => void };
 
 // Kubernetes Step 3 — "Point apps": point instrumented apps (or the user's own
 // collector) at the gateway's in-cluster Service DNS. No Docker socket, no
-// bridging — a Service gives the gateway a stable DNS name.
-export const Step3K8s: React.FC<Props> = ({ onBack, onNext }) => {
-  const [namespace, setNamespace] = useState('default');
+// bridging — a Service gives the gateway a stable DNS name. The namespace lifts
+// to App state so Step 4's kubectl commands show the same value.
+export const Step3K8s: React.FC<Props> = ({ namespace, onNamespaceChange, onBack, onNext }) => {
   const endpoint = k8sGatewayEndpoint(namespace);
   return (
     <div className="adapt-card">
@@ -25,7 +25,7 @@ export const Step3K8s: React.FC<Props> = ({ onBack, onNext }) => {
           id="k8s-namespace"
           type="text"
           value={namespace}
-          onChange={e => setNamespace(e.target.value)}
+          onChange={e => onNamespaceChange(e.target.value)}
           spellCheck={false}
           className="mt-1 w-full max-w-xs bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 text-sm focus:outline-none focus:border-link block"
           placeholder="default"
