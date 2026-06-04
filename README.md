@@ -154,6 +154,11 @@ Grouping namespaces under a Business Service is **AIOps console config, not the 
 
 ## Generate a Kubernetes chart
 
+Onboarding is **target-branched**: the wizard opens with a **"Where will this run?"** choice
+(Docker / Kubernetes). The Kubernetes path generates this chart as a first-class step, then guides you
+to point apps at the gateway Service and verify. The dashboard action below is the same generator, for
+re-running after onboarding.
+
 From the dashboard, **Quick actions → Generate Kubernetes deployment** emits a self-contained Helm
 chart (`helix-otel/`) pre-wired to your Helix tenant from the current config. Deploy it in four steps:
 

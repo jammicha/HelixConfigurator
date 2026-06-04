@@ -1,6 +1,6 @@
 # Target-branched onboarding (Docker vs Kubernetes) — design
 
-> **Spec** · Created 2026-06-04 · Status: **Draft for review**
+> **Spec** · Created 2026-06-04 · Status: **Implemented** (feat/k8s-onboarding-branch)
 > Build branch: `feat/k8s-onboarding-branch` (worktree `.worktrees/k8s-onboarding-branch`)
 > Source brief: [`docs/handoffs/06-k8s-onboarding-branch.md`](../../handoffs/06-k8s-onboarding-branch.md)
 > Builds on Phase 1: [`2026-06-03-generate-k8s-chart-design.md`](2026-06-03-generate-k8s-chart-design.md) · decision memo [`2026-06-03-kubernetes-deployment-decision-design.md`](2026-06-03-kubernetes-deployment-decision-design.md)
