@@ -68,8 +68,15 @@ export const K8sChartPanel: React.FC = () => {
             >Full walkthrough ↗</a>
           </div>
           <div>
-            <p className="text-sm text-gray-300">
-              <span className="text-gray-500">1 ·</span> Download &amp; unzip the chart — click <span className="text-gray-200">Download chart (.zip)</span> below, then <code className="text-tiny bg-gray-1000 px-1 py-0.5 rounded">unzip helix-otel-chart.zip</code>. Run the next steps from the folder that now holds <code className="text-tiny bg-gray-1000 px-1 py-0.5 rounded">helix-otel/</code>.
+            <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">1 · Download the chart</p>
+            <a
+              href={`/api/k8s/chart?viewer=${viewerEnabled}`}
+              className="bg-primary hover:bg-[#3006c2] text-white px-4 py-1.5 rounded text-tiny font-semibold transition-colors inline-flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" /> Download chart (.zip)
+            </a>
+            <p className="text-tiny text-gray-500 mt-2">
+              Then <code className="bg-gray-1000 px-1 py-0.5 rounded">unzip helix-otel-chart.zip</code> and run the next steps from the folder that now holds <code className="bg-gray-1000 px-1 py-0.5 rounded">helix-otel/</code>.
             </p>
           </div>
           <div>
@@ -95,15 +102,6 @@ export const K8sChartPanel: React.FC = () => {
           </details>
         </>
       )}
-
-      <div className="flex items-center justify-end gap-3 pt-1">
-        <a
-          href={`/api/k8s/chart?viewer=${viewerEnabled}`}
-          className="bg-primary hover:bg-[#3006c2] text-white px-4 py-1.5 rounded text-tiny font-semibold transition-colors inline-flex items-center gap-2"
-        >
-          <Download className="w-4 h-4" /> Download chart (.zip)
-        </a>
-      </div>
     </div>
   );
 };
