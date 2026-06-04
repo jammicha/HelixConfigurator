@@ -1,7 +1,8 @@
 // backend/k8sChart/renderValues.js
 // PURE: render the chart's values.yaml from live state. Non-secret values
-// (endpoint, xSource) are baked; the apiKey is ALWAYS empty (supplied via
-// --set at install). Resource names are stable for Docker-parity DNS.
+// (endpoint, xSource) are baked; the apiKey is ALWAYS empty. At install the user
+// either references a pre-created Secret (helix.existingSecret — recommended) or
+// passes --set helix.apiKey (quick demo). Resource names are stable for Docker-parity DNS.
 const yaml = require('js-yaml');
 
 const DEFAULTS = {
@@ -16,7 +17,10 @@ const DEFAULTS = {
 function renderValues({ endpoint = '', xSource = '', viewerEnabled = true } = {}) {
   const rl = { requests: { cpu: '100m', memory: '256Mi' }, limits: { cpu: '1', memory: '512Mi' } };
   const values = {
-    helix: { endpoint, xSource, apiKey: '' },
+    // apiKey stays empty; existingSecret (recommended) references a pre-created
+    // Secret so the key never passes through Helm. existingSecretKey is the key
+    // name within that Secret.
+    helix: { endpoint, xSource, apiKey: '', existingSecret: '', existingSecretKey: 'HELIX_API_KEY' },
     gateway: {
       name: DEFAULTS.gatewayName,
       image: { repository: DEFAULTS.collectorImage, tag: DEFAULTS.collectorTag, pullPolicy: 'IfNotPresent' },

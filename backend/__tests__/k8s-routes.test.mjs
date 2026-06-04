@@ -56,6 +56,7 @@ describe('GET /api/k8s/chart/preview', () => {
     expect(yaml.load(res.body.gatewayConfig).exporters['otlphttp/helix_local_viewer'].traces_endpoint)
       .toBe('http://helix-viewer:3001/api/otlp/traces');
     expect(res.body.installCommand).toMatch(/helm install helix \.\/helix-otel/);
+    expect(res.body.installCommand).toMatch(/existingSecret/);
     expect(res.body.files).toContain('helix-otel/templates/gateway-deployment.yaml');
   });
 

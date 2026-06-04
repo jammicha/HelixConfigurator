@@ -39,8 +39,8 @@ spec:
             - name: HELIX_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.gateway.name }}-helix
-                  key: HELIX_API_KEY
+                  name: {{ .Values.helix.existingSecret | default (printf "%s-helix" .Values.gateway.name) }}
+                  key: {{ .Values.helix.existingSecretKey | default "HELIX_API_KEY" }}
           livenessProbe:
             httpGet: { path: /, port: 13133 }
             initialDelaySeconds: 10

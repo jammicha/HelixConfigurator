@@ -9,6 +9,9 @@ describe('renderValues', () => {
     expect(v.helix.endpoint).toBe('https://helix.example/otlp');
     expect(v.helix.xSource).toBe('acme-otel');
     expect(v.helix.apiKey).toBe('');
+    // The recommended path references a pre-created Secret (empty by default).
+    expect(v.helix.existingSecret).toBe('');
+    expect(v.helix.existingSecretKey).toBe('HELIX_API_KEY');
   });
 
   it('reflects the viewer toggle', () => {

@@ -9,7 +9,14 @@ const path = require('path');
 const archiver = require('archiver');
 const { buildChartFiles, streamChartArchive } = require('../k8sChart');
 
-const INSTALL_COMMAND = 'helm install helix ./helix-otel --set helix.apiKey=<TenantID::AccessKey::SecretKey>';
+const INSTALL_COMMAND = [
+  '# Recommended — keep the key out of Helm by referencing a Secret you create:',
+  "kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID::AccessKey::SecretKey>'",
+  'helm install helix ./helix-otel --set helix.existingSecret=helix-key',
+  '',
+  '# Quick demo alternative (passes the key through Helm):',
+  'helm install helix ./helix-otel --set helix.apiKey=<TenantID::AccessKey::SecretKey>',
+].join('\n');
 
 // Recursively list all files under <projectRoot>/helix-otel/ as relative paths
 // like `helix-otel/Chart.yaml`, then append the two generated-file paths.

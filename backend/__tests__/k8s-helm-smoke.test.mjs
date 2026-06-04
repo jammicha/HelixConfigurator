@@ -51,4 +51,23 @@ describe.skipIf(!helmAvailable())('helm smoke', () => {
       }
     });
   }
+
+  it('existingSecret mode: no chart-managed Secret, gateway refs the external one', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'helm-smoke-es-'));
+    try {
+      const chart = assembleChart(tmp, true);
+      // No --set helix.apiKey: the key lives in a Secret the user pre-created.
+      execFileSync('helm', ['lint', chart, '--set', 'helix.existingSecret=my-helix-key'], { stdio: 'pipe' });
+      const out = execFileSync('helm', ['template', 'helix', chart, '--set', 'helix.existingSecret=my-helix-key'], { encoding: 'utf8' });
+      const docs = yaml.loadAll(out).filter(Boolean);
+      // The chart must NOT create its own Secret when an existing one is referenced.
+      expect(docs.map(d => d.kind)).not.toContain('Secret');
+      const dep = docs.find(d => d.kind === 'Deployment' && d.metadata.name === 'helix-gateway');
+      const apiKeyEnv = dep.spec.template.spec.containers[0].env.find(e => e.name === 'HELIX_API_KEY');
+      expect(apiKeyEnv.valueFrom.secretKeyRef.name).toBe('my-helix-key');
+      expect(apiKeyEnv.valueFrom.secretKeyRef.key).toBe('HELIX_API_KEY');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
