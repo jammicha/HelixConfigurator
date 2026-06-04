@@ -109,6 +109,10 @@ require('./routes/lifecycle').register(app, { docker });
 require('./routes/step-zero/synthetic').register(app, { docker });
 require('./routes/step-zero/instrument').register(app);
 require('./routes/env').register(app);
+require('./routes/k8s').register(app, {
+  configPath: CONFIG_PATH,
+  projectRoot: path.resolve(__dirname, '..'),
+});
 
 const diagnostics = require('./routes/diagnostics');
 diagnostics.register(app, { docker, containerLogs, configPath: CONFIG_PATH, otelStore });
