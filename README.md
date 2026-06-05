@@ -167,6 +167,7 @@ from there:
 ```bash
 unzip ~/Downloads/helix-otel-chart.zip && cd helix-otel
 ```
+_(Assumes your browser saved to `~/Downloads` — adjust the path if the `.zip` landed elsewhere.)_
 
 **2. Create the Secret** with your Helix key. The dialog pre-fills this command with your *actual*
 key (from the configurator's `.env`) so you can copy-paste it — tick *"Generating this for someone
