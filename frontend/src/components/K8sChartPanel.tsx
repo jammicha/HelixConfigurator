@@ -17,6 +17,7 @@ type Preview = {
 // previews + download. Generate-only — no cluster calls.
 export const K8sChartPanel: React.FC = () => {
   const [viewerEnabled, setViewerEnabled] = useState(true);
+  const [exposeViewer, setExposeViewer] = useState(false);
   const [handoff, setHandoff] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -26,7 +27,7 @@ export const K8sChartPanel: React.FC = () => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/k8s/chart/preview?viewer=${viewerEnabled}&handoff=${handoff}`)
+    fetch(`/api/k8s/chart/preview?viewer=${viewerEnabled}&handoff=${handoff}&expose=${exposeViewer}`)
       .then(async r => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`);
         return r.json();
@@ -35,14 +36,21 @@ export const K8sChartPanel: React.FC = () => {
       .catch(e => { if (!cancelled) setError(String(e.message || e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [viewerEnabled, handoff]);
+  }, [viewerEnabled, handoff, exposeViewer]);
 
   return (
     <div className="space-y-4">
       <label className="flex items-center gap-3 text-sm text-gray-300">
-        <input type="checkbox" checked={viewerEnabled} onChange={e => setViewerEnabled(e.target.checked)} className="accent-primary w-4 h-4" />
+        <input type="checkbox" checked={viewerEnabled} onChange={e => { setViewerEnabled(e.target.checked); if (!e.target.checked) setExposeViewer(false); }} className="accent-primary w-4 h-4" />
         Include the local &quot;View OTel Data&quot; viewer (Deployment + PVC)
       </label>
+
+      {viewerEnabled && (
+        <label className="flex items-start gap-3 text-sm text-gray-300 ml-7">
+          <input type="checkbox" checked={exposeViewer} onChange={e => setExposeViewer(e.target.checked)} className="accent-primary w-4 h-4 mt-0.5" />
+          <span>Expose it at <code className="font-mono text-gray-100">localhost:8765</code> — no port-forward <span className="text-tiny text-gray-500">(Docker Desktop / local clusters only; the viewer is unauthenticated, so don&apos;t use this on a shared/cloud cluster)</span></span>
+        </label>
+      )}
 
       <label className="flex items-center gap-3 text-sm text-gray-300">
         <input type="checkbox" checked={handoff} onChange={e => setHandoff(e.target.checked)} className="accent-primary w-4 h-4" />

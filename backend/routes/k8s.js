@@ -16,11 +16,16 @@ const KEY_PLACEHOLDER = '<TenantID::AccessKey::SecretKey>';
 // key is embedded in the create-secret command so the user can copy-paste without
 // hunting for it. The key only ever appears there (rendered in the authed UI) —
 // never in the chart values or the downloaded zip.
-function buildCommands({ handoff }) {
+function buildCommands({ handoff, exposeViewer }) {
   const key = handoff ? KEY_PLACEHOLDER : (process.env.HELIX_API_KEY || KEY_PLACEHOLDER);
+  // The viewer Service defaults to ClusterIP (secure). When the user opts in to direct
+  // localhost:8765 access (Docker Desktop / local), add the --set at install time only —
+  // the chart values stay safe-by-default for anyone who installs without this flag.
+  const installCommand = 'helm install helix . --set helix.existingSecret=helix-key'
+    + (exposeViewer ? ' --set viewer.service.type=LoadBalancer' : '');
   return {
     secretCommand: `kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='${key}'`,
-    installCommand: 'helm install helix . --set helix.existingSecret=helix-key',
+    installCommand,
   };
 }
 
@@ -56,6 +61,10 @@ function listChartFiles(projectRoot) {
 
 const wantsViewer = (req) => String(req.query.viewer ?? 'true').toLowerCase() !== 'false';
 const wantsHandoff = (req) => String(req.query.handoff) === 'true';
+// Opt-in: expose the viewer via a LoadBalancer Service (direct localhost:8765, no
+// port-forward). Only meaningful when the viewer is included — the route ANDs it with
+// wantsViewer so a stale flag can't add an exposure for a viewer that isn't there.
+const wantsExpose = (req) => String(req.query.expose) === 'true';
 
 function register(app, { configPath, projectRoot }) {
   // Build the two generated files from live state, or send an error response.
@@ -89,7 +98,7 @@ function register(app, { configPath, projectRoot }) {
     const files = await generate(req, res);
     if (!files) return;
     const handoff = wantsHandoff(req);
-    const { secretCommand, installCommand } = buildCommands({ handoff });
+    const { secretCommand, installCommand } = buildCommands({ handoff, exposeViewer: wantsViewer(req) && wantsExpose(req) });
     res.json({
       viewerEnabled: wantsViewer(req),
       values: files.values,
