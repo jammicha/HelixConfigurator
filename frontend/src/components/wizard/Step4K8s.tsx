@@ -47,13 +47,12 @@ export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, onBack,
         ) : (
           <p className="text-tiny text-gray-500">Set a real Helix endpoint in Step 1 to get a dashboard deep-link.</p>
         )}
-        <p className="text-tiny text-gray-500 mt-2">Give it ~2 minutes after pointing your apps — an empty dashboard usually just means data hasn&apos;t arrived yet. The X-Source registers on first ingest, which is also what makes Step 5&apos;s linking work.</p>
       </div>
     </div>
 
     <div className="mt-5 flex items-start gap-3 p-2.5 rounded border border-primary/40 bg-primary/10 text-tiny text-gray-300">
       <Hexagon className="w-3.5 h-3.5 text-link flex-shrink-0 mt-0.5" />
-      <span>Generate-only: the configurator can&apos;t read your cluster&apos;s gateway counters, so these checks run on your side. Live in-cluster verification is on the roadmap.</span>
+      <span>Generate-only: the configurator can&apos;t read your cluster&apos;s gateway counters, so these checks run on your side.</span>
     </div>
 
     <div className="flex gap-4 mt-6">

@@ -61,7 +61,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
       {viewerEnabled && (
         <label className="flex items-start gap-3 text-sm text-gray-300 ml-7">
           <input type="checkbox" checked={exposeViewer} onChange={e => setExposeViewer(e.target.checked)} className="accent-primary w-4 h-4 mt-0.5" />
-          <span>Expose it at <code className="font-mono text-gray-100">localhost:8765</code> — no port-forward <span className="text-tiny text-gray-500">(Docker Desktop / local clusters only; the viewer is unauthenticated, so don&apos;t use this on a shared/cloud cluster)</span></span>
+          <span>Expose it at <code className="font-mono text-gray-100">localhost:8765</code> — no port-forward <span className="text-tiny text-gray-500">(Caution: meant for local clusters only — don&apos;t use this on a shared/cloud cluster)</span></span>
         </label>
       )}
 
@@ -76,10 +76,10 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
       </div>
 
       {error && <div className="text-xs text-error-text bg-error/10 border border-error/40 rounded p-3">{error}</div>}
-      {loading && <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> Generating preview…</div>}
+      {!preview && loading && <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> Generating preview…</div>}
 
-      {preview && !loading && (
-        <>
+      {preview && (
+        <div className={loading ? 'space-y-4 opacity-50 transition-opacity' : 'space-y-4 transition-opacity'}>
           <div className="flex items-center justify-between">
             <p className="text-tiny uppercase tracking-wide text-gray-500">Install steps</p>
             <a
@@ -128,7 +128,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
             <summary className="text-sm text-gray-300 cursor-pointer select-none">Preview gateway collector config</summary>
             <SnippetBlock text={preview.gatewayConfig} />
           </details>
-        </>
+        </div>
       )}
     </div>
   );
