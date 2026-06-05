@@ -1,7 +1,8 @@
 // backend/k8sChart/transformCollectorConfig.js
 // PURE: transform the live collector config into the gateway ConfigMap payload.
-// - Rewrites (or strips) the hardcoded local-viewer exporter so it targets the
-//   in-cluster viewer Service instead of http://helix-configurator:3001.
+// - target='local': rewrites the local-viewer exporter to host.docker.internal:8765
+//   so telemetry flows back to the configurator running on the host.
+// - target='remote': strips the viewer exporter entirely (Helix-only).
 // - Ensures a health_check extension so the gateway Deployment can use httpGet probes.
 // The Helix exporter's ${env:...} substitutions are left untouched — the values
 // arrive via the pod's env (Secret + values), and the ConfigMap embeds this file
@@ -9,6 +10,7 @@
 const yaml = require('js-yaml');
 
 const VIEWER_EXPORTER_KEY = 'otlphttp/helix_local_viewer';
+const LOCAL_VIEWER_HOST = 'host.docker.internal:8765';
 
 function invalid(message, cause) {
   const err = new Error(message);
@@ -31,7 +33,7 @@ function ensureHealthCheckExtension(doc) {
   doc.service.extensions = exts;
 }
 
-function transformCollectorConfig(yamlString, { viewerEnabled, viewerServiceName = 'helix-viewer' } = {}) {
+function transformCollectorConfig(yamlString, { target = 'local' } = {}) {
   let doc;
   try {
     doc = yaml.load(yamlString);
@@ -43,18 +45,16 @@ function transformCollectorConfig(yamlString, { viewerEnabled, viewerServiceName
   doc.exporters = doc.exporters || {};
   const viewer = doc.exporters[VIEWER_EXPORTER_KEY];
 
-  if (viewerEnabled) {
+  if (target === 'local') {
     if (viewer) {
       for (const key of ['traces_endpoint', 'logs_endpoint', 'metrics_endpoint']) {
         if (typeof viewer[key] === 'string') {
-          // Replace scheme + host:port, preserve the /api/otlp/* path. The viewer
-          // Service is exposed on 8765 (its container port is 3001) so the human URL
-          // is localhost:8765/otel-data; in-cluster the gateway reaches it the same way.
-          viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, `http://${viewerServiceName}:8765`);
+          viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, `http://${LOCAL_VIEWER_HOST}`);
         }
       }
     }
   } else {
+    // target === 'remote': strip the viewer exporter entirely.
     delete doc.exporters[VIEWER_EXPORTER_KEY];
     const pipelines = (doc.service && doc.service.pipelines) || {};
     for (const name of Object.keys(pipelines)) {

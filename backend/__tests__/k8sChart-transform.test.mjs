@@ -30,24 +30,19 @@ service:
 `;
 
 describe('transformCollectorConfig', () => {
-  it('viewer ON: rewrites the viewer endpoints to the in-cluster Service, preserves paths', () => {
-    const out = yaml.load(transformCollectorConfig(BASE, { viewerEnabled: true }));
+  it('target=local: rewrites viewer endpoints to host.docker.internal:8765', () => {
+    const out = yaml.load(transformCollectorConfig(BASE, { target: 'local' }));
     const v = out.exporters[VIEWER_EXPORTER_KEY];
-    expect(v.traces_endpoint).toBe('http://helix-viewer:8765/api/otlp/traces');
-    expect(v.logs_endpoint).toBe('http://helix-viewer:8765/api/otlp/logs');
-    expect(v.metrics_endpoint).toBe('http://helix-viewer:8765/api/otlp/metrics');
+    expect(v.traces_endpoint).toBe('http://host.docker.internal:8765/api/otlp/traces');
+    expect(v.logs_endpoint).toBe('http://host.docker.internal:8765/api/otlp/logs');
+    expect(v.metrics_endpoint).toBe('http://host.docker.internal:8765/api/otlp/metrics');
     // Helix exporter and pipelines untouched.
     expect(out.exporters['otlphttp/bmchelix'].endpoint).toBe('${env:HELIX_ENDPOINT}');
     expect(out.service.pipelines.traces.exporters).toContain(VIEWER_EXPORTER_KEY);
   });
 
-  it('viewer ON: honors a custom viewerServiceName', () => {
-    const out = yaml.load(transformCollectorConfig(BASE, { viewerEnabled: true, viewerServiceName: 'vw' }));
-    expect(out.exporters[VIEWER_EXPORTER_KEY].traces_endpoint).toBe('http://vw:8765/api/otlp/traces');
-  });
-
-  it('viewer OFF: removes the viewer exporter and its pipeline refs, keeps bmchelix', () => {
-    const out = yaml.load(transformCollectorConfig(BASE, { viewerEnabled: false }));
+  it('target=remote: removes the viewer exporter and its pipeline refs, keeps bmchelix', () => {
+    const out = yaml.load(transformCollectorConfig(BASE, { target: 'remote' }));
     expect(out.exporters[VIEWER_EXPORTER_KEY]).toBeUndefined();
     expect(out.service.pipelines.traces.exporters).toEqual(['otlphttp/bmchelix']);
     expect(out.service.pipelines.logs.exporters).toEqual(['otlphttp/bmchelix']);
@@ -55,14 +50,14 @@ describe('transformCollectorConfig', () => {
   });
 
   it('always injects a health_check extension wired into the service', () => {
-    const on = yaml.load(transformCollectorConfig(BASE, { viewerEnabled: true }));
+    const on = yaml.load(transformCollectorConfig(BASE, { target: 'local' }));
     expect(on.extensions.health_check.endpoint).toBe('0.0.0.0:13133');
     expect(on.service.extensions).toContain('health_check');
   });
 
   it('does not duplicate an existing health_check extension', () => {
     const withHc = BASE + '\nextensions:\n  health_check: { endpoint: 0.0.0.0:13133 }\n';
-    const out = yaml.load(transformCollectorConfig(withHc, { viewerEnabled: true }));
+    const out = yaml.load(transformCollectorConfig(withHc, { target: 'local' }));
     expect(out.service.extensions.filter(e => e === 'health_check')).toHaveLength(1);
   });
 
@@ -71,14 +66,14 @@ describe('transformCollectorConfig', () => {
 exporters: { otlphttp/bmchelix: { endpoint: x } }
 service: { pipelines: { traces: { exporters: [otlphttp/bmchelix] } } }
 `;
-    const out = yaml.load(transformCollectorConfig(noViewer, { viewerEnabled: false }));
+    const out = yaml.load(transformCollectorConfig(noViewer, { target: 'remote' }));
     expect(out.exporters['otlphttp/bmchelix']).toBeDefined();
     expect(out.service.pipelines.traces.exporters).toEqual(['otlphttp/bmchelix']);
   });
 
   it('malformed YAML throws a typed INVALID_COLLECTOR_YAML error', () => {
     const capture = (s) => {
-      try { transformCollectorConfig(s, { viewerEnabled: true }); }
+      try { transformCollectorConfig(s, { target: 'local' }); }
       catch (e) { return e; }
       throw new Error('expected transformCollectorConfig to throw, but it did not');
     };
@@ -86,12 +81,12 @@ service: { pipelines: { traces: { exporters: [otlphttp/bmchelix] } } }
     expect(capture(':\n::').code).toBe('INVALID_COLLECTOR_YAML');
   });
 
-  it('viewer ON but exporter absent: no throw, viewer stays absent, health_check added', () => {
+  it('target=local but exporter absent: no throw, viewer stays absent, health_check added', () => {
     const noViewer = `
 exporters: { otlphttp/bmchelix: { endpoint: x } }
 service: { pipelines: { traces: { exporters: [otlphttp/bmchelix] } } }
 `;
-    const out = yaml.load(transformCollectorConfig(noViewer, { viewerEnabled: true }));
+    const out = yaml.load(transformCollectorConfig(noViewer, { target: 'local' }));
     expect(out.exporters[VIEWER_EXPORTER_KEY]).toBeUndefined();
     expect(out.exporters['otlphttp/bmchelix']).toBeDefined();
     expect(out.extensions.health_check).toBeDefined();
