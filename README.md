@@ -162,10 +162,10 @@ re-running after onboarding.
 From the dashboard, **Quick actions → Generate Kubernetes deployment** emits a self-contained Helm
 chart (`helix-otel/`) pre-wired to your Helix tenant from the current config. Deploy it in four steps:
 
-**1. Download & unzip** the `.zip` from the dialog — this creates a `helix-otel/` folder; run the
-rest from wherever it unzipped:
+**1. Download & unzip** the `.zip` from the dialog, then `cd` into the chart folder — run the rest
+from there:
 ```bash
-unzip ~/Downloads/helix-otel-chart.zip
+unzip ~/Downloads/helix-otel-chart.zip && cd helix-otel
 ```
 
 **2. Create the Secret** with your Helix key. The dialog pre-fills this command with your *actual*
@@ -177,7 +177,7 @@ kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID:
 
 **3. Install the chart**, referencing that Secret:
 ```bash
-helm install helix ./helix-otel --set helix.existingSecret=helix-key
+helm install helix . --set helix.existingSecret=helix-key
 ```
 
 **4. Verify & view** — wait for the pods, point apps at the gateway, open the local viewer:

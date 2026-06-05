@@ -20,7 +20,7 @@ function buildCommands({ handoff }) {
   const key = handoff ? KEY_PLACEHOLDER : (process.env.HELIX_API_KEY || KEY_PLACEHOLDER);
   return {
     secretCommand: `kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='${key}'`,
-    installCommand: 'helm install helix ./helix-otel --set helix.existingSecret=helix-key',
+    installCommand: 'helm install helix . --set helix.existingSecret=helix-key',
   };
 }
 

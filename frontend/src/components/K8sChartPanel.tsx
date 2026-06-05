@@ -68,7 +68,7 @@ export const K8sChartPanel: React.FC = () => {
             >Full walkthrough ↗</a>
           </div>
           <div>
-            <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">1 · Download the chart</p>
+            <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">1 · Download &amp; unzip</p>
             <a
               href={`/api/k8s/chart?viewer=${viewerEnabled}`}
               className="bg-primary hover:bg-[#3006c2] text-white px-4 py-1.5 rounded text-tiny font-semibold transition-colors inline-flex items-center gap-2"
@@ -76,8 +76,9 @@ export const K8sChartPanel: React.FC = () => {
               <Download className="w-4 h-4" /> Download chart (.zip)
             </a>
             <p className="text-tiny text-gray-500 mt-2">
-              Then <code className="bg-gray-1000 px-1 py-0.5 rounded">unzip helix-otel-chart.zip</code> and run the next steps from the folder that now holds <code className="bg-gray-1000 px-1 py-0.5 rounded">helix-otel/</code>.
+              Then unzip and <code className="bg-gray-1000 px-1 py-0.5 rounded">cd</code> into the chart folder — steps 2 &amp; 3 run from inside it:
             </p>
+            <SnippetBlock text={`unzip helix-otel-chart.zip && cd helix-otel`} />
           </div>
           <div>
             <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">2 · Create the secret</p>

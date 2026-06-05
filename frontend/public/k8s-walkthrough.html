@@ -118,11 +118,11 @@
     <p>
       In the configurator&rsquo;s <strong>Generate</strong> step (or the dashboard&rsquo;s
       <em>Generate&nbsp;Kubernetes&nbsp;deployment</em> action), choose whether to include the local viewer,
-      then click <strong>Download chart (.zip)</strong>. Unzip it and run the rest of these steps from the
-      folder that now holds <code>helix-otel/</code>:
+      then click <strong>Download chart (.zip)</strong>. Unzip it and <code>cd</code> into the chart folder &mdash;
+      run the rest of these steps from inside it:
     </p>
     <pre><code>unzip helix-otel-chart.zip
-cd helix-otel-chart   # the folder containing helix-otel/</code></pre>
+cd helix-otel</code></pre>
     <p class="muted">
       The chart is pre-wired from your saved configuration: your <code>HELIX_ENDPOINT</code> and
       <code>X_SOURCE</code> are baked into <code>values.yaml</code>, and your live collector pipeline becomes
@@ -151,10 +151,10 @@ cd helix-otel-chart   # the folder containing helix-otel/</code></pre>
     </div>
 
     <h2 id="install"><span class="num">3</span>Install with Helm</h2>
-    <pre><code>helm install helix ./helix-otel --set helix.existingSecret=helix-key</code></pre>
+    <pre><code>helm install helix . --set helix.existingSecret=helix-key</code></pre>
     <p>Install into a specific namespace by adding <code>-n &lt;namespace&gt;</code> (create it first if needed):</p>
     <pre><code>kubectl create namespace observability
-helm install helix ./helix-otel -n observability \
+helm install helix . -n observability \
   --set helix.existingSecret=helix-key</code></pre>
     <p class="muted">
       This brings up the gateway <code>Deployment</code> + <code>Service</code> (named
