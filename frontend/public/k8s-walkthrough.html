@@ -204,15 +204,16 @@ OTEL_RESOURCE_ATTRIBUTES=service.namespace=&lt;app&gt;,deployment.environment=&l
     <h3>Gateway pods are up</h3>
     <pre><code>kubectl get pods -l app.kubernetes.io/component=gateway -n &lt;namespace&gt;</code></pre>
     <h3>Watch it locally (if you included the viewer)</h3>
-    <pre><code>kubectl port-forward svc/helix-viewer 3001:3001 -n &lt;namespace&gt;</code></pre>
-    <p class="faint">Then open <code>http://localhost:3001/otel-data</code>.</p>
+    <p>The viewer lives at <code>http://localhost:8765/otel-data</code>. By default it&rsquo;s internal (ClusterIP — safe anywhere); reach it with a port-forward:</p>
+    <pre><code>kubectl port-forward svc/helix-viewer 8765:8765 -n &lt;namespace&gt;</code></pre>
+    <p class="faint">On Docker Desktop, skip the port-forward: install with <code>--set viewer.service.type=LoadBalancer</code> and open <code>http://localhost:8765/otel-data</code> directly. Avoid LoadBalancer on shared/cloud clusters — it exposes the unauthenticated viewer.</p>
     <h3>See it in Helix</h3>
     <p>Open your tenant&rsquo;s <strong>OTel Namespace Overview</strong> dashboard — traces, metrics, and logs from your apps should appear within a couple of minutes of pointing them at the gateway.</p>
 
     <h2 id="options"><span class="num">★</span>Options &amp; flags</h2>
     <ul>
       <li><strong>Local viewer</strong> — on by default (a Deployment + PVC). Disable it with <code>--set viewer.enabled=false</code>, or untick it before downloading.</li>
-      <li><strong>Reach the viewer without port-forward</strong> — <code>--set viewer.service.type=LoadBalancer</code> (Docker Desktop / cloud) or <code>=NodePort</code>, then open it directly instead of running <code>kubectl port-forward</code>.</li>
+      <li><strong>Viewer exposure</strong> — internal (<code>ClusterIP</code>) by default; reach it via <code>kubectl port-forward svc/helix-viewer 8765:8765</code>, then <code>localhost:8765/otel-data</code>. On Docker Desktop / local clusters, <code>--set viewer.service.type=LoadBalancer</code> serves it directly with no port-forward. Don&rsquo;t use LoadBalancer on shared/cloud clusters — the viewer is unauthenticated.</li>
       <li><strong>Existing secret</strong> — <code>--set helix.existingSecret=&lt;name&gt;</code> to reference a Secret you manage yourself.</li>
       <li><strong>Override the baked endpoint/source</strong> at install — <code>--set helix.endpoint=… --set helix.xSource=…</code>.</li>
       <li><strong>OpenTelemetry Operator flavor</strong> — <em>coming soon</em>: an <code>OpenTelemetryCollector</code> CR + zero-code auto-instrumentation, for clusters that already run the Operator.</li>

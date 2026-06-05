@@ -32,7 +32,7 @@ function renderValues({ endpoint = '', xSource = '', viewerEnabled = true } = {}
       enabled: viewerEnabled,
       name: DEFAULTS.viewerName,
       image: { repository: DEFAULTS.viewerImage, tag: DEFAULTS.viewerTag, pullPolicy: 'IfNotPresent' },
-      service: { type: 'ClusterIP' }, // override to LoadBalancer/NodePort to skip the port-forward
+      service: { type: 'ClusterIP' }, // internal by default — the viewer is unauthenticated, so never exposed by accident; on Docker Desktop/local --set viewer.service.type=LoadBalancer to open localhost:8765 with no port-forward
       resources: rl,
       persistence: { size: '2Gi', storageClass: '' },
     },

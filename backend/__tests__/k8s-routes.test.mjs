@@ -61,7 +61,7 @@ describe('GET /api/k8s/chart/preview', () => {
     expect(res.status).toBe(200);
     expect(yaml.load(res.body.values).helix.endpoint).toBe('https://helix.example/otlp');
     expect(yaml.load(res.body.gatewayConfig).exporters['otlphttp/helix_local_viewer'].traces_endpoint)
-      .toBe('http://helix-viewer:3001/api/otlp/traces');
+      .toBe('http://helix-viewer:8765/api/otlp/traces');
     expect(res.body.installCommand).toMatch(/helm install helix \. --set/);
     expect(res.body.installCommand).toMatch(/existingSecret/);
     // Default: the live key is pre-filled into the (separate) create-secret command.

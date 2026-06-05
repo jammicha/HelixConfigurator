@@ -34,8 +34,9 @@ export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, onBack,
       </div>
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">2 · Watch it locally (if you included the viewer)</p>
-        <SnippetBlock text={`kubectl port-forward svc/helix-viewer 3001:3001 -n ${namespace.trim() || 'default'}`} />
-        <p className="text-tiny text-gray-500 -mt-4">Then open <code className="font-mono">http://localhost:3001/otel-data</code>. (Skip the port-forward by installing with <code className="font-mono">--set viewer.service.type=LoadBalancer</code>.)</p>
+        <p className="text-tiny text-gray-500 mb-2">The viewer lives at <code className="font-mono">http://localhost:8765/otel-data</code>. By default it&apos;s internal (ClusterIP — safe on any cluster), so reach it with a port-forward:</p>
+        <SnippetBlock text={`kubectl port-forward svc/helix-viewer 8765:8765 -n ${namespace.trim() || 'default'}`} />
+        <p className="text-tiny text-gray-500 -mt-4">On Docker Desktop you can skip the port-forward: install with <code className="font-mono">--set viewer.service.type=LoadBalancer</code> and open <code className="font-mono">http://localhost:8765/otel-data</code> directly. (Don&apos;t use LoadBalancer on shared/cloud clusters — it exposes the unauthenticated viewer.)</p>
       </div>
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">3 · See it in Helix</p>

@@ -33,9 +33,9 @@ describe('transformCollectorConfig', () => {
   it('viewer ON: rewrites the viewer endpoints to the in-cluster Service, preserves paths', () => {
     const out = yaml.load(transformCollectorConfig(BASE, { viewerEnabled: true }));
     const v = out.exporters[VIEWER_EXPORTER_KEY];
-    expect(v.traces_endpoint).toBe('http://helix-viewer:3001/api/otlp/traces');
-    expect(v.logs_endpoint).toBe('http://helix-viewer:3001/api/otlp/logs');
-    expect(v.metrics_endpoint).toBe('http://helix-viewer:3001/api/otlp/metrics');
+    expect(v.traces_endpoint).toBe('http://helix-viewer:8765/api/otlp/traces');
+    expect(v.logs_endpoint).toBe('http://helix-viewer:8765/api/otlp/logs');
+    expect(v.metrics_endpoint).toBe('http://helix-viewer:8765/api/otlp/metrics');
     // Helix exporter and pipelines untouched.
     expect(out.exporters['otlphttp/bmchelix'].endpoint).toBe('${env:HELIX_ENDPOINT}');
     expect(out.service.pipelines.traces.exporters).toContain(VIEWER_EXPORTER_KEY);
@@ -43,7 +43,7 @@ describe('transformCollectorConfig', () => {
 
   it('viewer ON: honors a custom viewerServiceName', () => {
     const out = yaml.load(transformCollectorConfig(BASE, { viewerEnabled: true, viewerServiceName: 'vw' }));
-    expect(out.exporters[VIEWER_EXPORTER_KEY].traces_endpoint).toBe('http://vw:3001/api/otlp/traces');
+    expect(out.exporters[VIEWER_EXPORTER_KEY].traces_endpoint).toBe('http://vw:8765/api/otlp/traces');
   });
 
   it('viewer OFF: removes the viewer exporter and its pipeline refs, keeps bmchelix', () => {

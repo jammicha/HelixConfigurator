@@ -181,11 +181,13 @@ kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID:
 helm install helix . --set helix.existingSecret=helix-key
 ```
 
-**4. Verify & view** — wait for the pods, point apps at the gateway, open the local viewer:
+**4. Verify & view** — wait for the pods, point apps at the gateway, open the viewer:
 ```bash
 kubectl get pods                                 # wait for helix-gateway + helix-viewer = Running
 # apps in-cluster send to:  http://helix-gateway:4318
-kubectl port-forward svc/helix-viewer 3001:3001  # then open http://localhost:3001/otel-data
+# viewer is internal by default → port-forward, then open http://localhost:8765/otel-data:
+kubectl port-forward svc/helix-viewer 8765:8765
+# (Docker Desktop shortcut: install with --set viewer.service.type=LoadBalancer to skip the port-forward)
 ```
 
 > **Secrets:** the chart also accepts `--set helix.apiKey=…` for throwaway demos, but that value
