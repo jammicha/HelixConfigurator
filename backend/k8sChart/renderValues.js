@@ -32,6 +32,7 @@ function renderValues({ endpoint = '', xSource = '', viewerEnabled = true } = {}
       enabled: viewerEnabled,
       name: DEFAULTS.viewerName,
       image: { repository: DEFAULTS.viewerImage, tag: DEFAULTS.viewerTag, pullPolicy: 'IfNotPresent' },
+      service: { type: 'ClusterIP' }, // override to LoadBalancer/NodePort to skip the port-forward
       resources: rl,
       persistence: { size: '2Gi', storageClass: '' },
     },

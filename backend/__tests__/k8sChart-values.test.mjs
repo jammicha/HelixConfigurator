@@ -27,6 +27,7 @@ describe('renderValues', () => {
     expect(v.gateway.image.tag).toBe(DEFAULTS.collectorTag);
     expect(v.viewer.image.repository).toBe('ghcr.io/jammicha/helixconfigurator');
     expect(v.viewer.image.pullPolicy).toBe('IfNotPresent');
+    expect(v.viewer.service.type).toBe('ClusterIP');
   });
 
   it('produces valid YAML with empty defaults when no live env is supplied', () => {
