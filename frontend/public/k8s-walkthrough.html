@@ -167,15 +167,10 @@ helm install helix . -n observability \
     <h2 id="point"><span class="num">4</span>Point your apps at the gateway</h2>
     <p>
       A Kubernetes Service gives the gateway a stable in-cluster DNS name — no bridging required. Point your
-      instrumented apps (or your own collector) at it.
+      own collector (or instrumented apps directly) at it.
     </p>
 
-    <h3>Option A · App sends OTLP directly</h3>
-    <p>Set this on your application&rsquo;s Deployment (replace <code>&lt;namespace&gt;</code> with where you installed the chart):</p>
-    <pre><code>OTEL_EXPORTER_OTLP_ENDPOINT=http://helix-gateway.&lt;namespace&gt;.svc.cluster.local:4318</code></pre>
-    <p class="faint">Apps running in the gateway&rsquo;s own namespace can use the short form <code>http://helix-gateway:4318</code>.</p>
-
-    <h3>Option B · You run your own collector</h3>
+    <h3>Option A · You run your own collector</h3>
     <p>Add the gateway as an exporter in your collector&rsquo;s ConfigMap, then roll it out:</p>
     <pre><code>exporters:
   otlphttp/helix_gateway:
@@ -189,6 +184,11 @@ service:
     metrics: { exporters: [..., otlphttp/helix_gateway] }
     logs:    { exporters: [..., otlphttp/helix_gateway] }</code></pre>
     <pre><code>kubectl rollout restart deployment/&lt;your-collector&gt;</code></pre>
+
+    <h3>Option B · App sends OTLP directly</h3>
+    <p>Set this on your application&rsquo;s Deployment (replace <code>&lt;namespace&gt;</code> with where you installed the chart):</p>
+    <pre><code>OTEL_EXPORTER_OTLP_ENDPOINT=http://helix-gateway.&lt;namespace&gt;.svc.cluster.local:4318</code></pre>
+    <p class="faint">Apps running in the gateway&rsquo;s own namespace can use the short form <code>http://helix-gateway:4318</code>.</p>
 
     <h3>Onboarding more than one app?</h3>
     <p>

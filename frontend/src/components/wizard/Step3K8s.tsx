@@ -23,7 +23,7 @@ export const Step3K8s: React.FC<Props> = ({ namespace, onNamespaceChange, onBack
       </div>
       <p className="text-sm text-gray-400 mb-4">
         Once the chart is installed, the gateway is reachable in-cluster at its Service DNS name. Point your
-        instrumented apps (or your own collector) at it.
+        own collector (or your apps directly) at it.
       </p>
 
       <div className="mb-4">
@@ -40,14 +40,7 @@ export const Step3K8s: React.FC<Props> = ({ namespace, onNamespaceChange, onBack
         <p className="text-tiny text-gray-500 mt-1">Installed into a non-default namespace? Enter it here (the <code className="font-mono">-n</code> flag you passed to <code className="font-mono">helm install</code>).</p>
       </div>
 
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Option A · App sends OTLP directly</p>
-      <SnippetBlock text={`OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint}`} />
-      <p className="text-tiny text-gray-500 -mt-4 mb-5">
-        Set this on your app&apos;s Deployment. Apps in the gateway&apos;s own namespace can use the short form{' '}
-        <code className="font-mono">http://helix-gateway:4318</code>.
-      </p>
-
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Option B · You run your own collector</p>
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Option A · You run your own collector</p>
       <SnippetBlock text={`exporters:
   otlphttp/helix_gateway:
     endpoint: "${endpoint}"
@@ -61,6 +54,13 @@ service:
     logs:    { exporters: [..., otlphttp/helix_gateway] }`} />
       <p className="text-tiny text-gray-500 -mt-4 mb-5">
         Add to your collector&apos;s ConfigMap, then <code className="font-mono">kubectl rollout restart deployment/&lt;your-collector&gt;</code>.
+      </p>
+
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Option B · App sends OTLP directly</p>
+      <SnippetBlock text={`OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint}`} />
+      <p className="text-tiny text-gray-500 -mt-4 mb-5">
+        Set this on your app&apos;s Deployment. Apps in the gateway&apos;s own namespace can use the short form{' '}
+        <code className="font-mono">http://helix-gateway:4318</code>.
       </p>
 
       <NamespaceRecipe
