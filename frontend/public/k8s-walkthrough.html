@@ -218,11 +218,13 @@ OTEL_RESOURCE_ATTRIBUTES=service.namespace=&lt;app&gt;,deployment.environment=&l
     </ul>
 
     <h2 id="troubleshooting"><span class="num">?</span>Troubleshooting</h2>
-    <h3>Viewer pod stuck in <code>ImagePullBackOff</code> on a local cluster</h3>
-    <p>The viewer uses the local configurator image. On <code>kind</code>/<code>minikube</code>, load it into the cluster first:</p>
-    <pre><code>kind load docker-image helix-configurator:latest
-# or:
-minikube image load helix-configurator:latest</code></pre>
+    <h3>Viewer pod stuck in <code>ImagePullBackOff</code></h3>
+    <p>By default the viewer pulls a published image, so it should start on its own. This usually only happens
+    if you <strong>override</strong> <code>viewer.image</code> to a local build the cluster can&rsquo;t pull — load it into the
+    cluster first, or just run without the viewer (<code>--set viewer.enabled=false</code>):</p>
+    <pre><code>kind:           kind load docker-image &lt;your-image&gt;
+minikube:       minikube image load &lt;your-image&gt;
+Docker Desktop:  push it to a local registry, or point viewer.image at a pullable one</code></pre>
     <div class="callout warn">
       <div class="label">OpenShift / restricted Pod Security</div>
       The gateway runs fully non-root and passes the restricted Pod Security Standard. The local viewer

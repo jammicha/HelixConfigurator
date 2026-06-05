@@ -25,7 +25,7 @@ describe('renderValues', () => {
     expect(v.viewer.name).toBe('helix-viewer');
     expect(v.gateway.image.repository).toBe('otel/opentelemetry-collector-contrib');
     expect(v.gateway.image.tag).toBe(DEFAULTS.collectorTag);
-    expect(v.viewer.image.repository).toBe('helix-configurator');
+    expect(v.viewer.image.repository).toBe('ghcr.io/jammicha/helixconfigurator');
     expect(v.viewer.image.pullPolicy).toBe('IfNotPresent');
   });
 

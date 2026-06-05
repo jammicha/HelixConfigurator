@@ -10,10 +10,8 @@ Helix OTel gateway installed as release "{{ .Release.Name }}" in namespace "{{ .
      kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Values.viewer.name }} 3001:3001
    then open http://localhost:3001/otel-data
 
-   The viewer image is built locally, so the cluster can't pull it. If the pod shows
-   ImagePullBackOff, load {{ .Values.viewer.image.repository }}:{{ .Values.viewer.image.tag }} into the cluster -- or just disable the
-   viewer (reinstall with --set viewer.enabled=false), since the gateway above is the payload:
-     kind:           kind load docker-image {{ .Values.viewer.image.repository }}:{{ .Values.viewer.image.tag }}
-     minikube:       minikube image load {{ .Values.viewer.image.repository }}:{{ .Values.viewer.image.tag }}
-     Docker Desktop: enable Settings > General > "Use containerd for pulling and storing images", then rebuild
+   The viewer pulls {{ .Values.viewer.image.repository }}:{{ .Values.viewer.image.tag }} from a public
+   registry, so it should start automatically. To run without it, reinstall with
+   --set viewer.enabled=false (the gateway above is the payload). If you override viewer.image to a
+   local build the cluster can't pull, load it first (kind load / minikube image load).
 {{- end }}

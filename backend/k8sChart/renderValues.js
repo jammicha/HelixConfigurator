@@ -10,7 +10,7 @@ const DEFAULTS = {
   viewerName: 'helix-viewer',
   collectorImage: 'otel/opentelemetry-collector-contrib',
   collectorTag: '0.119.0', // pinned; verify/bump to a validated contrib release
-  viewerImage: 'helix-configurator',
+  viewerImage: 'ghcr.io/jammicha/helixconfigurator', // published image so the viewer pulls out of the box
   viewerTag: 'latest',
 };
 
