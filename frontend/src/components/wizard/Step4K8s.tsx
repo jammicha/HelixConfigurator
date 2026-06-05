@@ -30,11 +30,11 @@ export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, onBack,
     <div className="space-y-5">
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">1 · Gateway pods are up</p>
-        <SnippetBlock text={`kubectl get pods -l app.kubernetes.io/component=gateway -n ${namespace}`} />
+        <SnippetBlock text={`kubectl get pods -l app.kubernetes.io/component=gateway -n ${namespace.trim() || 'default'}`} />
       </div>
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">2 · Watch it locally (if you included the viewer)</p>
-        <SnippetBlock text={`kubectl port-forward svc/helix-viewer 3001:3001 -n ${namespace}`} />
+        <SnippetBlock text={`kubectl port-forward svc/helix-viewer 3001:3001 -n ${namespace.trim() || 'default'}`} />
         <p className="text-tiny text-gray-500 -mt-4">Then open <code className="font-mono">http://localhost:3001/otel-data</code>. (Skip the port-forward by installing with <code className="font-mono">--set viewer.service.type=LoadBalancer</code>.)</p>
       </div>
       <div>

@@ -194,13 +194,13 @@ kubectl port-forward svc/helix-viewer 3001:3001  # then open http://localhost:30
 > Vault / Sealed Secrets). The chart expects the key under `HELIX_API_KEY` (override with
 > `--set helix.existingSecretKey=…`).
 
-> **Viewer image:** the viewer runs a locally-built `helix-configurator:latest` — nothing publishes
-> it to a registry, so a local cluster can't pull it and the pod `ImagePullBackOff`s (it tries
-> `docker.io/library/helix-configurator:latest`, which 404s) until the image is loaded into *that
-> cluster's* store. Since the viewer is optional, the simplest fix is to leave it out —
-> `--set viewer.enabled=false` (or untick it before download): the gateway is the real payload, and a
-> live Helix deployment shows telemetry in Helix's own UI, not this bundled viewer. To run the local
-> viewer anyway, load the image into your cluster's runtime:
+> **Viewer image:** the viewer defaults to the published, public `ghcr.io/jammicha/helixconfigurator:latest`,
+> so the cluster pulls it automatically — no image-loading needed. It's still optional: a convenience
+> window on the telemetry, while the gateway is the real payload and a live Helix deployment shows
+> everything in Helix's own UI. Drop it with `--set viewer.enabled=false` (or untick it before
+> download). If you instead override `viewer.image` to a **locally-built** image (e.g. your own
+> `helix-configurator:latest`), the cluster can't pull it and the pod `ImagePullBackOff`s until you
+> load it into *that cluster's* store:
 > - **kind:** `kind load docker-image helix-configurator:latest`
 > - **minikube:** `minikube image load helix-configurator:latest`
 > - **Docker Desktop:** its newer Kubernetes runs on containerd (node `desktop-control-plane`) and
