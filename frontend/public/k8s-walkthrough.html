@@ -202,7 +202,7 @@ OTEL_RESOURCE_ATTRIBUTES=service.namespace=&lt;app&gt;,deployment.environment=&l
     <h2 id="verify"><span class="num">5</span>Verify telemetry is flowing</h2>
     <p>The configurator is generate-only — it doesn&rsquo;t reach into your cluster — so verify from your own <code>kubectl</code> and in Helix.</p>
     <h3>Gateway pods are up</h3>
-    <pre><code>kubectl get pods -l app.kubernetes.io/part-of=helix-otel -n &lt;namespace&gt;</code></pre>
+    <pre><code>kubectl get pods -l app.kubernetes.io/component=gateway -n &lt;namespace&gt;</code></pre>
     <h3>Watch it locally (if you included the viewer)</h3>
     <pre><code>kubectl port-forward svc/helix-viewer 3001:3001 -n &lt;namespace&gt;</code></pre>
     <p class="faint">Then open <code>http://localhost:3001/otel-data</code>.</p>

@@ -30,7 +30,7 @@ export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, onBack,
     <div className="space-y-5">
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">1 · Gateway pods are up</p>
-        <SnippetBlock text={`kubectl get pods -l app.kubernetes.io/part-of=helix-otel -n ${namespace}`} />
+        <SnippetBlock text={`kubectl get pods -l app.kubernetes.io/component=gateway -n ${namespace}`} />
       </div>
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">2 · Watch it locally (if you included the viewer)</p>
