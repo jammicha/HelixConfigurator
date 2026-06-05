@@ -154,14 +154,20 @@ Grouping namespaces under a Business Service is **AIOps console config, not the 
 
 ## Generate a Kubernetes chart
 
+Onboarding is **target-branched**: the wizard opens with a **"Where will this run?"** choice
+(Docker / Kubernetes). The Kubernetes path generates this chart as a first-class step, then guides you
+to point apps at the gateway Service and verify. The dashboard action below is the same generator, for
+re-running after onboarding.
+
 From the dashboard, **Quick actions → Generate Kubernetes deployment** emits a self-contained Helm
 chart (`helix-otel/`) pre-wired to your Helix tenant from the current config. Deploy it in four steps:
 
-**1. Download & unzip** the `.zip` from the dialog — this creates a `helix-otel/` folder; run the
-rest from wherever it unzipped:
+**1. Download & unzip** the `.zip` from the dialog, then `cd` into the chart folder — run the rest
+from there:
 ```bash
-unzip ~/Downloads/helix-otel-chart.zip
+unzip ~/Downloads/helix-otel-chart.zip && cd helix-otel
 ```
+_(Assumes your browser saved to `~/Downloads` — adjust the path if the `.zip` landed elsewhere.)_
 
 **2. Create the Secret** with your Helix key. The dialog pre-fills this command with your *actual*
 key (from the configurator's `.env`) so you can copy-paste it — tick *"Generating this for someone
@@ -172,14 +178,16 @@ kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID:
 
 **3. Install the chart**, referencing that Secret:
 ```bash
-helm install helix ./helix-otel --set helix.existingSecret=helix-key
+helm install helix . --set helix.existingSecret=helix-key
 ```
 
-**4. Verify & view** — wait for the pods, point apps at the gateway, open the local viewer:
+**4. Verify & view** — wait for the pods, point apps at the gateway, open the viewer:
 ```bash
 kubectl get pods                                 # wait for helix-gateway + helix-viewer = Running
 # apps in-cluster send to:  http://helix-gateway:4318
-kubectl port-forward svc/helix-viewer 3001:3001  # then open http://localhost:3001/otel-data
+# viewer is internal by default → port-forward, then open http://localhost:8765/otel-data:
+kubectl port-forward svc/helix-viewer 8765:8765
+# (Docker Desktop shortcut: install with --set viewer.service.type=LoadBalancer to skip the port-forward)
 ```
 
 > **Secrets:** the chart also accepts `--set helix.apiKey=…` for throwaway demos, but that value
@@ -188,13 +196,13 @@ kubectl port-forward svc/helix-viewer 3001:3001  # then open http://localhost:30
 > Vault / Sealed Secrets). The chart expects the key under `HELIX_API_KEY` (override with
 > `--set helix.existingSecretKey=…`).
 
-> **Viewer image:** the viewer runs a locally-built `helix-configurator:latest` — nothing publishes
-> it to a registry, so a local cluster can't pull it and the pod `ImagePullBackOff`s (it tries
-> `docker.io/library/helix-configurator:latest`, which 404s) until the image is loaded into *that
-> cluster's* store. Since the viewer is optional, the simplest fix is to leave it out —
-> `--set viewer.enabled=false` (or untick it before download): the gateway is the real payload, and a
-> live Helix deployment shows telemetry in Helix's own UI, not this bundled viewer. To run the local
-> viewer anyway, load the image into your cluster's runtime:
+> **Viewer image:** the viewer defaults to the published, public `ghcr.io/jammicha/helixconfigurator:latest`,
+> so the cluster pulls it automatically — no image-loading needed. It's still optional: a convenience
+> window on the telemetry, while the gateway is the real payload and a live Helix deployment shows
+> everything in Helix's own UI. Drop it with `--set viewer.enabled=false` (or untick it before
+> download). If you instead override `viewer.image` to a **locally-built** image (e.g. your own
+> `helix-configurator:latest`), the cluster can't pull it and the pod `ImagePullBackOff`s until you
+> load it into *that cluster's* store:
 > - **kind:** `kind load docker-image helix-configurator:latest`
 > - **minikube:** `minikube image load helix-configurator:latest`
 > - **Docker Desktop:** its newer Kubernetes runs on containerd (node `desktop-control-plane`) and

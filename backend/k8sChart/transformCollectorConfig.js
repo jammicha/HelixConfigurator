@@ -47,8 +47,10 @@ function transformCollectorConfig(yamlString, { viewerEnabled, viewerServiceName
     if (viewer) {
       for (const key of ['traces_endpoint', 'logs_endpoint', 'metrics_endpoint']) {
         if (typeof viewer[key] === 'string') {
-          // Replace scheme + host:port, preserve the /api/otlp/* path.
-          viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, `http://${viewerServiceName}:3001`);
+          // Replace scheme + host:port, preserve the /api/otlp/* path. The viewer
+          // Service is exposed on 8765 (its container port is 3001) so the human URL
+          // is localhost:8765/otel-data; in-cluster the gateway reaches it the same way.
+          viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, `http://${viewerServiceName}:8765`);
         }
       }
     }

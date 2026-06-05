@@ -25,7 +25,7 @@ describe('buildChartFiles', () => {
     const g = yaml.load(gatewayConfig);
     expect(v.viewer.enabled).toBe(true);
     expect(v.helix.endpoint).toBe('https://h/otlp');
-    expect(g.exporters['otlphttp/helix_local_viewer'].traces_endpoint).toBe('http://helix-viewer:3001/api/otlp/traces');
+    expect(g.exporters['otlphttp/helix_local_viewer'].traces_endpoint).toBe('http://helix-viewer:8765/api/otlp/traces');
   });
 
   it('strips the viewer exporter when the toggle is off', () => {

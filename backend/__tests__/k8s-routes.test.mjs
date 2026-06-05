@@ -61,13 +61,29 @@ describe('GET /api/k8s/chart/preview', () => {
     expect(res.status).toBe(200);
     expect(yaml.load(res.body.values).helix.endpoint).toBe('https://helix.example/otlp');
     expect(yaml.load(res.body.gatewayConfig).exporters['otlphttp/helix_local_viewer'].traces_endpoint)
-      .toBe('http://helix-viewer:3001/api/otlp/traces');
-    expect(res.body.installCommand).toMatch(/helm install helix \.\/helix-otel/);
+      .toBe('http://helix-viewer:8765/api/otlp/traces');
+    expect(res.body.installCommand).toMatch(/helm install helix \. --set/);
     expect(res.body.installCommand).toMatch(/existingSecret/);
     // Default: the live key is pre-filled into the (separate) create-secret command.
     expect(res.body.secretCommand).toContain("HELIX_API_KEY='TENANT::ACCESS::SECRET'");
     expect(res.body.keyEmbedded).toBe(true);
     expect(res.body.files).toContain('helix-otel/templates/gateway-deployment.yaml');
+  });
+
+  it('appends --set viewer.service.type=LoadBalancer when expose=true', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?viewer=true&expose=true');
+    expect(res.status).toBe(200);
+    expect(res.body.installCommand).toMatch(/--set viewer\.service\.type=LoadBalancer/);
+  });
+
+  it('omits the LoadBalancer flag by default (secure)', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?viewer=true');
+    expect(res.body.installCommand).not.toMatch(/LoadBalancer/);
+  });
+
+  it('ignores expose=true when the viewer is disabled (no Service to expose)', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?viewer=false&expose=true');
+    expect(res.body.installCommand).not.toMatch(/LoadBalancer/);
   });
 
   it('viewer=false strips the viewer exporter in the previewed config', async () => {

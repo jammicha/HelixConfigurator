@@ -25,6 +25,11 @@ import { Step3 } from './components/wizard/Step3';
 import type { DetectedCollector } from './components/wizard/Step3';
 import { Step4 } from './components/wizard/Step4';
 import { Step5 } from './components/wizard/Step5';
+import { Step2K8s } from './components/wizard/Step2K8s';
+import { Step3K8s } from './components/wizard/Step3K8s';
+import { Step4K8s } from './components/wizard/Step4K8s';
+import { TargetSelector } from './components/wizard/TargetSelector';
+import { getWizardSteps, isWizardTargetOrNull, type WizardTarget } from './components/wizard/wizardTargets';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle, extractServiceKey } from './utils/helixKey';
 import { isHelixRelevant } from './utils/logFilter';
@@ -54,6 +59,14 @@ const App = () => {
     'helix-configurator.setupStep',
     1,
     (v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 5,
+  );
+  // Onboarding target: Docker (manage a local gateway container) vs Kubernetes
+  // (generate a Helm chart). Chosen on the selector screen; null forces the
+  // selector. localStorage like setupStep — a flow choice, not a credential.
+  const [target, setTarget] = useLocalStorageState<WizardTarget | null>(
+    'helix-configurator.target',
+    null,
+    isWizardTargetOrNull,
   );
   const [isVerifying, setIsVerifying] = useState(false);
   const [setupError, setSetupError] = useState('');
@@ -129,6 +142,9 @@ const App = () => {
   const [gatewayConfigOpen, setGatewayConfigOpen] = useState(false);
   const [gatewayConfigText, setGatewayConfigText] = useState<string>('');
   const [showK8sChart, setShowK8sChart] = useState(false);
+  // Gateway namespace the user enters in the K8s "Point apps" step; lifted here
+  // so Step 4's kubectl commands show the same namespace they typed in Step 3.
+  const [k8sNamespace, setK8sNamespace] = useState('default');
   const [step3Tab, setStep3Tab] = useState<'detected' | 'manual'>('detected');
   const [k8sApplying, setK8sApplying] = useState<boolean>(false);
   const [k8sApplyResult, setK8sApplyResult] = useState<'applied' | 'failed' | null>(null);
@@ -356,7 +372,7 @@ const App = () => {
   // the most legible signal that the user's app is actually sending data
   // through the bridge.
   useEffect(() => {
-    if (isSetupComplete || setupStep !== 4) {
+    if (isSetupComplete || setupStep !== 4 || target !== 'docker') {
       setReceiverBaseline(null);
       setReceiverNow(null);
       setReceiverError('');
@@ -427,17 +443,17 @@ const App = () => {
     scanErrors();
     const errInterval = setInterval(scanErrors, 8000);
     return () => { cancelled = true; clearInterval(interval); clearInterval(errInterval); };
-  }, [setupStep, isSetupComplete]);
+  }, [setupStep, isSetupComplete, target]);
 
   // Wizard Steps 2 + 3 — refresh detected collectors on entry and every 8s
   // while visible. Step 2 needs the list for the smart-add ("Apply
   // automatically") panel; Step 3 needs it for the network-attach widget.
   useEffect(() => {
-    if (isSetupComplete || (setupStep !== 2 && setupStep !== 3)) return;
+    if (isSetupComplete || (setupStep !== 2 && setupStep !== 3) || target !== 'docker') return;
     refreshDetectedCollectors();
     const id = setInterval(refreshDetectedCollectors, 8000);
     return () => clearInterval(id);
-  }, [setupStep, isSetupComplete]);
+  }, [setupStep, isSetupComplete, target]);
 
   // Poll for Network Diagnostics — only once onboarding is complete.
   usePolledFetch('/api/diagnostics/network', 15000,
@@ -661,6 +677,20 @@ const App = () => {
     setSetupError('');
 
     try {
+      // Kubernetes target: just persist the creds (POST /api/env reloads
+      // process.env so the Step-2 chart preview bakes them in) and advance.
+      // No gateway container to recreate, no Docker network diagnostic.
+      if (target === 'kubernetes') {
+        const envRes = await fetch('/api/env', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(envVars),
+        });
+        if (!envRes.ok) throw new Error('Failed to save settings');
+        setSetupStep(2);
+        return; // the finally block clears isVerifying
+      }
+
       // Save keys
       const envRes = await fetch('/api/env', {
         method: 'POST',
@@ -852,6 +882,7 @@ const App = () => {
         setSetupError('');
         setIsSetupComplete(false);
         setSetupStep(1);
+        setTarget(null);
         localStorage.removeItem('helix-configurator.onboarded');
         localStorage.removeItem('helix-configurator.setupStep');
         setResetting(false);
@@ -1217,10 +1248,25 @@ const App = () => {
 
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
           {!isSetupComplete ? (
+            !target ? (
+              <TargetSelector onSelect={(t) => { setTarget(t); setSetupStep(1); }} />
+            ) : (
             <div className="max-w-5xl mx-auto space-y-4">
               <h1 className="text-xl font-semibold text-center text-gray-100">Welcome to Helix Configurator</h1>
 
-              <Stepper current={setupStep} onJump={setSetupStep} />
+              {/* Re-choose target. Resets to Step 1 — steps 2/3 differ by target,
+                  so restarting the branch is correct. Creds stay in .env. */}
+              <div className="flex justify-center">
+                <button
+                  onClick={() => { setTarget(null); setSetupStep(1); }}
+                  className="text-tiny text-gray-400 hover:text-gray-200 border border-gray-800 rounded px-2 py-1"
+                  title="Switch between Docker and Kubernetes"
+                >
+                  Target: {target === 'kubernetes' ? 'Kubernetes' : 'Docker'} · change
+                </button>
+              </div>
+
+              <Stepper current={setupStep} steps={getWizardSteps(target)} onJump={setSetupStep} />
 
               {/* Single discoverable escape hatch for "this got into a weird
                   state, let me start over." Lives on every wizard step so a
@@ -1248,6 +1294,8 @@ const App = () => {
 
               {setupStep === 1 && (
                 <Step1
+                  primaryLabel={target === 'kubernetes' ? 'Save & continue →' : 'Save & initialize →'}
+                  heading={target === 'kubernetes' ? 'Step 1: Configure your Helix connection' : 'Step 1: Configure helix-gateway'}
                   envVars={envVars}
                   setEnvVars={setEnvVars}
                   showApiKey={showApiKey}
@@ -1261,7 +1309,9 @@ const App = () => {
                 />
               )}
 
-              {setupStep === 2 && (
+              {setupStep === 2 && (target === 'kubernetes' ? (
+                <Step2K8s namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
+              ) : (
                 <Step2
                   smartAddProposal={smartAdd.proposal}
                   smartAddResult={smartAdd.result}
@@ -1273,9 +1323,11 @@ const App = () => {
                   onBack={() => setSetupStep(1)}
                   onNext={() => setSetupStep(3)}
                 />
-              )}
+              ))}
 
-              {setupStep === 3 && (
+              {setupStep === 3 && (target === 'kubernetes' ? (
+                <Step3K8s namespace={k8sNamespace} onBack={() => setSetupStep(2)} onNext={() => setSetupStep(4)} />
+              ) : (
                 <Step3
                   bridgeStatus={bridgeStatus}
                   tab={step3Tab}
@@ -1293,9 +1345,16 @@ const App = () => {
                   onNext={() => setSetupStep(4)}
                   onJumpToStep={setSetupStep}
                 />
-              )}
+              ))}
 
-              {setupStep === 4 && (
+              {setupStep === 4 && (target === 'kubernetes' ? (
+                <Step4K8s
+                  otelDashboardUrl={externalApps.otelDashboardUrl}
+                  namespace={k8sNamespace}
+                  onBack={() => setSetupStep(3)}
+                  onFinishStep={() => setSetupStep(5)}
+                />
+              ) : (
                 <Step4
                   bridgeStatus={bridgeStatus}
                   detectedCollectors={detectedCollectors}
@@ -1309,7 +1368,7 @@ const App = () => {
                   onJumpToStep={setSetupStep}
                   onLaunchDashboard={() => setSetupStep(5)}
                 />
-              )}
+              ))}
 
               {setupStep === 5 && (
                 <Step5
@@ -1336,6 +1395,7 @@ const App = () => {
                 onCopyPath={copyToClipboard}
               />
             </div>
+            )
           ) : (
             <>
               {/* Pipeline status banner — "is this thing working?" at the top */}
