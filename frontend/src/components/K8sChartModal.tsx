@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { useEscClose } from '../hooks/useEscClose';
 import { K8sChartPanel } from './K8sChartPanel';
@@ -9,6 +9,7 @@ type Props = { isOpen: boolean; onClose: () => void };
 // shared K8sChartPanel (the same panel the onboarding wizard's Kubernetes step uses).
 export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
   useEscClose(isOpen, onClose);
+  const [namespace, setNamespace] = useState('default');
   if (!isOpen) return null;
   return (
     <div
@@ -29,7 +30,7 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
-          <K8sChartPanel />
+          <K8sChartPanel namespace={namespace} onNamespaceChange={setNamespace} />
         </div>
       </div>
     </div>

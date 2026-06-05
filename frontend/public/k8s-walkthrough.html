@@ -153,8 +153,10 @@ cd helix-otel</code></pre>
 
     <h2 id="install"><span class="num">3</span>Install with Helm</h2>
     <pre><code>helm install helix . --set helix.existingSecret=helix-key</code></pre>
-    <p>Install into a specific namespace by adding <code>-n &lt;namespace&gt;</code> (create it first if needed):</p>
+    <p>Install into a specific namespace by adding <code>-n &lt;namespace&gt;</code>. The Secret must live in the <em>same</em> namespace as the release — the gateway reads it from its own namespace — so create all three together:</p>
     <pre><code>kubectl create namespace observability
+kubectl create secret generic helix-key -n observability \
+  --from-literal=HELIX_API_KEY='&lt;TenantID&gt;::&lt;AccessKey&gt;::&lt;SecretKey&gt;'
 helm install helix . -n observability \
   --set helix.existingSecret=helix-key</code></pre>
     <p class="muted">

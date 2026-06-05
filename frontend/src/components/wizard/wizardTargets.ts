@@ -45,3 +45,23 @@ export function k8sGatewayEndpoint(namespace: string = 'default'): string {
   const ns = (namespace || 'default').trim() || 'default';
   return `http://helix-gateway.${ns}.svc.cluster.local:4318`;
 }
+
+// Decorate the generated secret + install commands for a target namespace. A
+// Kubernetes Secret is namespaced and the chart resolves `helix.existingSecret` in
+// the release's namespace, so the secret must live there too. For a non-default
+// namespace we create it first (so the secret can land in it) and add `-n <ns>` to
+// BOTH commands; default/blank leaves them on the context's current namespace.
+export function namespacedCommands(
+  namespace: string,
+  base: { secretCommand: string; installCommand: string },
+): { createNamespace: string | null; secretCommand: string; installCommand: string } {
+  const ns = (namespace || '').trim();
+  if (!ns || ns === 'default') {
+    return { createNamespace: null, secretCommand: base.secretCommand, installCommand: base.installCommand };
+  }
+  return {
+    createNamespace: `kubectl create namespace ${ns}`,
+    secretCommand: `${base.secretCommand} -n ${ns}`,
+    installCommand: `${base.installCommand} -n ${ns}`,
+  };
+}

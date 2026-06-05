@@ -5,6 +5,7 @@ import {
   k8sGatewayEndpoint,
   isWizardTarget,
   isWizardTargetOrNull,
+  namespacedCommands,
 } from './wizardTargets';
 
 describe('getWizardSteps', () => {
@@ -55,5 +56,29 @@ describe('isWizardTarget / isWizardTargetOrNull', () => {
     expect(isWizardTargetOrNull(null)).toBe(true);
     expect(isWizardTargetOrNull('docker')).toBe(true);
     expect(isWizardTargetOrNull('x')).toBe(false);
+  });
+});
+
+describe('namespacedCommands', () => {
+  const base = {
+    secretCommand: "kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='K'",
+    installCommand: 'helm install helix . --set helix.existingSecret=helix-key',
+  };
+  it('default/blank namespace: commands unchanged, no create-namespace', () => {
+    for (const ns of ['default', '', '   ']) {
+      const r = namespacedCommands(ns, base);
+      expect(r.createNamespace).toBeNull();
+      expect(r.secretCommand).toBe(base.secretCommand);
+      expect(r.installCommand).toBe(base.installCommand);
+    }
+  });
+  it('non-default namespace: creates it and adds -n to both commands', () => {
+    const r = namespacedCommands('observability', base);
+    expect(r.createNamespace).toBe('kubectl create namespace observability');
+    expect(r.secretCommand).toBe(`${base.secretCommand} -n observability`);
+    expect(r.installCommand).toBe(`${base.installCommand} -n observability`);
+  });
+  it('trims surrounding whitespace', () => {
+    expect(namespacedCommands('  obs ', base).createNamespace).toBe('kubectl create namespace obs');
   });
 });

@@ -1310,7 +1310,7 @@ const App = () => {
               )}
 
               {setupStep === 2 && (target === 'kubernetes' ? (
-                <Step2K8s onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
+                <Step2K8s namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
               ) : (
                 <Step2
                   smartAddProposal={smartAdd.proposal}
@@ -1326,7 +1326,7 @@ const App = () => {
               ))}
 
               {setupStep === 3 && (target === 'kubernetes' ? (
-                <Step3K8s namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(2)} onNext={() => setSetupStep(4)} />
+                <Step3K8s namespace={k8sNamespace} onBack={() => setSetupStep(2)} onNext={() => setSetupStep(4)} />
               ) : (
                 <Step3
                   bridgeStatus={bridgeStatus}

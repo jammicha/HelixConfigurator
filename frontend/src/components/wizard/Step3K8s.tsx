@@ -3,14 +3,15 @@ import { SnippetBlock } from '../SnippetBlock';
 import { NamespaceRecipe } from './NamespaceRecipe';
 import { k8sGatewayEndpoint } from './wizardTargets';
 
-type Props = { namespace: string; onNamespaceChange: (ns: string) => void; onBack: () => void; onNext: () => void };
+type Props = { namespace: string; onBack: () => void; onNext: () => void };
 
 // Kubernetes Step 3 — "Point apps": point instrumented apps (or the user's own
 // collector) at the gateway's in-cluster Service DNS. No Docker socket, no
 // bridging — a Service gives the gateway a stable DNS name. The namespace lifts
 // to App state so Step 4's kubectl commands show the same value.
-export const Step3K8s: React.FC<Props> = ({ namespace, onNamespaceChange, onBack, onNext }) => {
+export const Step3K8s: React.FC<Props> = ({ namespace, onBack, onNext }) => {
   const endpoint = k8sGatewayEndpoint(namespace);
+  const ns = namespace.trim() || 'default';
   return (
     <div className="adapt-card">
       <div className="flex items-start justify-between gap-3 mb-2">
@@ -26,18 +27,9 @@ export const Step3K8s: React.FC<Props> = ({ namespace, onNamespaceChange, onBack
         own collector (or your apps directly) at it.
       </p>
 
-      <div className="mb-4">
-        <label htmlFor="k8s-namespace" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Gateway namespace</label>
-        <input
-          id="k8s-namespace"
-          type="text"
-          value={namespace}
-          onChange={e => onNamespaceChange(e.target.value)}
-          spellCheck={false}
-          className="mt-1 w-full max-w-xs bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 text-sm focus:outline-none focus:border-link block"
-          placeholder="default"
-        />
-        <p className="text-tiny text-gray-500 mt-1">Installed into a non-default namespace? Enter it here (the <code className="font-mono">-n</code> flag you passed to <code className="font-mono">helm install</code>).</p>
+      <div className="mb-4 p-2.5 rounded border border-gray-800 bg-gray-1000/50">
+        <p className="text-tiny text-gray-400 mb-1">First, confirm the gateway came up in Step 2 — apps can&apos;t reach a Service with no running pods behind it (namespace <code className="font-mono">{ns}</code>, from the Generate step):</p>
+        <SnippetBlock text={`kubectl get pods -l app.kubernetes.io/component=gateway -n ${ns}`} />
       </div>
 
       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Option A · You run your own collector</p>

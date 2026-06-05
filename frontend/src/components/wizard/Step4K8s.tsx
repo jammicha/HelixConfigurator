@@ -47,6 +47,7 @@ export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, onBack,
         ) : (
           <p className="text-tiny text-gray-500">Set a real Helix endpoint in Step 1 to get a dashboard deep-link.</p>
         )}
+        <p className="text-tiny text-gray-500 mt-2">Give it ~2 minutes after pointing your apps — an empty dashboard usually just means data hasn&apos;t arrived yet. The X-Source registers on first ingest, which is also what makes Step 5&apos;s linking work.</p>
       </div>
     </div>
 

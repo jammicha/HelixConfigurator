@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { SnippetBlock } from './SnippetBlock';
+import { namespacedCommands } from './wizard/wizardTargets';
 
 type Preview = {
   values: string;
@@ -15,7 +16,9 @@ type Preview = {
 // onboarding wizard's Kubernetes "Generate" step. Self-contained: owns the
 // viewer/handoff toggles, fetches the preview, and renders the install steps +
 // previews + download. Generate-only — no cluster calls.
-export const K8sChartPanel: React.FC = () => {
+type Props = { namespace: string; onNamespaceChange: (ns: string) => void };
+
+export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange }) => {
   const [viewerEnabled, setViewerEnabled] = useState(true);
   const [exposeViewer, setExposeViewer] = useState(false);
   const [handoff, setHandoff] = useState(false);
@@ -38,8 +41,18 @@ export const K8sChartPanel: React.FC = () => {
     return () => { cancelled = true; };
   }, [viewerEnabled, handoff, exposeViewer]);
 
+  const cmds = namespacedCommands(namespace, preview ?? { secretCommand: '', installCommand: '' });
+
   return (
     <div className="space-y-4">
+      <div>
+        <label htmlFor="k8s-ns" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Install namespace</label>
+        <input
+          id="k8s-ns" type="text" value={namespace} onChange={e => onNamespaceChange(e.target.value)} spellCheck={false} placeholder="default"
+          className="mt-1 w-full max-w-xs bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 text-sm focus:outline-none focus:border-link block"
+        />
+        <p className="text-tiny text-gray-500 mt-1">The secret &amp; install commands below target this namespace (they must match). Leave as <code className="font-mono">default</code> for a quick try.</p>
+      </div>
       <label className="flex items-center gap-3 text-sm text-gray-300">
         <input type="checkbox" checked={viewerEnabled} onChange={e => { setViewerEnabled(e.target.checked); if (!e.target.checked) setExposeViewer(false); }} className="accent-primary w-4 h-4" />
         Include the local &quot;View OTel Data&quot; viewer (Deployment + PVC)
@@ -90,7 +103,13 @@ export const K8sChartPanel: React.FC = () => {
           </div>
           <div>
             <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">2 · Create the secret</p>
-            <SnippetBlock text={preview.secretCommand} />
+            {cmds.createNamespace && (
+              <>
+                <p className="text-tiny text-gray-500 mb-1">First create the namespace so the secret can land in it:</p>
+                <SnippetBlock text={cmds.createNamespace} />
+              </>
+            )}
+            <SnippetBlock text={cmds.secretCommand} />
             {preview.keyEmbedded && (
               <p className="text-tiny text-[#fcd34d] mb-2">
                 ⚠ Contains your live Helix key — it runs locally and is never written into the downloaded chart.
@@ -99,7 +118,7 @@ export const K8sChartPanel: React.FC = () => {
           </div>
           <div>
             <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">3 · Install the chart</p>
-            <SnippetBlock text={preview.installCommand} />
+            <SnippetBlock text={cmds.installCommand} />
           </div>
           <details>
             <summary className="text-sm text-gray-300 cursor-pointer select-none">Preview values.yaml</summary>
