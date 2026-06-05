@@ -13,7 +13,14 @@ export const Step3K8s: React.FC<Props> = ({ namespace, onNamespaceChange, onBack
   const endpoint = k8sGatewayEndpoint(namespace);
   return (
     <div className="adapt-card">
-      <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 3: Point your apps at the gateway</h2>
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <h2 className="text-lg font-semibold text-gray-200">Step 3: Point your apps at the gateway</h2>
+        <a
+          href="/k8s-walkthrough.html#point"
+          target="_blank" rel="noopener noreferrer"
+          className="text-tiny text-[#8b7cf6] hover:underline whitespace-nowrap mt-1 flex-shrink-0"
+        >Full walkthrough ↗</a>
+      </div>
       <p className="text-sm text-gray-400 mb-4">
         Once the chart is installed, the gateway is reachable in-cluster at its Service DNS name. Point your
         instrumented apps (or your own collector) at it.

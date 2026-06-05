@@ -14,7 +14,14 @@ type Props = {
 // deep-link. No live counters, nothing gates leaving the step.
 export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, onBack, onFinishStep }) => (
   <div className="adapt-card">
-    <h2 className="text-lg font-semibold mb-2 text-gray-200">Step 4: Verify telemetry is flowing</h2>
+    <div className="flex items-start justify-between gap-3 mb-2">
+      <h2 className="text-lg font-semibold text-gray-200">Step 4: Verify telemetry is flowing</h2>
+      <a
+        href="/k8s-walkthrough.html#verify"
+        target="_blank" rel="noopener noreferrer"
+        className="text-tiny text-[#8b7cf6] hover:underline whitespace-nowrap mt-1 flex-shrink-0"
+      >Full walkthrough ↗</a>
+    </div>
     <p className="text-sm text-gray-400 mb-4">
       The configurator generated the chart but doesn&apos;t reach into your cluster — verify from your own{' '}
       <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">kubectl</code> and in Helix.
