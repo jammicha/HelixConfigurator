@@ -17,10 +17,6 @@ const { requireAuth, registerAuthRoutes } = require('./auth');
 const { resolvePort } = require('./portConfig');
 const port = resolvePort(process.env);
 const app = express();
-// Trust the loopback proxy so X-Forwarded-* headers from a local tunnel
-// (cloudflared, ngrok) are honored. computeInstallBaseUrl() uses these to
-// discover the tunnel's public hostname and embed it in install commands.
-app.set('trust proxy', 'loopback');
 
 const CONFIG_PATH = path.join(__dirname, '../helix-otel-collector.yaml');
 const TEMPLATES_DIR = path.join(__dirname, '../templates');
@@ -63,14 +59,8 @@ app.get(/^\/dashboard-mockup(\/.*)?$/, (req, res) => {
 registerAuthRoutes(app);
 
 // Health endpoint (public — for k8s liveness probes, load balancers, monitoring)
-// IS_DEMO_INSTALL is also surfaced here (in addition to gating the demo
-// routes below) so the SPA can mirror the backend's decision and hide
-// the AIOps demo page when the flag is off. Without this, the route was
-// reachable client-side and looked broken on first action.
-const demoInstallEnabled = (process.env.IS_DEMO_INSTALL || 'true').trim().toLowerCase() !== 'false';
-
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, demoInstall: demoInstallEnabled });
+  res.json({ ok: true, version: VERSION, demoInstall: false });
 });
 
 // --- OTel trace store (local fan-out from helix-gateway) -----------------
@@ -83,20 +73,6 @@ const otelStore = new OtelStore({ dbPath: OTEL_DB_PATH });
 console.log(`OTel trace store: ${OTEL_DB_PATH}`);
 
 require('./routes/otlp').register(app, { otelStore });
-// Demo install bundle (public — no auth). Mounted under /api/_demo/aiops/*
-// and registered BEFORE the requireAuth middleware so the install one-liner
-// works without a session cookie.
-//
-// IS_DEMO_INSTALL gates the entire demo plumbing. Defaults to on for
-// backward compatibility with the in-repo .env and tunneled-demo flows.
-// Set IS_DEMO_INSTALL=false in a real-product deployment so the routes
-// 404 and the demo namespace is invisible to clients. The flag itself is
-// also surfaced via /api/health so the SPA can hide the demo page in
-// production.
-if (demoInstallEnabled) {
-  require('./routes/demo').register(app, { projectRoot: path.resolve(__dirname, '..') });
-}
-// --------------------------------------------------------------------------
 
 // Gate everything else under /api/*
 app.use('/api', requireAuth);

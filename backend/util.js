@@ -191,39 +191,12 @@ const getLanIPv4 = () => {
 // "https,http". The first entry is the outermost client-facing value.
 const firstHeaderValue = (raw) => (raw ? raw.split(',')[0].trim() : null);
 
-// Build the URL we'll embed in copyable install commands and inside the
-// generated install scripts themselves. Resolution order:
-//   1. INSTALL_BASE_URL env var — explicit override for any tunnel/proxy.
-//   2. X-Forwarded-Host header — set by cloudflared / ngrok / reverse proxies.
-//      We trust 'loopback' so this is only honored when the tunnel runs
-//      locally (the typical demo setup).
-//   3. LAN IP substitution — if the request came from localhost, swap in the
-//      machine's LAN IPv4 so the URL works from another box on the same network.
-//   4. Bare Host header — same-machine demos.
-const computeInstallBaseUrl = (req) => {
-  if (process.env.INSTALL_BASE_URL) {
-    return process.env.INSTALL_BASE_URL.replace(/\/$/, '');
-  }
-  const fwdHost = firstHeaderValue(req.get('x-forwarded-host'));
-  if (fwdHost) {
-    const proto = firstHeaderValue(req.get('x-forwarded-proto')) || req.protocol;
-    return `${proto}://${fwdHost}`;
-  }
-  const host = req.get('host') || 'localhost:3001';
-  const lanIp = getLanIPv4();
-  if (lanIp && /^(localhost|127\.0\.0\.1)(:|$)/.test(host)) {
-    return `${req.protocol}://${host.replace(/^(localhost|127\.0\.0\.1)/, lanIp)}`;
-  }
-  return `${req.protocol}://${host}`;
-};
-
 module.exports = {
   demuxLogBuffer,
   makeContainerLogs,
   isValidContainerName,
   getLanIPv4,
   firstHeaderValue,
-  computeInstallBaseUrl,
   DockerTimeoutError,
   withDockerTimeout,
   sendDockerTimeoutResponse,
