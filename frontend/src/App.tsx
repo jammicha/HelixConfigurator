@@ -1230,11 +1230,12 @@ const App = () => {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-gray-900 font-sans text-gray-100">
-      <UpdateBanner />
       <ToastStack toasts={toasts} />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto transition-all duration-300">
+        {/* Update-available nudge — full-width strip at the top of the content column */}
+        <UpdateBanner />
         {/* Header */}
         <AppHeader
           isSetupComplete={isSetupComplete}

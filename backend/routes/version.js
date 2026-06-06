@@ -4,6 +4,9 @@
 const REPO = process.env.RELEASES_REPO || 'jammicha/HelixConfigurator';
 
 async function defaultFetchLatestTag() {
+  // Note: unauthenticated GitHub has a 60 req/hr-per-IP rate limit. The banner
+  // fetches /api/version once per page load, so this is fine; add caching here
+  // if /api/version ever gets polled or called server-side in bulk.
   const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
     headers: { 'accept': 'application/vnd.github+json' },
   });
@@ -19,6 +22,8 @@ function register(app, { current, fetchLatestTag = defaultFetchLatestTag } = {})
     let latest = null, updateAvailable = false;
     try {
       latest = normalize(await fetchLatestTag());
+      // String inequality, not semver ordering — a downgrade also reads as
+      // "update available". Acceptable for a single-tenant operator tool.
       updateAvailable = !!latest && latest !== normalize(current);
     } catch { /* offline-safe */ }
     res.json({ current: normalize(current), latest, updateAvailable });

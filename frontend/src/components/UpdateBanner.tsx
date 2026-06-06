@@ -11,9 +11,15 @@ export function UpdateBanner() {
   }, [])
   if (!v?.updateAvailable || dismissed) return null
   return (
-    <div style={{ background: '#3759d8', color: '#fff', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="flex items-center justify-between bg-[#3759d8] px-4 py-2 text-sm text-white">
       <span>Update available: v{v.latest} (you have v{v.current}). Re-run your install command to update.</span>
-      <button onClick={() => setDismissed(true)} style={{ background: 'transparent', border: '1px solid #fff', color: '#fff', borderRadius: 6, padding: '2px 10px', cursor: 'pointer' }}>Dismiss</button>
+      <button
+        onClick={() => setDismissed(true)}
+        aria-label="Dismiss update banner"
+        className="cursor-pointer rounded border border-white bg-transparent px-2.5 py-0.5 text-white hover:bg-white/10"
+      >
+        Dismiss
+      </button>
     </div>
   )
 }
