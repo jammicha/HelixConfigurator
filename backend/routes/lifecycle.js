@@ -12,8 +12,42 @@ const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers 
 const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
 
+const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
+
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
+
+// Pull an image and wait for completion. dockerode's pull is callback+stream
+// based; followProgress resolves when the layered pull finishes.
+function pullImage(docker, image) {
+  return new Promise((resolve, reject) => {
+    docker.pull(image, (err, stream) => {
+      if (err) return reject(err);
+      docker.modem.followProgress(stream, (doneErr) => doneErr ? reject(doneErr) : resolve());
+    });
+  });
+}
+
+// Create the gateway container from scratch — the job docker-compose does in
+// the container path. Used on the first Docker-target commit when no gateway
+// exists yet. After this, recreateGateway() handles subsequent env edits.
+async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
+  // Pull only if absent (offline-friendly; image may already be local).
+  try {
+    await docker.getImage(GATEWAY_IMAGE).inspect();
+  } catch (e) {
+    if (e.statusCode === 404) await pullImage(docker, GATEWAY_IMAGE);
+    else throw e;
+  }
+  try {
+    await docker.createNetwork({ Name: 'helix-bridge' });
+  } catch (e) {
+    if (e.statusCode !== 409) throw e; // 409 = already exists
+  }
+  const spec = buildGatewayCreateSpec({ name, env, configHostPath });
+  const container = await docker.createContainer(spec);
+  await container.start();
+}
 
 // Persistent record of "networks the gateway should be attached to." Every
 // `docker network connect` issued by the bridge routes also lands here. On
@@ -547,4 +581,4 @@ function register(app, { docker }) {
   }
 }
 
-module.exports = { register };
+module.exports = { register, createGatewayFromScratch };
