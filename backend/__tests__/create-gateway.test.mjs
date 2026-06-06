@@ -41,6 +41,23 @@ describe('createGatewayFromScratch', () => {
   });
 });
 
+describe('createGatewayFromScratch — start failure cleanup', () => {
+  it('removes the container (force) when start() rejects, then rethrows', async () => {
+    const docker = mockDocker();
+    const removeSpy = vi.fn(async () => {});
+    const startError = new Error('start failed');
+    docker.createContainer = vi.fn(async () => ({
+      start: vi.fn(async () => { throw startError; }),
+      remove: removeSpy,
+    }));
+    await expect(
+      createGatewayFromScratch(docker, { name: 'helix-gateway', env: [], configHostPath: '/x.yaml' }),
+    ).rejects.toThrow('start failed');
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(removeSpy).toHaveBeenCalledWith({ force: true });
+  });
+});
+
 describe('createGatewayFromScratch — host fan-out', () => {
   it('rewrites the on-disk collector yaml to host.docker.internal before create', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'helix-cfg-'));

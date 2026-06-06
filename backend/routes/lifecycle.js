@@ -49,13 +49,20 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
   // fan-out target to host.docker.internal so traces reach the host viewer.
   try {
     const current = await fsp.readFile(configHostPath, 'utf8');
-    await fsp.writeFile(configHostPath, rewriteLocalViewerToHost(current));
+    const tmp = `${configHostPath}.tmp`;
+    await fsp.writeFile(tmp, rewriteLocalViewerToHost(current));
+    await fsp.rename(tmp, configHostPath);
   } catch (e) {
     console.warn('createGatewayFromScratch: yaml host-rewrite skipped:', e.message);
   }
   const spec = buildGatewayCreateSpec({ name, env, configHostPath });
   const container = await docker.createContainer(spec);
-  await container.start();
+  try {
+    await container.start();
+  } catch (e) {
+    try { await container.remove({ force: true }); } catch { /* best effort */ }
+    throw e;
+  }
 }
 
 // Persistent record of "networks the gateway should be attached to." Every
