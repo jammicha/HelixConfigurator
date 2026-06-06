@@ -14,8 +14,9 @@ const containerLogs = makeContainerLogs(docker);
 
 const { requireAuth, registerAuthRoutes } = require('./auth');
 
+const { resolvePort } = require('./portConfig');
+const port = resolvePort(process.env);
 const app = express();
-const port = 3001;
 // Trust the loopback proxy so X-Forwarded-* headers from a local tunnel
 // (cloudflared, ngrok) are honored. computeInstallBaseUrl() uses these to
 // discover the tunnel's public hostname and embed it in install commands.
@@ -128,6 +129,13 @@ require('./routes/config').register(app, {
 const server = app.listen(port, () => {
   console.log(`Backend listening at http://localhost:${port}`);
   console.log(`Helix Ingest Endpoint: ${process.env.HELIX_ENDPOINT || 'NOT CONFIGURED'}`);
+});
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\nPort ${port} is in use. Set PORT in .env to a free port and relaunch.\n`);
+    process.exit(1);
+  }
+  throw e;
 });
 
 let shuttingDown = false;
