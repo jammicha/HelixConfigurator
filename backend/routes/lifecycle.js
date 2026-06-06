@@ -13,6 +13,7 @@ const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
 
 const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
+const { rewriteLocalViewerToHost } = require('../collectorFanout');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
@@ -43,6 +44,14 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
     await docker.createNetwork({ Name: 'helix-bridge' });
   } catch (e) {
     if (e.statusCode !== 409) throw e; // 409 = already exists
+  }
+  // Configurator runs on the host, gateway in a container — flip the local
+  // fan-out target to host.docker.internal so traces reach the host viewer.
+  try {
+    const current = await fsp.readFile(configHostPath, 'utf8');
+    await fsp.writeFile(configHostPath, rewriteLocalViewerToHost(current));
+  } catch (e) {
+    console.warn('createGatewayFromScratch: yaml host-rewrite skipped:', e.message);
   }
   const spec = buildGatewayCreateSpec({ name, env, configHostPath });
   const container = await docker.createContainer(spec);
