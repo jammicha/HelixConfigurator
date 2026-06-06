@@ -10,16 +10,42 @@ The Helix Configurator is a local diagnostic and management tool that simplifies
 - Deep-link into BMC Helix dashboards and AIOps for the configured business service.
 - Explore traces, logs, errors, and per-operation health locally via the **View OTel Data** page — a built-in APM-style viewer fed by a parallel fan-out from the gateway.
 
-## Prerequisites
+## Distribution
 
-- [Docker](https://docs.docker.com/get-docker/)
-- [Docker Compose](https://docs.docker.com/compose/install/)
+The configurator ships as a **pre-built native package** — no Docker Desktop or
+Docker Compose required to run the configurator itself.
+
+**Primary path — native package (recommended)**
+
+1. Download the platform zip from **GitHub Releases**
+   (`helix-configurator-darwin-arm64.zip`, `darwin-amd64`, `linux-amd64`, or
+   `windows-amd64`).
+2. Extract the zip.
+3. Run the launcher: `./start.command` (macOS), `./start.sh` (Linux), or
+   `start.bat` (Windows). The launcher runs `./node backend/index.js` and opens
+   the browser to `http://localhost:8765`.
+
+No Docker is needed to run the configurator. Docker Engine (not necessarily
+Docker Desktop) is needed only when you choose the **Docker** onboarding target
+for your apps — so the configurator can create and manage the `helix-gateway`
+collector container.
+
+**Secondary path — Docker image (GHCR)**
+
+The container image (`ghcr.io/jammicha/helixconfigurator`) remains published and
+works as before with `docker compose up -d`. The image sets `PORT=3001`
+internally; `docker-compose.yml` maps `8765:3001`.
+
+**Local development** (no install needed): see [Development](#development).
+
+---
 
 ## Getting Started
 
 ### 1. Configure environment variables
 
-Create a `.env` file in the repo root with the following:
+Create a `.env` file in the repo root (or the extracted package directory) with
+the following:
 
 ```env
 # Required
@@ -47,13 +73,8 @@ UI_AUTH_PASSWORD=
 # Internal: container the configurator manages. Leave as default unless renaming.
 TARGET_CONTAINER_NAME=helix-gateway
 
-# Optional: gate the demo install bundle (the simulated AIOps "Manage
-# OpenTelemetry" wizard and its install-bundle generator). Defaults to true
-# for backward compatibility with the in-repo .env. Set to `false` in a real
-# product deployment so the /api/_demo/aiops/* routes return 404 and the
-# demo plumbing is invisible to clients. See the "Demo install bundle"
-# section below for what this gates.
-IS_DEMO_INSTALL=true
+# Internal: update-check repo (matches GitHub Releases). Leave as default.
+# RELEASES_REPO=jammicha/HelixConfigurator
 ```
 
 The `helix-otel-collector.yaml` shipped in the repo references these via `${env:HELIX_ENDPOINT}` / `${env:HELIX_API_KEY}` / `${env:X_SOURCE}`, so secrets stay in `.env` (which is gitignored) and never land in committed config.
@@ -64,13 +85,27 @@ Notes:
 - `X_SOURCE` is the telemetry **source** header. In Helix it becomes the *OTel Namespace* only for apps that don't set their own `service.namespace` (Business Services bind to that namespace). Onboarding several apps? Give each its own `service.namespace` so they stay distinct — see [Onboarding multiple applications](#onboarding-multiple-applications).
 - `UI_AUTH_PASSWORD` enables shared-password sign-in to the configurator UI. Leave blank for open access. This is "prevent casual access" — anyone wanting real authentication should put an SSO proxy in front.
 
-### 2. Start the services
+### 2. Start the configurator
+
+**Native package (primary):** run the launcher from the extracted directory:
 
 ```bash
-docker-compose up --build -d
+./start.sh          # Linux
+./start.command     # macOS (or double-click in Finder)
+start.bat           # Windows
 ```
 
-This builds the configurator image, starts the OpenTelemetry Collector (`helix-gateway`) with your config mounted, and exposes the UI on `http://localhost:8765`.
+The launcher runs `./node backend/index.js`, waits for `:8765/api/health`, then
+opens the browser automatically.
+
+**Docker image (secondary):**
+
+```bash
+docker-compose up -d
+```
+
+This starts the pre-built GHCR image (container on port 3001, mapped to host
+port 8765) and the gateway. No local build required.
 
 ### 3. Open the UI
 
@@ -260,61 +295,63 @@ Trace detail (click a row in Traces):
 
 Diagnostics popover (top-right of the page) lists detected upstream OTel collectors and offers a one-click **Restart** action — useful when the demo collector's `memory_limiter` trips after long runs and the trace stream stalls.
 
-## Container & Port Reference
+## Port & Process Reference
 
-| Service | Container | Host Port | Purpose |
-|---|---|---|---|
-| `helix-configurator` | `helix-configurator` | 8765 → 3001 | Configurator UI + backend API |
-| `helix-gateway` | `helix-gateway` | 4317 | OTLP gRPC receiver |
-| `helix-gateway` | `helix-gateway` | 4318 | OTLP HTTP receiver |
-| `helix-gateway` | `helix-gateway` | 8888 | Prometheus metrics endpoint (used by the diagnostic counters) |
+| Deployment | Service | Where it runs | Host Port | Purpose |
+|---|---|---|---|---|
+| **Native (primary)** | `helix-configurator` | Host process | 8765 (default; override with `PORT` in `.env`) | Configurator UI + backend API |
+| **Native (primary)** | `helix-gateway` | Docker container (created by the configurator) | 4317 / 4318 / 8888 | OTLP gRPC / HTTP receiver; Prometheus metrics |
+| **Docker image (secondary)** | `helix-configurator` | Container on `helix-bridge` | 8765 → 3001 | Configurator UI + backend API |
+| **Docker image (secondary)** | `helix-gateway` | Container on `helix-bridge` | 4317 / 4318 / 8888 | OTLP gRPC / HTTP receiver; Prometheus metrics |
 
-Both containers attach to the `helix-bridge` Docker network. Application containers can be attached to the same network at runtime via the *Discovered Services* panel — once attached, point your app's OTel exporter at `helix-gateway:4317` and `X-Api-Key` / `X-Source` headers will be injected by the gateway.
+In the native path the configurator is a **host process** (port `PORT`, default 8765). When you choose the Docker onboarding target, the configurator creates `helix-gateway` itself via dockerode — pulling `otel/opentelemetry-collector-contrib:latest`, creating the `helix-bridge` network, and publishing ports 4317/4318/8888. The gateway's local fan-out endpoint is `http://host.docker.internal:8765` (the configurator is on the host, not in a container); `ExtraHosts: host.docker.internal:host-gateway` is injected so this resolves on Linux Docker Engine as well as Docker Desktop.
 
-The gateway also fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is a SQLite database mounted at `./data/otel-store.db` (capped at 1000 traces, sliding window) and persists across container restarts.
+Application containers can be attached to the same `helix-bridge` network at runtime via the *Discovered Services* panel — once attached, point your app's OTel exporter at `helix-gateway:4317` or `:4318`.
 
-The configurator also exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes — bypasses the auth gate so it works in unauthenticated orchestrator checks.
+The gateway fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is SQLite at `./data/otel-store.db` (capped at 1000 traces, sliding window) and persists across restarts.
 
-## Demo install bundle (`/api/_demo/aiops/*`)
+The configurator exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes and an `GET /api/version` endpoint that compares the embedded version to the latest GitHub release — the UI shows an "update available" banner when they differ.
 
-A second set of routes lives under the `/api/_demo/aiops/` namespace. These are **not** product features — they simulate the BMC Helix AIOps "Manage OpenTelemetry" page so a prospect can experience the full onboarding flow (generate an install command → run it → land in the configurator UI) without a real AIOps tenant on the other end.
+## Demo — `helix-aiops-mock`
 
-What the demo plumbing does:
-- The `/aiops` page on the configurator collects an `X-Source` name and POSTs to `/api/_demo/aiops/configure`. The backend fabricates a `FAKE-KEY-…` API key, parks it in an in-memory session, and returns a copyable `curl … | bash` / `iwr … | iex` one-liner.
-- That installer hits `/api/_demo/aiops/install/<token>.{sh,ps1}` to fetch the platform-specific install script, which in turn downloads `/api/_demo/aiops/package/<token>` — a generated zip containing the configurator source, a templated `helix-otel-collector.yaml`, a `.env` with the fake key, double-click launchers, and a README.
-- The bundle's `.env` ships `HELIX_ENDPOINT=https://your-tenant.onbmc.com` as an obvious placeholder; the user replaces it on the configurator's Settings page on first run.
+The demo workflow (simulating the BMC Helix AIOps "Manage OpenTelemetry" install
+page) lives in the **separate `helix-aiops-mock` project**, not in this repo. It
+is a small standalone Express app (port `:9000`) that:
 
-What it would look like in a real-product deployment:
-- A real AIOps page would generate the install command (the configurator would not host the page).
-- A real tenant would supply the actual `HELIX_ENDPOINT` and `HELIX_API_KEY`, not the placeholder + fake.
-- The fan-out `otlphttp/helix_local_viewer` exporter in `helix-otel-collector.yaml` (which feeds the local View OTel Data page) is **not** demo plumbing — it's part of the configurator's standalone-sidecar story and ships in either world.
+- Serves a mock "Manage OTel" form where you enter an X-Source name.
+- Mints a session (token + fake API key) and returns a `curl … | bash` /
+  `iwr … | iex` one-liner pointing at GitHub Releases.
+- Serves templated bash/PowerShell install scripts that download the correct
+  platform zip from `https://github.com/jammicha/HelixConfigurator/releases/latest/download/`,
+  write a pre-filled `.env`, and launch `./node backend/index.js`.
 
-To hide the demo namespace entirely:
-
-```env
-IS_DEMO_INSTALL=false
-```
-
-Setting the flag makes the four `/api/_demo/aiops/*` routes return 404 and the `/aiops` SPA page becomes a dead end. All other `/api/*` routes (the real OTel data, gateway management, diagnostics) are unaffected.
-
-The boundary is also visible in source: every demo-only renderer (`renderCollectorYaml`, `renderEnvFile`, `renderDockerCompose`, `renderBashInstaller`, `renderPowerShellInstaller`, `writePackageToArchive`, …) lives in `backend/routes/demo.js` and nowhere else. A new contributor reading the code can tell at a glance which surfaces are product and which are sales-tool.
+The configurator itself has **no demo routes, no `/aiops` page, and no
+`IS_DEMO_INSTALL` flag** — it is purely the product tool. The fan-out
+`otlphttp/helix_local_viewer` exporter (which feeds **View OTel Data**) is not
+demo plumbing; it ships in all deployments.
 
 ## Troubleshooting & Management
 
-- View configurator logs:
-  ```bash
-  docker logs helix-configurator
-  ```
+- **Native:** the configurator logs to stdout in the terminal where you ran the launcher.
 - View gateway (OTel Collector) logs:
   ```bash
   docker logs helix-gateway
   ```
-- Stop and remove containers:
+- Stop the gateway container:
+  ```bash
+  docker stop helix-gateway
+  ```
+- **Docker image path:** stop both containers with:
   ```bash
   docker-compose down
   ```
 - Reset the gateway to a fresh state without losing settings:
   Use the **Restart** button in the UI's *Helix Gateway Status* card.
+- **Update the configurator:** re-run the install command from `helix-aiops-mock`
+  or download the latest zip from GitHub Releases and extract over the existing
+  directory (your `.env`, `helix-otel-collector.yaml`, and `data/` are
+  preserved). The configurator UI shows an "update available" banner at the top
+  of the page when a newer release is detected.
 
 ## Development
 
@@ -324,7 +361,7 @@ To run the components outside Docker:
 ```bash
 cd backend
 npm install
-npm run dev   # starts on :3001
+PORT=3001 npm run dev   # starts on :3001 (matches the Vite proxy target below)
 ```
 
 ### Frontend
@@ -334,7 +371,9 @@ npm install
 npm run dev   # starts Vite dev server on :3000
 ```
 
-The frontend dev server proxies `/api/*` to `http://localhost:3001`. Both halves can run concurrently while developing.
+The frontend dev server proxies `/api/*` to `http://localhost:3001`. Run the
+backend with `PORT=3001` (as shown above) so the proxy resolves. Both halves
+can run concurrently while developing.
 
 ## Known Issues
 
