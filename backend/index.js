@@ -76,8 +76,9 @@ app.get('/api/health', (req, res) => {
 // --- OTel trace store (local fan-out from helix-gateway) -----------------
 // SQLite lives in a mounted volume so traces survive container restarts.
 // Outside Docker we fall back to backend/data so dev is self-contained.
-const OTEL_DB_PATH = process.env.OTEL_DB_PATH ||
-  (fs.existsSync('/app') ? '/app/data/otel-store.db' : path.join(__dirname, 'data', 'otel-store.db'));
+const { resolveDataDir } = require('./statePaths');
+const DATA_DIR = resolveDataDir({ appDirExists: fs.existsSync('/app'), backendDir: __dirname });
+const OTEL_DB_PATH = process.env.OTEL_DB_PATH || path.join(DATA_DIR, 'otel-store.db');
 const otelStore = new OtelStore({ dbPath: OTEL_DB_PATH });
 console.log(`OTel trace store: ${OTEL_DB_PATH}`);
 

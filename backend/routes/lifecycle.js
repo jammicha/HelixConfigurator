@@ -24,12 +24,11 @@ const ENV_PATH = path.join(__dirname, '..', '..', '.env');
 //
 // File lives in the same data/ volume as the OTel store so it survives
 // container restarts. Single-writer assumption: only this process mutates it.
-const BRIDGED_NETWORKS_PATH = (() => {
-  // Mirror the OTEL_DB_PATH logic from index.js so the file lands in the same
-  // volume both inside and outside the container.
-  if (fs.existsSync('/app')) return '/app/data/bridged-networks.json';
-  return path.join(__dirname, '..', 'data', 'bridged-networks.json');
-})();
+const { resolveDataDir } = require('../statePaths');
+const BRIDGED_NETWORKS_PATH = path.join(
+  resolveDataDir({ appDirExists: fs.existsSync('/app'), backendDir: path.join(__dirname, '..') }),
+  'bridged-networks.json',
+);
 
 const loadBridgedNetworks = async () => {
   try {
