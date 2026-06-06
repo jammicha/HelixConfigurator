@@ -46,13 +46,13 @@ Invoke-WebRequest -UseBasicParsing -Uri "${base(repo)}/helix-configurator-${plat
 Expand-Archive -Force -Path pkg.zip -DestinationPath .; Remove-Item pkg.zip
 Set-Location helix-configurator
 if (-not (Test-Path .env) -or (Select-String -Path .env -Pattern 'placeholder' -Quiet)) {
-@"
+@'
 HELIX_ENDPOINT=${session.endpoint}
 HELIX_API_KEY=${session.apiKey}
 X_SOURCE=${x}
 BUSINESS_SERVICE_KEY=
 PORT=8765
-"@ | Set-Content .env
+'@ | Set-Content .env
 }
 .\\start.bat
 `;

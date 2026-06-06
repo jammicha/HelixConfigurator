@@ -26,4 +26,13 @@ describe('renderPowerShellInstaller', () => {
   it('maps arch to the windows-amd64 asset', () => {
     expect(ps).toContain('helix-configurator-windows-amd64.zip');
   });
+  it('templates a sanitized X_SOURCE, api key, and endpoint into .env', () => {
+    expect(ps).toContain('X_SOURCE=cart-svc');           // spaces sanitized
+    expect(ps).toContain('HELIX_API_KEY=FAKE-KEY-AB');
+    expect(ps).toContain('HELIX_ENDPOINT=https://t.onbmc.com');
+  });
+  it('uses a single-quoted here-string so .env values are not PS-expanded', () => {
+    expect(ps).toContain("@'");
+    expect(ps).toContain("'@ | Set-Content .env");
+  });
 });

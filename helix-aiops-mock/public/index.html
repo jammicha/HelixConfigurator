@@ -18,8 +18,11 @@ button{background:#3759d8;border-color:#3759d8;cursor:pointer}pre{background:#0b
 <script>
 document.getElementById('go').onclick = async () => {
   const xSource = document.getElementById('x').value.trim(); if(!xSource) return;
-  const r = await fetch('/configure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({xSource})});
-  const j = await r.json(); document.getElementById('sh').textContent=j.sh;
-  document.getElementById('ps').textContent=j.ps1; document.getElementById('out').hidden=false;
+  try {
+    const r = await fetch('/configure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({xSource})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.error || 'Failed to generate install command'); return; }
+    const j = await r.json(); document.getElementById('sh').textContent=j.sh;
+    document.getElementById('ps').textContent=j.ps1; document.getElementById('out').hidden=false;
+  } catch { alert('Network error — is the mock server running?'); }
 };
 </script></body></html>
