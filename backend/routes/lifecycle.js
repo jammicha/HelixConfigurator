@@ -426,10 +426,10 @@ function register(app, { docker, configPath }) {
 
   // POST wipe wizard state and start fresh. Clears the configurator-managed
   // .env values, drops the bridged-networks persistence, and recreates the
-  // gateway with a clean environment. Does NOT touch UI_AUTH_PASSWORD or
-  // IS_DEMO_INSTALL (deployment config, not wizard state) and does NOT wipe
-  // the OTel trace store (separate concern; users can reset that from the
-  // dashboard if they need a clean data slate too).
+  // gateway with a clean environment. Does NOT touch deployment config like
+  // UI_AUTH_PASSWORD (not wizard state) and does NOT wipe the OTel trace store
+  // (separate concern; users can reset that from the dashboard if they need a
+  // clean data slate too).
   app.post('/api/lifecycle/reset-onboarding', async (req, res) => {
     const sidecarName = TARGET_CONTAINER();
     const WIZARD_KEYS = ['HELIX_ENDPOINT', 'HELIX_API_KEY', 'X_SOURCE', 'BUSINESS_SERVICE_KEY', 'HELIX_EVENTS_ENDPOINT'];

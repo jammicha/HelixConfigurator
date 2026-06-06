@@ -23,4 +23,7 @@ describe('buildGatewayCreateSpec', () => {
   it('attaches the helix-bridge network', () => {
     expect(spec.HostConfig.NetworkMode).toBe('helix-bridge');
   });
+  it('maps host.docker.internal to host-gateway so fan-out works on Linux Docker', () => {
+    expect(spec.HostConfig.ExtraHosts).toContain('host.docker.internal:host-gateway');
+  });
 });
