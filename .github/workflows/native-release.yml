@@ -3,6 +3,8 @@ name: Native release
 on:
   push:
     tags: ['v*']
+  # Manual runs build + zip for smoke-testing; the Upload step only succeeds
+  # on a tag push (action-gh-release needs a tag to attach assets to).
   workflow_dispatch:
 
 permissions:
@@ -28,6 +30,13 @@ jobs:
 
       - name: Install backend prod deps (native addons)
         run: cd backend && npm ci --omit=dev
+
+      - name: Verify native addon loaded
+        # better-sqlite3 is the only native dep and the main cross-platform risk
+        # (a missing prebuild silently falls back to a source build, or fails to
+        # load). Fail loudly here rather than shipping a zip whose addon is broken.
+        shell: bash
+        run: cd backend && node -e "require('better-sqlite3'); console.log('better-sqlite3 OK on ${{ matrix.platform }}')"
 
       - name: Stage package
         shell: bash
