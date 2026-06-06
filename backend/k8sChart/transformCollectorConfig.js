@@ -8,9 +8,9 @@
 // arrive via the pod's env (Secret + values), and the ConfigMap embeds this file
 // via `.Files.Get` (raw bytes), so no Helm/Go templating touches them.
 const yaml = require('js-yaml');
+const { LOCAL_VIEWER_HOST } = require('../collectorFanout');
 
 const VIEWER_EXPORTER_KEY = 'otlphttp/helix_local_viewer';
-const LOCAL_VIEWER_HOST = 'host.docker.internal:8765';
 
 function invalid(message, cause) {
   const err = new Error(message);
