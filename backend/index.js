@@ -70,7 +70,6 @@ require('./routes/otlp').register(app, { otelStore });
 
 // Gate everything else under /api/*
 app.use('/api', requireAuth);
-// --------------------------------------------------------------------------
 
 require('./routes/traces').register(app, { otelStore, docker });
 require('./routes/situations').register(app, { otelStore });

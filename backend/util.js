@@ -1,7 +1,6 @@
 // Shared utilities used across multiple route modules. Pure functions where
 // possible; the docker-dependent containerLogs is exposed as a factory so
 // callers can bind it to their own Docker client.
-const os = require('os');
 
 // Demultiplex docker logs() output when the container isn't TTY-attached.
 // Each multiplexed frame is: [streamType:1][padding:3][length:4_BE][payload].
@@ -168,35 +167,10 @@ const sendDockerTimeoutResponse = (res, err) => {
   return false;
 };
 
-// Best LAN-routable IPv4 from any non-virtual interface, prioritizing
-// 192.168.* over 10.* (the typical home/lab vs corp ordering).
-const getLanIPv4 = () => {
-  const ifaces = os.networkInterfaces();
-  const candidates = [];
-  for (const name of Object.keys(ifaces)) {
-    if (/docker|bridge|vbox|vmnet|utun|tun|tap|wg/i.test(name)) continue;
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        candidates.push({ name, address: iface.address });
-      }
-    }
-  }
-  const priority = (ip) => /^192\.168\./.test(ip) ? 0 : /^10\./.test(ip) ? 1 : 2;
-  candidates.sort((a, b) => priority(a.address) - priority(b.address));
-  return candidates[0]?.address || null;
-};
-
-// Chained proxies (cloudflared → vite → backend) append to X-Forwarded-*
-// rather than overwrite, so the value can be a comma-joined list like
-// "https,http". The first entry is the outermost client-facing value.
-const firstHeaderValue = (raw) => (raw ? raw.split(',')[0].trim() : null);
-
 module.exports = {
   demuxLogBuffer,
   makeContainerLogs,
   isValidContainerName,
-  getLanIPv4,
-  firstHeaderValue,
   DockerTimeoutError,
   withDockerTimeout,
   sendDockerTimeoutResponse,
