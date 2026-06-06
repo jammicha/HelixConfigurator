@@ -57,6 +57,9 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, version: VERSION, demoInstall: false });
 });
 
+// Update-check endpoint (public — banner works without auth, like /api/health)
+require('./routes/version').register(app, { current: VERSION });
+
 // --- OTel trace store (local fan-out from helix-gateway) -----------------
 // SQLite lives in a mounted volume so traces survive container restarts.
 // Outside Docker we fall back to backend/data so dev is self-contained.
