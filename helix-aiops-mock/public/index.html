@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Manage OpenTelemetry — Helix AIOps (mock)</title>
+<style>body{font:15px/1.5 system-ui;max-width:680px;margin:40px auto;padding:0 16px;background:#10141c;color:#e6e8ee}
+input,button{font:inherit;padding:8px 10px;border-radius:6px;border:1px solid #2a3140;background:#1b1f29;color:inherit}
+button{background:#3759d8;border-color:#3759d8;cursor:pointer}pre{background:#0b0e14;padding:12px;border-radius:8px;overflow:auto}
+.card{background:#161b24;border:1px solid #2a3140;border-radius:10px;padding:20px;margin-top:16px}</style></head>
+<body>
+<h1>Manage OpenTelemetry <span style="opacity:.5">(mock)</span></h1>
+<p>Enter your service name to generate an API key and install command.</p>
+<div class="card">
+  <label>Service / source name<br><input id="x" placeholder="my-service" style="width:100%"></label>
+  <p><button id="go">Generate install command</button></p>
+  <div id="out" hidden>
+    <p><b>macOS / Linux</b></p><pre id="sh"></pre>
+    <p><b>Windows (PowerShell)</b></p><pre id="ps"></pre>
+  </div>
+</div>
+<script>
+document.getElementById('go').onclick = async () => {
+  const xSource = document.getElementById('x').value.trim(); if(!xSource) return;
+  const r = await fetch('/configure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({xSource})});
+  const j = await r.json(); document.getElementById('sh').textContent=j.sh;
+  document.getElementById('ps').textContent=j.ps1; document.getElementById('out').hidden=false;
+};
+</script></body></html>
