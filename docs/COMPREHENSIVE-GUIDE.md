@@ -132,8 +132,8 @@ remote). First run launches the wizard; the nav bar
 **Local development** (outside Docker):
 
 ```bash
-cd backend  && npm install && PORT=3001 npm run dev   # :3001 (matches Vite proxy)
-cd frontend && npm install && npm run dev             # :3000 (Vite; proxies /api → :3001)
+cd backend  && npm install && npm run dev   # :8765 (the default PORT)
+cd frontend && npm install && npm run dev   # :3000 (Vite; proxies /api → :8765)
 ```
 
 `tsc --noEmit` is the frontend's primary safety net (there is no UI test suite).
@@ -742,8 +742,8 @@ A digest of the durable, easy-to-trip-over knowledge:
 **Run/iterate:**
 
 ```bash
-cd backend  && npm install && PORT=3001 npm run dev   # :3001 (auto-reload; matches Vite proxy)
-cd frontend && npm install && npm run dev             # :3000 (Vite proxies /api → :3001)
+cd backend  && npm install && npm run dev   # :8765 (auto-reload; the default PORT)
+cd frontend && npm install && npm run dev   # :3000 (Vite proxies /api → :8765)
 ```
 
 To validate the Docker image path:

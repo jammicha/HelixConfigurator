@@ -428,10 +428,10 @@ Auth-gated under `/api`:
 ## 11. Local development
 
 ```bash
-# Backend (auto-reload) — set PORT=3001 to match the Vite proxy target
-cd backend && npm install && PORT=3001 npm run dev   # :3001
+# Backend (auto-reload) — binds the default PORT 8765
+cd backend && npm install && npm run dev   # :8765
 
-# Frontend (Vite dev server, proxies /api → :3001)
+# Frontend (Vite dev server, proxies /api → :8765)
 cd frontend && npm install && npm run dev  # :3000
 ```
 

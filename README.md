@@ -361,7 +361,7 @@ To run the components outside Docker:
 ```bash
 cd backend
 npm install
-PORT=3001 npm run dev   # starts on :3001 (matches the Vite proxy target below)
+npm run dev   # starts on :8765 (the default PORT)
 ```
 
 ### Frontend
@@ -371,9 +371,9 @@ npm install
 npm run dev   # starts Vite dev server on :3000
 ```
 
-The frontend dev server proxies `/api/*` to `http://localhost:3001`. Run the
-backend with `PORT=3001` (as shown above) so the proxy resolves. Both halves
-can run concurrently while developing.
+The frontend dev server proxies `/api/*` to `http://localhost:8765` (the
+backend's default port), so both halves can run concurrently with no extra
+configuration.
 
 ## Known Issues
 
