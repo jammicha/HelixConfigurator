@@ -26,5 +26,6 @@ COPY --from=frontend-build /app/frontend/dist ./frontend-dist
 # COPY .env .
 # COPY otel-collector-config.yaml .
 
+ENV PORT=3001
 EXPOSE 3001
 CMD ["node", "backend/index.js"]
