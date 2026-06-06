@@ -1,0 +1,66 @@
+# .github/workflows/native-release.yml
+name: Native release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create releases + upload assets
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-latest,   platform: darwin-arm64, nodearch: arm64 }
+          - { os: macos-13,       platform: darwin-amd64, nodearch: x64   }
+          - { os: ubuntu-latest,  platform: linux-amd64,  nodearch: x64   }
+          - { os: windows-latest, platform: windows-amd64, nodearch: x64  }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+
+      - name: Install backend prod deps (native addons)
+        run: cd backend && npm ci --omit=dev
+
+      - name: Stage package
+        shell: bash
+        run: |
+          set -e
+          STAGE="helix-configurator"
+          rm -rf "$STAGE" && mkdir -p "$STAGE/data"
+          cp -R backend "$STAGE/backend"
+          cp -R frontend/dist "$STAGE/frontend-dist"
+          cp -R templates "$STAGE/templates"
+          cp -R helix-otel "$STAGE/helix-otel"
+          cp helix-otel-collector.yaml "$STAGE/helix-otel-collector.yaml"
+          # Bundle the matching Node runtime
+          node -e "const v=process.version;console.log(v)"
+          NODE_DIR="$(dirname "$(command -v node)")"
+          if [ "${{ runner.os }}" = "Windows" ]; then cp "$NODE_DIR/node.exe" "$STAGE/node.exe";
+          else cp "$NODE_DIR/node" "$STAGE/node"; fi
+          # Launchers
+          cp packaging/start.sh "$STAGE/" 2>/dev/null || true
+          cp packaging/start.command "$STAGE/" 2>/dev/null || true
+          cp packaging/start.bat "$STAGE/" 2>/dev/null || true
+          chmod +x "$STAGE/start.sh" "$STAGE/start.command" 2>/dev/null || true
+
+      - name: Zip
+        shell: bash
+        run: |
+          ZIP="helix-configurator-${{ matrix.platform }}.zip"
+          if [ "${{ runner.os }}" = "Windows" ]; then 7z a "$ZIP" helix-configurator > /dev/null;
+          else zip -ry "$ZIP" helix-configurator > /dev/null; fi
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: helix-configurator-${{ matrix.platform }}.zip
+          fail_on_unmatched_files: true
+          prerelease: false   # latest/download/ must resolve to this release
