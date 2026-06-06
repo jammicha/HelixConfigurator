@@ -33,12 +33,6 @@ app.use(express.json({ limit: '4mb' }));
 // Serve static frontend (auth gate is on /api/* only — static assets stay public)
 app.use(express.static(path.join(__dirname, '../frontend-dist')));
 
-// SPA fallback for the AIOps mock route — express.static 404s on /aiops since
-// no file exists there. Send index.html so the client-side route renders.
-app.get(/^\/aiops(\/.*)?$/, (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
-});
-
 // SPA fallback for the View OTel Data route.
 app.get(/^\/otel-data(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
