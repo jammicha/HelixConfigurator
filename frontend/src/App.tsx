@@ -41,6 +41,7 @@ import { QuickActions } from './components/dashboard/QuickActions';
 import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConnectionSettingsDrawer';
 import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/SetPasswordModal';
 import { AppHeader } from './components/AppHeader';
+import { UpdateBanner } from './components/UpdateBanner';
 import { DiscoveredServicesDrawer } from './components/dashboard/DiscoveredServicesDrawer';
 import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGrid';
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
@@ -1229,6 +1230,7 @@ const App = () => {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-gray-900 font-sans text-gray-100">
+      <UpdateBanner />
       <ToastStack toasts={toasts} />
 
       {/* Main Content Area */}
