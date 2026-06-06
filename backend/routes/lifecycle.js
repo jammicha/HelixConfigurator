@@ -242,7 +242,7 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
   await fresh.start();
 };
 
-function register(app, { docker }) {
+function register(app, { docker, configPath }) {
   // POST restart the configured target container. Recreates rather than
   // plain-restarts so updated .env values load (see recreateGateway above
   // for the env_file-at-create-time rationale).
@@ -296,23 +296,30 @@ function register(app, { docker }) {
   app.post('/api/lifecycle/bridge', async (req, res) => {
     const sidecarName = TARGET_CONTAINER();
 
-    // Ensure the helix-bridge network exists (idempotent) so Step 3's
-    // manual-Option-B path has somewhere to land.
+    // Create-or-recreate: native installs have no compose, so on the first
+    // Docker-target commit there is no gateway to inspect — create it from
+    // scratch. Subsequent commits hit recreateGateway (env refresh).
+    let gatewayExists = true;
     try {
-      await docker.createNetwork({ Name: 'helix-bridge' });
+      await docker.getContainer(sidecarName).inspect();
     } catch (e) {
-      if (e.statusCode !== 409) console.warn('Network create warning:', e.message);
+      if (e.statusCode === 404) gatewayExists = false;
+      else return res.status(500).json({ error: 'Failed to inspect gateway', details: e.message });
     }
-
     try {
-      await recreateGateway(docker, sidecarName);
+      if (gatewayExists) {
+        await recreateGateway(docker, sidecarName);
+      } else {
+        const env = (await readEnvAsArray()) || [];
+        await createGatewayFromScratch(docker, { name: sidecarName, env, configHostPath: configPath });
+      }
     } catch (e) {
       return res.status(500).json({
-        error: 'Gateway recreate failed — env changes may not have taken effect',
+        error: 'Gateway create/recreate failed — env changes may not have taken effect',
         details: e.message,
       });
     }
-    res.json({ message: 'Gateway recreated with updated environment' });
+    res.json({ message: gatewayExists ? 'Gateway recreated with updated environment' : 'Gateway created' });
   });
 
   // POST attach the sidecar to an arbitrary Docker network by name. Used by

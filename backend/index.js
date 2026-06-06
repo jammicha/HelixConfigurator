@@ -107,7 +107,7 @@ require('./routes/situations').register(app, { otelStore });
 require('./routes/business-service').register(app, { otelStore });
 require('./routes/discovery').register(app, { docker });
 require('./routes/containers').register(app, { docker });
-require('./routes/lifecycle').register(app, { docker });
+require('./routes/lifecycle').register(app, { docker, configPath: CONFIG_PATH });
 require('./routes/step-zero/synthetic').register(app, { docker });
 require('./routes/step-zero/instrument').register(app);
 require('./routes/env').register(app);
