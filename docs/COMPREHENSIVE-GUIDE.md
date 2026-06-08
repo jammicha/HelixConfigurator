@@ -726,8 +726,9 @@ A digest of the durable, easy-to-trip-over knowledge:
   pipeline noise; "Show internal" reveals them.
 - **The configurator never modifies the customer's app** (ARCHITECTURE §10) — the
   bridge connects the gateway to their network; Step-2 snippets are suggestive.
-- **Demo code lives in `helix-aiops-mock/`**, not in this repo. The configurator
-  has no `/api/_demo/aiops/*` routes, no `/aiops` SPA, and no `IS_DEMO_INSTALL` flag.
+- **Demo code lives in a separate repo** (github.com/jammicha/helix-aiops-mock),
+  not here. The configurator has no `/api/_demo/aiops/*` routes, no `/aiops` SPA,
+  and no `IS_DEMO_INSTALL` flag.
 - **Synthetic demo data is namespace-quarantined** by a hardcoded internal
   diagnostic namespace, so it never pollutes the user's real `X-Source`. The
   deep-link aligns to that fixed value, not vice-versa.
