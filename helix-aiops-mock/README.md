@@ -20,16 +20,31 @@ customer would see.
 
 - **Node.js 18+** (no other runtime, no Docker)
 
-## Run it
+## Run it — one command, no clone
+
+Easiest, works on macOS / Linux / Windows (needs **Node 18+**):
 
 ```bash
-npm install
-npm start
+npx -y github:jammicha/helix-aiops-mock
 ```
 
-Then open **http://localhost:9000**.
+Or, on macOS / Linux, the bootstrap script:
 
-That's the whole thing. There's no build step and no database.
+```bash
+curl -fsSL https://raw.githubusercontent.com/jammicha/helix-aiops-mock/main/run.sh | bash
+```
+
+Either one downloads the project, installs it, and opens
+**http://localhost:9000** for you. There's no build step and no database.
+
+## Run it — from a clone
+
+```bash
+git clone https://github.com/jammicha/helix-aiops-mock
+cd helix-aiops-mock
+npm install
+npm start        # → http://localhost:9000
+```
 
 ## The demo flow
 

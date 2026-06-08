@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // helix-aiops-mock/server.js
 // Standalone local mock of the BMC Helix "Manage OTel" page. Mints a demo
 // session and serves a tiny install script that downloads the pre-built native
@@ -53,7 +54,22 @@ app.get('/install/:token.ps1', (req, res) => {
   res.type('text/plain').send(renderPowerShellInstaller({ session: s, repo: REPO }));
 });
 
+// Best-effort: pop the default browser at the page on startup (skipped in
+// tests/CI or when NO_OPEN is set). Never fatal if no opener is available.
+function openBrowser(url) {
+  if (process.env.NO_OPEN || process.env.CI) return;
+  const { spawn } = require('child_process');
+  const [cmd, args] = process.platform === 'darwin' ? ['open', [url]]
+    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+    : ['xdg-open', [url]];
+  try { spawn(cmd, args, { stdio: 'ignore', detached: true }).unref(); } catch { /* no opener */ }
+}
+
 if (require.main === module) {
-  app.listen(PORT, () => console.log(`helix-aiops-mock on http://localhost:${PORT}`));
+  app.listen(PORT, () => {
+    const url = `http://localhost:${PORT}`;
+    console.log(`\n  helix-aiops-mock running → ${url}\n  (Ctrl-C to stop)\n`);
+    openBrowser(url);
+  });
 }
 module.exports = { app, sessions };
