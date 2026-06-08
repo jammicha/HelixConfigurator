@@ -12,8 +12,58 @@ const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers 
 const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
 
+const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
+const { rewriteLocalViewerToHost } = require('../collectorFanout');
+
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
+
+// Pull an image and wait for completion. dockerode's pull is callback+stream
+// based; followProgress resolves when the layered pull finishes.
+function pullImage(docker, image) {
+  return new Promise((resolve, reject) => {
+    docker.pull(image, (err, stream) => {
+      if (err) return reject(err);
+      docker.modem.followProgress(stream, (doneErr) => doneErr ? reject(doneErr) : resolve());
+    });
+  });
+}
+
+// Create the gateway container from scratch — the job docker-compose does in
+// the container path. Used on the first Docker-target commit when no gateway
+// exists yet. After this, recreateGateway() handles subsequent env edits.
+async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
+  // Pull only if absent (offline-friendly; image may already be local).
+  try {
+    await docker.getImage(GATEWAY_IMAGE).inspect();
+  } catch (e) {
+    if (e.statusCode === 404) await pullImage(docker, GATEWAY_IMAGE);
+    else throw e;
+  }
+  try {
+    await docker.createNetwork({ Name: 'helix-bridge' });
+  } catch (e) {
+    if (e.statusCode !== 409) throw e; // 409 = already exists
+  }
+  // Configurator runs on the host, gateway in a container — flip the local
+  // fan-out target to host.docker.internal so traces reach the host viewer.
+  try {
+    const current = await fsp.readFile(configHostPath, 'utf8');
+    const tmp = `${configHostPath}.tmp`;
+    await fsp.writeFile(tmp, rewriteLocalViewerToHost(current));
+    await fsp.rename(tmp, configHostPath);
+  } catch (e) {
+    console.warn('createGatewayFromScratch: yaml host-rewrite skipped:', e.message);
+  }
+  const spec = buildGatewayCreateSpec({ name, env, configHostPath });
+  const container = await docker.createContainer(spec);
+  try {
+    await container.start();
+  } catch (e) {
+    try { await container.remove({ force: true }); } catch { /* best effort */ }
+    throw e;
+  }
+}
 
 // Persistent record of "networks the gateway should be attached to." Every
 // `docker network connect` issued by the bridge routes also lands here. On
@@ -24,12 +74,11 @@ const ENV_PATH = path.join(__dirname, '..', '..', '.env');
 //
 // File lives in the same data/ volume as the OTel store so it survives
 // container restarts. Single-writer assumption: only this process mutates it.
-const BRIDGED_NETWORKS_PATH = (() => {
-  // Mirror the OTEL_DB_PATH logic from index.js so the file lands in the same
-  // volume both inside and outside the container.
-  if (fs.existsSync('/app')) return '/app/data/bridged-networks.json';
-  return path.join(__dirname, '..', 'data', 'bridged-networks.json');
-})();
+const { resolveDataDir } = require('../statePaths');
+const BRIDGED_NETWORKS_PATH = path.join(
+  resolveDataDir({ appDirExists: fs.existsSync('/app'), backendDir: path.join(__dirname, '..') }),
+  'bridged-networks.json',
+);
 
 const loadBridgedNetworks = async () => {
   try {
@@ -209,7 +258,7 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
   await fresh.start();
 };
 
-function register(app, { docker }) {
+function register(app, { docker, configPath }) {
   // POST restart the configured target container. Recreates rather than
   // plain-restarts so updated .env values load (see recreateGateway above
   // for the env_file-at-create-time rationale).
@@ -263,23 +312,30 @@ function register(app, { docker }) {
   app.post('/api/lifecycle/bridge', async (req, res) => {
     const sidecarName = TARGET_CONTAINER();
 
-    // Ensure the helix-bridge network exists (idempotent) so Step 3's
-    // manual-Option-B path has somewhere to land.
+    // Create-or-recreate: native installs have no compose, so on the first
+    // Docker-target commit there is no gateway to inspect — create it from
+    // scratch. Subsequent commits hit recreateGateway (env refresh).
+    let gatewayExists = true;
     try {
-      await docker.createNetwork({ Name: 'helix-bridge' });
+      await docker.getContainer(sidecarName).inspect();
     } catch (e) {
-      if (e.statusCode !== 409) console.warn('Network create warning:', e.message);
+      if (e.statusCode === 404) gatewayExists = false;
+      else return res.status(500).json({ error: 'Failed to inspect gateway', details: e.message });
     }
-
     try {
-      await recreateGateway(docker, sidecarName);
+      if (gatewayExists) {
+        await recreateGateway(docker, sidecarName);
+      } else {
+        const env = (await readEnvAsArray()) || [];
+        await createGatewayFromScratch(docker, { name: sidecarName, env, configHostPath: configPath });
+      }
     } catch (e) {
       return res.status(500).json({
-        error: 'Gateway recreate failed — env changes may not have taken effect',
+        error: 'Gateway create/recreate failed — env changes may not have taken effect',
         details: e.message,
       });
     }
-    res.json({ message: 'Gateway recreated with updated environment' });
+    res.json({ message: gatewayExists ? 'Gateway recreated with updated environment' : 'Gateway created' });
   });
 
   // POST attach the sidecar to an arbitrary Docker network by name. Used by
@@ -370,10 +426,10 @@ function register(app, { docker }) {
 
   // POST wipe wizard state and start fresh. Clears the configurator-managed
   // .env values, drops the bridged-networks persistence, and recreates the
-  // gateway with a clean environment. Does NOT touch UI_AUTH_PASSWORD or
-  // IS_DEMO_INSTALL (deployment config, not wizard state) and does NOT wipe
-  // the OTel trace store (separate concern; users can reset that from the
-  // dashboard if they need a clean data slate too).
+  // gateway with a clean environment. Does NOT touch deployment config like
+  // UI_AUTH_PASSWORD (not wizard state) and does NOT wipe the OTel trace store
+  // (separate concern; users can reset that from the dashboard if they need a
+  // clean data slate too).
   app.post('/api/lifecycle/reset-onboarding', async (req, res) => {
     const sidecarName = TARGET_CONTAINER();
     const WIZARD_KEYS = ['HELIX_ENDPOINT', 'HELIX_API_KEY', 'X_SOURCE', 'BUSINESS_SERVICE_KEY', 'HELIX_EVENTS_ENDPOINT'];
@@ -548,4 +604,4 @@ function register(app, { docker }) {
   }
 }
 
-module.exports = { register };
+module.exports = { register, createGatewayFromScratch };

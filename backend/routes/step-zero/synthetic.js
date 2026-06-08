@@ -9,7 +9,11 @@ const { generateTrace } = require('./synthetic-scenario');
 const DEFAULT_DURATION_S = 60;
 const DEFAULT_TRACES_PER_S = 8;
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
-const SELF_BASE = () => `http://localhost:${process.env.PORT || 3001}`;
+// Resolve the same way index.js binds the server (default 8765), so the
+// Layer-2 "local" destination posts to where the configurator actually listens
+// on the native path. (Was hard-defaulted to 3001 — the container-only port.)
+const { resolvePort } = require('../../portConfig');
+const SELF_BASE = () => `http://localhost:${resolvePort(process.env)}`;
 
 let activeRun = null;
 const __resetForTests = () => { activeRun = null; };

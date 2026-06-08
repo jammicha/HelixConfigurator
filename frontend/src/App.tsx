@@ -41,6 +41,7 @@ import { QuickActions } from './components/dashboard/QuickActions';
 import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConnectionSettingsDrawer';
 import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/SetPasswordModal';
 import { AppHeader } from './components/AppHeader';
+import { UpdateBanner } from './components/UpdateBanner';
 import { DiscoveredServicesDrawer } from './components/dashboard/DiscoveredServicesDrawer';
 import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGrid';
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
@@ -1233,6 +1234,8 @@ const App = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto transition-all duration-300">
+        {/* Update-available nudge — full-width strip at the top of the content column */}
+        <UpdateBanner />
         {/* Header */}
         <AppHeader
           isSetupComplete={isSetupComplete}

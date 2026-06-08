@@ -21,12 +21,12 @@ OTel collector with the right exporter, embed an API key, decide between
 gRPC/HTTP/headers, then debug the inevitable network and config mismatches.
 
 The **Helix Configurator** is the local sidecar that does this for them. It
-runs two containers on the customer's host (the configurator UI/API plus a
-managed OTel collector called **helix-gateway**), gives them a web UI to wire
-their app to the gateway, validates that traces are reaching Helix, and — once
-the pipe is hot — provides a built-in APM-style trace explorer (**View OTel
-Data**) so they can introspect their telemetry without standing up Jaeger or
-Tempo.
+runs as a **host process** (the configurator UI/API, no Docker required to run
+it) and manages a **`helix-gateway`** OTel collector container when the Docker
+onboarding target is chosen. It gives users a web UI to wire their app to the
+gateway, validates that traces are reaching Helix, and — once the pipe is hot —
+provides a built-in APM-style trace explorer (**View OTel Data**) so they can
+introspect their telemetry without standing up Jaeger or Tempo.
 
 The configurator is intentionally a *sidecar*: it never modifies the customer's
 application. Customer apps point at `helix-gateway:4318` (or `:4317`); the
@@ -37,21 +37,24 @@ traces and logs to the configurator for the local viewer (in Docker mode via `he
 
 ## 2. Component map
 
+**Native path (primary)** — the configurator is a host process, not a container:
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Host (Docker Engine)                                                     │
+│ Host                                                                     │
 │                                                                          │
 │  ┌──────────────────────┐        ┌──────────────────────┐                │
 │  │  helix-configurator  │        │    helix-gateway     │   ┌──────────┐ │
 │  │  (Express + React)   │◀──────▶│  (otel/contrib coll) │──▶│   BMC    │ │
 │  │                      │        │                      │   │  Helix   │ │
-│  │  UI on :8765         │        │  OTLP gRPC :4317     │   └──────────┘ │
-│  │  API on :3001        │        │  OTLP HTTP :4318     │                │
-│  │  SQLite /app/data/   │◀───────│  Prom metrics :8888  │                │
-│  │  /var/run/docker.sock│        │                      │                │
+│  │  host process :8765  │        │  Docker container    │   └──────────┘ │
+│  │  SQLite ./data/      │        │  OTLP gRPC :4317     │                │
+│  │  /var/run/docker.sock│◀───────│  OTLP HTTP :4318     │                │
+│  │  (Docker target only)│        │  Prom metrics :8888  │                │
 │  └─────────┬────────────┘        └──────────────────────┘                │
-│            │                                                              │
-│            │ uses dockerode to attach to user networks,                   │
+│            │                           fan-out →                         │
+│            │                     host.docker.internal:8765               │
+│            │ dockerode: create/attach networks,                          │
 │            │ inspect containers, restart upstream collectors              │
 │            ▼                                                              │
 │  ┌──────────────────────────────────────────────────────────────────┐    │
@@ -61,10 +64,21 @@ traces and logs to the configurator for the local viewer (in Docker mode via `he
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Both `helix-configurator` and `helix-gateway` start on the `helix-bridge`
-Docker network. To make them reachable to/from the customer's apps, the
-configurator's bridge endpoints attach `helix-gateway` to the customer's
-existing compose network (or vice versa) at runtime.
+The configurator binds `PORT` (default **8765**) directly as a host process.
+The Docker image path sets `ENV PORT=3001` and keeps the `8765:3001` host
+mapping — the same code runs both ways; the port is the only difference.
+
+In the native path the configurator **creates `helix-gateway` itself** via
+dockerode (`createGatewayFromScratch`) on the first Docker-target save —
+pulling the contrib collector image if absent, creating `helix-bridge`, and
+publishing ports 4317/4318/8888. The gateway's local fan-out endpoint is
+`http://host.docker.internal:8765` (the configurator is on the host); an
+`ExtraHosts: host.docker.internal:host-gateway` entry makes this resolve on
+Linux Docker Engine as well as Docker Desktop.
+
+To make the gateway reachable to/from the customer's apps, the configurator's
+bridge endpoints attach `helix-gateway` to the customer's existing compose
+network (or vice versa) at runtime.
 
 ---
 
@@ -72,18 +86,25 @@ existing compose network (or vice versa) at runtime.
 
 ```
 HelixConfigurator/
-├── docker-compose.yml          # the two-container deployment
-├── Dockerfile                  # builds the helix-configurator image
+├── docker-compose.yml          # secondary Docker-image deployment
+├── Dockerfile                  # builds the helix-configurator image (secondary path)
 ├── helix-otel-collector.yaml   # gateway pipeline config (env-var-templated)
 ├── README.md                   # quickstart + feature summary
-├── ARCHITECTURE.md             # this file
 │
-├── backend/                    # Node 20 + Express
-│   ├── index.js                # thin entry: auth gate + mounts route modules
+├── packaging/                  # native launcher scripts
+│   ├── start.command           # macOS: ./node backend/index.js
+│   ├── start.sh                # Linux: ./node backend/index.js
+│   └── start.bat               # Windows: node.exe backend\index.js
+│
+├── backend/                    # Node 22 + Express
+│   ├── index.js                # thin entry: port bind + auth gate + route mounts
+│   ├── portConfig.js           # resolvePort() — default 8765; Docker image sets PORT=3001
+│   ├── statePaths.js           # resolveDataDir() — /app/data (Docker) or ./data (native)
+│   ├── collectorFanout.js      # rewriteLocalViewerToHost() — shared host.docker.internal rewrite
 │   ├── routes/                 # one module per surface: otlp, traces, config,
 │   │                           # env, diagnostics, discovery, lifecycle,
-│   │                           # containers, demo, situations(+payloads),
-│   │                           # business-service, step-zero/*
+│   │                           # gatewaySpec, containers, situations(+payloads),
+│   │                           # business-service, k8s, version, step-zero/*
 │   ├── otelStore.js            # better-sqlite3 schema + ingest/query methods
 │   ├── situations-payloads.js  # pure builders for AIOps events/Situations
 │   ├── package.json
@@ -91,16 +112,15 @@ HelixConfigurator/
 │
 ├── frontend/                   # React 19 + Vite + TypeScript
 │   ├── src/
-│   │   ├── main.tsx            # path-based switch into one of three pages
+│   │   ├── main.tsx            # path-based switch into top-level pages
 │   │   ├── App.tsx             # Onboarding wizard + Gateway Dashboard
 │   │   └── components/
 │   │       ├── OtelDataPage.tsx  # /otel-data — the local APM viewer
-│   │       ├── AiopsPage.tsx     # /aiops — mock of Helix's install wizard
+│   │       ├── UpdateBanner.tsx  # "update available" banner (GET /api/version)
 │   │       └── LoginScreen.tsx
 │   ├── public/
 │   │   ├── bmc-logo.svg
-│   │   └── bmc-chevron.svg     # only shipped for backwards compat;
-│   │                           # OtelDataPage uses an inline BmcChevron
+│   │   └── bmc-chevron.svg
 │   ├── tailwind.config.*       # ADAPT design tokens
 │   └── package.json
 │
@@ -109,7 +129,7 @@ HelixConfigurator/
 └── docs/                       # version-controlled (Markdown only)
     ├── COMPREHENSIVE-GUIDE.md   # the full new-contributor guide
     ├── README.md               # documentation folder map
-    ├── architecture/           # this file + Blueprints-v1.md
+    ├── architecture/           # this file + Blueprints-v1.md + native-packaging-diagram.md
     ├── guides/  roadmap/  handoffs/
     ├── history/  superpowers/   # completed records & design archive
     └── deprecated/             # superseded docs, kept for reference
@@ -176,7 +196,11 @@ properties:
   stay in `.env` (gitignored) and never land in committed files.
 * **Two exporters per fan-out pipeline** — `otlphttp/bmchelix` (out to Helix)
   and `otlphttp/helix_local_viewer` (HTTP to the configurator's `/api/otlp/*`
-  endpoints inside the same Docker network).
+  endpoints at `http://host.docker.internal:8765`). The `host.docker.internal`
+  address reaches the host-process configurator from inside the gateway
+  container; `ExtraHosts: host.docker.internal:host-gateway` is set on the
+  container spec so this resolves on Linux Docker Engine (not just Docker
+  Desktop).
 * **No queueing on helix_local_viewer** — `sending_queue: enabled: false` and
   `retry_on_failure: enabled: false` so a brief configurator restart can't
   accumulate a backlog. The bmchelix exporter does keep its sending queue,
@@ -320,7 +344,10 @@ Heartbeat comments every 15s keep proxies from killing idle SSE connections.
 
 ## 8. SQLite store
 
-Single file at `/app/data/otel-store.db`, mounted from `./data/`. Four tables:
+Single file resolved by `statePaths.resolveDataDir()`: `/app/data/otel-store.db`
+in the Docker image (volume-mounted from `./data/`) or `<installRoot>/data/otel-store.db`
+natively (the `data/` folder in the extracted package). `OTEL_DB_PATH` env
+override wins. Four tables:
 
 * `traces` — one row per trace, recomputed on every span batch. Columns:
   `trace_id` (PK), `service_name`, `root_operation`, `start_time_ns`,
@@ -399,16 +426,17 @@ Auth-gated under `/api`:
 ## 11. Local development
 
 ```bash
-# Backend (auto-reload)
-cd backend && npm install && npm run dev   # :3001
+# Backend (auto-reload) — binds the default PORT 8765
+cd backend && npm install && npm run dev   # :8765
 
-# Frontend (Vite dev server, proxies /api → :3001)
+# Frontend (Vite dev server, proxies /api → :8765)
 cd frontend && npm install && npm run dev  # :3000
 ```
 
-The dev server proxies `/api/*` to the backend, so you can iterate on the UI
-without rebuilding the Docker image. To validate the full container pipeline,
-the conventional cycle is:
+The dev server proxies `/api/*` to the backend at `:3001`, so you can iterate
+on the UI without a Docker build.
+
+To validate the Docker image path:
 
 ```bash
 docker compose up -d --build helix-configurator
@@ -419,8 +447,13 @@ time) and recreates the container without touching `helix-gateway`. The
 gateway only needs `docker compose restart helix-gateway` if you've edited
 the YAML or `.env`.
 
-The frontend runs `tsc --noEmit` on type-check; there is no runtime test
-suite. CI is not configured. Type-check passing is the primary safety net.
+To validate the **native path** locally, either run the launcher scripts from
+`packaging/` directly or download the built zip from CI.
+
+The frontend runs `tsc --noEmit` on type-check. Backend has Vitest unit tests
+(`npm test` in `backend/`). CI runs on release tags via `native-release.yml`;
+`publish.yml` builds the Docker image on push. Type-check + backend tests are
+the primary safety net.
 
 ---
 

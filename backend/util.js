@@ -1,7 +1,6 @@
 // Shared utilities used across multiple route modules. Pure functions where
 // possible; the docker-dependent containerLogs is exposed as a factory so
 // callers can bind it to their own Docker client.
-const os = require('os');
 
 // Demultiplex docker logs() output when the container isn't TTY-attached.
 // Each multiplexed frame is: [streamType:1][padding:3][length:4_BE][payload].
@@ -168,62 +167,10 @@ const sendDockerTimeoutResponse = (res, err) => {
   return false;
 };
 
-// Best LAN-routable IPv4 from any non-virtual interface, prioritizing
-// 192.168.* over 10.* (the typical home/lab vs corp ordering).
-const getLanIPv4 = () => {
-  const ifaces = os.networkInterfaces();
-  const candidates = [];
-  for (const name of Object.keys(ifaces)) {
-    if (/docker|bridge|vbox|vmnet|utun|tun|tap|wg/i.test(name)) continue;
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        candidates.push({ name, address: iface.address });
-      }
-    }
-  }
-  const priority = (ip) => /^192\.168\./.test(ip) ? 0 : /^10\./.test(ip) ? 1 : 2;
-  candidates.sort((a, b) => priority(a.address) - priority(b.address));
-  return candidates[0]?.address || null;
-};
-
-// Chained proxies (cloudflared → vite → backend) append to X-Forwarded-*
-// rather than overwrite, so the value can be a comma-joined list like
-// "https,http". The first entry is the outermost client-facing value.
-const firstHeaderValue = (raw) => (raw ? raw.split(',')[0].trim() : null);
-
-// Build the URL we'll embed in copyable install commands and inside the
-// generated install scripts themselves. Resolution order:
-//   1. INSTALL_BASE_URL env var — explicit override for any tunnel/proxy.
-//   2. X-Forwarded-Host header — set by cloudflared / ngrok / reverse proxies.
-//      We trust 'loopback' so this is only honored when the tunnel runs
-//      locally (the typical demo setup).
-//   3. LAN IP substitution — if the request came from localhost, swap in the
-//      machine's LAN IPv4 so the URL works from another box on the same network.
-//   4. Bare Host header — same-machine demos.
-const computeInstallBaseUrl = (req) => {
-  if (process.env.INSTALL_BASE_URL) {
-    return process.env.INSTALL_BASE_URL.replace(/\/$/, '');
-  }
-  const fwdHost = firstHeaderValue(req.get('x-forwarded-host'));
-  if (fwdHost) {
-    const proto = firstHeaderValue(req.get('x-forwarded-proto')) || req.protocol;
-    return `${proto}://${fwdHost}`;
-  }
-  const host = req.get('host') || 'localhost:3001';
-  const lanIp = getLanIPv4();
-  if (lanIp && /^(localhost|127\.0\.0\.1)(:|$)/.test(host)) {
-    return `${req.protocol}://${host.replace(/^(localhost|127\.0\.0\.1)/, lanIp)}`;
-  }
-  return `${req.protocol}://${host}`;
-};
-
 module.exports = {
   demuxLogBuffer,
   makeContainerLogs,
   isValidContainerName,
-  getLanIPv4,
-  firstHeaderValue,
-  computeInstallBaseUrl,
   DockerTimeoutError,
   withDockerTimeout,
   sendDockerTimeoutResponse,

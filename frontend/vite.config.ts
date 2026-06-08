@@ -5,21 +5,15 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
-    // Bind to 0.0.0.0 so the AIOps install command (which embeds the LAN IP)
-    // is reachable from a different machine on the same network.
+    // Bind to 0.0.0.0 so the dev server is reachable from another machine on
+    // the LAN (e.g. checking the UI from a phone or a VM).
     host: true,
-    // Allow tunnel hosts. Vite 5 blocks unknown Host headers by default;
-    // cloudflared / ngrok rotate hostnames per session so we whitelist the
-    // domains rather than specific subdomains. LAN IP access still works
-    // because Vite's default allowed list covers private IP ranges.
-    allowedHosts: ['.trycloudflare.com', '.ngrok.io', '.ngrok-free.app', '.ngrok.app'],
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        // The backend binds PORT (default 8765); the dev proxy follows that
+        // default so `npm run dev` on both halves works with no env var.
+        target: 'http://localhost:8765',
         changeOrigin: true,
-        // Propagate X-Forwarded-* (host/proto) so the backend can see the
-        // tunnel's public hostname when running behind cloudflared/ngrok.
-        xfwd: true,
       }
     }
   }

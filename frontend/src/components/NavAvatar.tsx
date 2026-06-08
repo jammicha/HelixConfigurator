@@ -5,7 +5,7 @@ type AuthShape = { required: boolean; authenticated: boolean } | null;
 
 // Which configurator-internal page the user is currently on. Drives the
 // active-item highlight in the app-switcher dropdown. Pages that don't
-// render this component (e.g. /aiops, /step-zero) pass null.
+// render this component (e.g. /step-zero) pass null.
 export type CurrentPage = 'onboarding' | 'dashboard' | 'otel-data' | null;
 
 interface NavAvatarProps {

@@ -1,8 +1,8 @@
 // backend/routes/k8s.js
 // Phase 1 "Generate K8s chart": stream a self-contained Helm chart (or preview
 // it as JSON) built from live configurator state. Generate-only — no cluster calls.
-// Reuses the archiver streaming pattern from routes/demo.js. Registered under
-// requireAuth (an authed dashboard action).
+// Uses archiver to stream the chart zip. Registered under requireAuth (an authed
+// dashboard action).
 const fsPromises = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
