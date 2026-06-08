@@ -28,10 +28,14 @@ app.post('/configure', (req, res) => {
   const xSource = (req.body && req.body.xSource || '').trim();
   if (!xSource) return res.status(400).json({ error: 'xSource is required' });
   const token = crypto.randomBytes(16).toString('hex');
-  sessions.set(token, { xSource, apiKey: fakeKey(), endpoint: SIMULATED_ENDPOINT, createdAt: Date.now() });
+  const session = { xSource, apiKey: fakeKey(), endpoint: SIMULATED_ENDPOINT, createdAt: Date.now() };
+  sessions.set(token, session);
   const base = `${req.protocol}://${req.get('host')}`;
   res.json({
     token,
+    xSource: session.xSource,
+    apiKey: session.apiKey,        // simulated; surfaced so the page can show it like the real wizard
+    endpoint: session.endpoint,
     sh: `curl -fsSL ${base}/install/${token}.sh | bash`,
     ps1: `iwr ${base}/install/${token}.ps1 | iex`,
   });
