@@ -16,7 +16,9 @@ jobs:
       matrix:
         include:
           - { os: macos-latest,   platform: darwin-arm64, nodearch: arm64 }
-          - { os: macos-13,       platform: darwin-amd64, nodearch: x64   }
+          # Intel Macs (darwin-amd64) are intentionally NOT built: GitHub's only
+          # Intel-Mac runner (macos-13) is EOL and no longer allocates, so the job
+          # queued forever. Apple Silicon dominates; Intel users run the Docker image.
           - { os: ubuntu-latest,  platform: linux-amd64,  nodearch: x64   }
           - { os: windows-latest, platform: windows-amd64, nodearch: x64  }
     runs-on: ${{ matrix.os }}

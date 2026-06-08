@@ -19,6 +19,11 @@ describe('renderBashInstaller', () => {
   it('does NOT require docker', () => {
     expect(sh).not.toMatch(/docker (info|compose)/);
   });
+  it('refuses Intel Macs (darwin-amd64) with a Docker pointer instead of a 404', () => {
+    expect(sh).toContain('"$PLATFORM" = "darwin-amd64"');
+    expect(sh).toMatch(/Intel Macs aren't supported/);
+    expect(sh).toContain('ghcr.io/jammicha/helixconfigurator');
+  });
 });
 
 describe('renderPowerShellInstaller', () => {

@@ -13,6 +13,11 @@ OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 case "$ARCH" in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
 PLATFORM="$OS-$ARCH"
+if [ "$PLATFORM" = "darwin-amd64" ]; then
+  echo "Intel Macs aren't supported by the native package."
+  echo "Run the Docker image instead:  docker run -p 8765:3001 ghcr.io/jammicha/helixconfigurator"
+  exit 1
+fi
 TARGET="$(pwd)/helix-configurator-${x}"
 echo "Installing Helix Configurator ($PLATFORM) into $TARGET"
 mkdir -p "$TARGET" && cd "$TARGET"
