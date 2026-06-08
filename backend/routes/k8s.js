@@ -11,30 +11,14 @@ const { buildChartFiles, streamChartArchive } = require('../k8sChart');
 
 const KEY_PLACEHOLDER = '<TenantID::AccessKey::SecretKey>';
 
-// Build the two install commands shown in the dashboard as separate, individually
-// copyable steps. When not in handoff mode and a live key is configured, the actual
-// key is embedded in the create-secret command so the user can copy-paste without
-// hunting for it. The key only ever appears there (rendered in the authed UI) —
-// never in the chart values or the downloaded zip.
-function buildCommands({ handoff, exposeViewer }) {
+function buildCommands({ handoff }) {
   const key = handoff ? KEY_PLACEHOLDER : (process.env.HELIX_API_KEY || KEY_PLACEHOLDER);
-  // The viewer Service defaults to ClusterIP (secure). When the user opts in to direct
-  // localhost:8765 access (Docker Desktop / local), add the --set at install time only —
-  // the chart values stay safe-by-default for anyone who installs without this flag.
-  const installCommand = 'helm install helix . --set helix.existingSecret=helix-key'
-    + (exposeViewer ? ' --set viewer.service.type=LoadBalancer' : '');
   return {
     secretCommand: `kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='${key}'`,
-    installCommand,
+    installCommand: 'helm install helix ./helix-otel --set helix.existingSecret=helix-key',
   };
 }
 
-// Recursively list all files under <projectRoot>/helix-otel/ as relative paths
-// like `helix-otel/Chart.yaml`, then append the two generated-file paths.
-// Lazy + memoized (the skeleton is static) and GUARDED: if the skeleton dir is
-// missing (e.g. not copied into the Docker image), it logs and falls back to the
-// generated files rather than throwing — route registration must never crash the
-// whole backend at startup over one optional feature's file listing.
 const chartFilesCache = new Map();
 function listChartFiles(projectRoot) {
   if (chartFilesCache.has(projectRoot)) return chartFilesCache.get(projectRoot);
@@ -59,16 +43,10 @@ function listChartFiles(projectRoot) {
   return result;
 }
 
-const wantsViewer = (req) => String(req.query.viewer ?? 'true').toLowerCase() !== 'false';
+const getTarget = (req) => String(req.query.target || 'local') === 'remote' ? 'remote' : 'local';
 const wantsHandoff = (req) => String(req.query.handoff) === 'true';
-// Opt-in: expose the viewer via a LoadBalancer Service (direct localhost:8765, no
-// port-forward). Only meaningful when the viewer is included — the route ANDs it with
-// wantsViewer so a stale flag can't add an exposure for a viewer that isn't there.
-const wantsExpose = (req) => String(req.query.expose) === 'true';
 
 function register(app, { configPath, projectRoot }) {
-  // Build the two generated files from live state, or send an error response.
-  // Returns null after responding on failure.
   async function generate(req, res) {
     let collectorYaml;
     try {
@@ -82,7 +60,7 @@ function register(app, { configPath, projectRoot }) {
         collectorYaml,
         endpoint: process.env.HELIX_ENDPOINT || '',
         xSource: process.env.X_SOURCE || '',
-        viewerEnabled: wantsViewer(req),
+        target: getTarget(req),
       });
     } catch (e) {
       if (e.code === 'INVALID_COLLECTOR_YAML') {
@@ -98,9 +76,9 @@ function register(app, { configPath, projectRoot }) {
     const files = await generate(req, res);
     if (!files) return;
     const handoff = wantsHandoff(req);
-    const { secretCommand, installCommand } = buildCommands({ handoff, exposeViewer: wantsViewer(req) && wantsExpose(req) });
+    const { secretCommand, installCommand } = buildCommands({ handoff });
     res.json({
-      viewerEnabled: wantsViewer(req),
+      target: getTarget(req),
       values: files.values,
       gatewayConfig: files.gatewayConfig,
       secretCommand,

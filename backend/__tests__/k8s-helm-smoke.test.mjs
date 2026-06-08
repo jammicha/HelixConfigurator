@@ -17,11 +17,11 @@ function helmAvailable() {
   catch { return false; }
 }
 
-function assembleChart(destRoot, viewerEnabled) {
+function assembleChart(destRoot, target) {
   const dest = path.join(destRoot, 'helix-otel');
   fs.cpSync(SKELETON, dest, { recursive: true });
   const collectorYaml = fs.readFileSync(path.join(PROJECT_ROOT, 'helix-otel-collector.yaml'), 'utf8');
-  const { values, gatewayConfig } = buildChartFiles({ collectorYaml, endpoint: 'https://h/otlp', xSource: 'acme', viewerEnabled });
+  const { values, gatewayConfig } = buildChartFiles({ collectorYaml, endpoint: 'https://h/otlp', xSource: 'acme', target });
   fs.writeFileSync(path.join(dest, 'values.yaml'), values);
   fs.mkdirSync(path.join(dest, 'config'), { recursive: true });
   fs.writeFileSync(path.join(dest, 'config', 'gateway-collector.yaml'), gatewayConfig);
@@ -29,11 +29,11 @@ function assembleChart(destRoot, viewerEnabled) {
 }
 
 describe.skipIf(!helmAvailable())('helm smoke', () => {
-  for (const viewer of [true, false]) {
-    it(`renders valid manifests (viewer=${viewer})`, () => {
+  for (const target of ['local', 'remote']) {
+    it(`renders valid manifests (target=${target})`, () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'helm-smoke-'));
       try {
-        const chart = assembleChart(tmp, viewer);
+        const chart = assembleChart(tmp, target);
         execFileSync('helm', ['lint', chart, '--set', 'helix.apiKey=dummy'], { stdio: 'pipe' });
         const out = execFileSync('helm', ['template', 'helix', chart, '--set', 'helix.apiKey=dummy'], { encoding: 'utf8' });
         const docs = yaml.loadAll(out).filter(Boolean);
@@ -41,8 +41,10 @@ describe.skipIf(!helmAvailable())('helm smoke', () => {
         expect(kinds).toContain('Deployment');
         expect(kinds).toContain('ConfigMap');
         expect(kinds).toContain('Secret');
-        // Viewer objects present only when enabled.
-        expect(kinds.includes('PersistentVolumeClaim')).toBe(viewer);
+        // No viewer resources for either target.
+        expect(kinds).not.toContain('PersistentVolumeClaim');
+        // Only one Deployment (the gateway).
+        expect(kinds.filter(k => k === 'Deployment')).toHaveLength(1);
         // Gateway ConfigMap embeds the collector config.
         const cm = docs.find(d => d.kind === 'ConfigMap');
         expect(cm.data['config.yaml']).toMatch(/otlphttp\/bmchelix/);
@@ -55,12 +57,10 @@ describe.skipIf(!helmAvailable())('helm smoke', () => {
   it('existingSecret mode: no chart-managed Secret, gateway refs the external one', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'helm-smoke-es-'));
     try {
-      const chart = assembleChart(tmp, true);
-      // No --set helix.apiKey: the key lives in a Secret the user pre-created.
+      const chart = assembleChart(tmp, 'local');
       execFileSync('helm', ['lint', chart, '--set', 'helix.existingSecret=my-helix-key'], { stdio: 'pipe' });
       const out = execFileSync('helm', ['template', 'helix', chart, '--set', 'helix.existingSecret=my-helix-key'], { encoding: 'utf8' });
       const docs = yaml.loadAll(out).filter(Boolean);
-      // The chart must NOT create its own Secret when an existing one is referenced.
       expect(docs.map(d => d.kind)).not.toContain('Secret');
       const dep = docs.find(d => d.kind === 'Deployment' && d.metadata.name === 'helix-gateway');
       const apiKeyEnv = dep.spec.template.spec.containers[0].env.find(e => e.name === 'HELIX_API_KEY');

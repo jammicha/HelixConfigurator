@@ -56,39 +56,33 @@ afterAll(() => {
 });
 
 describe('GET /api/k8s/chart/preview', () => {
-  it('returns generated values, gateway config, install command and file list', async () => {
-    const res = await request(makeApp()).get('/api/k8s/chart/preview?viewer=true');
+  it('target=local: rewrites viewer to host.docker.internal:8765, returns install commands', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?target=local');
     expect(res.status).toBe(200);
+    expect(res.body.target).toBe('local');
     expect(yaml.load(res.body.values).helix.endpoint).toBe('https://helix.example/otlp');
     expect(yaml.load(res.body.gatewayConfig).exporters['otlphttp/helix_local_viewer'].traces_endpoint)
-      .toBe('http://helix-viewer:8765/api/otlp/traces');
-    expect(res.body.installCommand).toMatch(/helm install helix \. --set/);
+      .toBe('http://host.docker.internal:8765/api/otlp/traces');
+    expect(res.body.installCommand).toMatch(/helm install helix \.\/helix-otel/);
     expect(res.body.installCommand).toMatch(/existingSecret/);
-    // Default: the live key is pre-filled into the (separate) create-secret command.
     expect(res.body.secretCommand).toContain("HELIX_API_KEY='TENANT::ACCESS::SECRET'");
     expect(res.body.keyEmbedded).toBe(true);
     expect(res.body.files).toContain('helix-otel/templates/gateway-deployment.yaml');
+    // No viewer values in the output
+    expect(yaml.load(res.body.values).viewer).toBeUndefined();
   });
 
-  it('appends --set viewer.service.type=LoadBalancer when expose=true', async () => {
-    const res = await request(makeApp()).get('/api/k8s/chart/preview?viewer=true&expose=true');
-    expect(res.status).toBe(200);
-    expect(res.body.installCommand).toMatch(/--set viewer\.service\.type=LoadBalancer/);
-  });
-
-  it('omits the LoadBalancer flag by default (secure)', async () => {
-    const res = await request(makeApp()).get('/api/k8s/chart/preview?viewer=true');
-    expect(res.body.installCommand).not.toMatch(/LoadBalancer/);
-  });
-
-  it('ignores expose=true when the viewer is disabled (no Service to expose)', async () => {
-    const res = await request(makeApp()).get('/api/k8s/chart/preview?viewer=false&expose=true');
-    expect(res.body.installCommand).not.toMatch(/LoadBalancer/);
-  });
-
-  it('viewer=false strips the viewer exporter in the previewed config', async () => {
-    const res = await request(makeApp()).get('/api/k8s/chart/preview?viewer=false');
+  it('target=remote: strips the viewer exporter from gateway config', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?target=remote');
+    expect(res.body.target).toBe('remote');
     expect(yaml.load(res.body.gatewayConfig).exporters['otlphttp/helix_local_viewer']).toBeUndefined();
+  });
+
+  it('defaults to target=local when no target param is provided', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview');
+    expect(res.body.target).toBe('local');
+    expect(yaml.load(res.body.gatewayConfig).exporters['otlphttp/helix_local_viewer'].traces_endpoint)
+      .toBe('http://host.docker.internal:8765/api/otlp/traces');
   });
 
   it('returns 400 on malformed live collector YAML', async () => {
@@ -106,14 +100,11 @@ describe('GET /api/k8s/chart/preview', () => {
     expect(res.body.secretCommand).not.toContain('TENANT::ACCESS::SECRET');
   });
 
-  it('does not crash at register or preview when the chart skeleton is missing (regression)', async () => {
-    // Guards the bug where listChartFiles ran eagerly at register() and threw
-    // ENOENT — crashing the whole backend at startup — when helix-otel/ wasn't
-    // present (e.g. not copied into the Docker image).
+  it('does not crash at register or preview when the chart skeleton is missing', async () => {
     const app = express();
     const { register } = require('../routes/k8s.js');
     expect(() => register(app, { configPath, projectRoot: '/no/such/dir' })).not.toThrow();
-    const res = await request(app).get('/api/k8s/chart/preview?viewer=true');
+    const res = await request(app).get('/api/k8s/chart/preview?target=local');
     expect(res.status).toBe(200);
     expect(res.body.files).toEqual(expect.arrayContaining([
       'helix-otel/values.yaml',
@@ -124,7 +115,7 @@ describe('GET /api/k8s/chart/preview', () => {
 
 describe('GET /api/k8s/chart', () => {
   it('streams a zip containing the full chart with the generated files', async () => {
-    const res = await request(makeApp()).get('/api/k8s/chart?viewer=true')
+    const res = await request(makeApp()).get('/api/k8s/chart?target=local')
       .buffer(true).parse(binaryParser);
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toBe('application/zip');
@@ -137,8 +128,12 @@ describe('GET /api/k8s/chart', () => {
       'helix-otel/config/gateway-collector.yaml',
       'helix-otel/templates/gateway-deployment.yaml',
       'helix-otel/templates/secret.yaml',
-      'helix-otel/templates/viewer-pvc.yaml',
     ]) expect(names).toContain(f);
+
+    // Viewer templates must NOT be in the zip.
+    expect(names).not.toContain('helix-otel/templates/viewer-deployment.yaml');
+    expect(names).not.toContain('helix-otel/templates/viewer-service.yaml');
+    expect(names).not.toContain('helix-otel/templates/viewer-pvc.yaml');
 
     // Non-template generated files parse as YAML.
     const zip = new AdmZip(res.body);
@@ -151,7 +146,7 @@ describe('GET /api/k8s/chart', () => {
       .filter(e => !e.isDirectory)
       .map(e => e.entryName)
       .sort();
-    const preview = await request(makeApp()).get('/api/k8s/chart/preview?viewer=true');
+    const preview = await request(makeApp()).get('/api/k8s/chart/preview?target=local');
     expect(preview.body.files).toContain('helix-otel/templates/gateway-deployment.yaml');
     expect(preview.body.files.slice().sort()).toEqual(fileEntries);
   });

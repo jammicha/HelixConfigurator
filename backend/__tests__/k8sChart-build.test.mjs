@@ -17,20 +17,20 @@ service:
 `;
 
 describe('buildChartFiles', () => {
-  it('returns values.yaml and gateway config consistent with the toggle (viewer on)', () => {
+  it('target=local: rewrites viewer exporter to host.docker.internal:8765, no viewer in values', () => {
     const { values, gatewayConfig } = buildChartFiles({
-      collectorYaml: COLLECTOR, endpoint: 'https://h/otlp', xSource: 'acme', viewerEnabled: true,
+      collectorYaml: COLLECTOR, endpoint: 'https://h/otlp', xSource: 'acme', target: 'local',
     });
     const v = yaml.load(values);
     const g = yaml.load(gatewayConfig);
-    expect(v.viewer.enabled).toBe(true);
+    expect(v.viewer).toBeUndefined();
     expect(v.helix.endpoint).toBe('https://h/otlp');
-    expect(g.exporters['otlphttp/helix_local_viewer'].traces_endpoint).toBe('http://helix-viewer:8765/api/otlp/traces');
+    expect(g.exporters['otlphttp/helix_local_viewer'].traces_endpoint).toBe('http://host.docker.internal:8765/api/otlp/traces');
   });
 
-  it('strips the viewer exporter when the toggle is off', () => {
-    const { values, gatewayConfig } = buildChartFiles({ collectorYaml: COLLECTOR, viewerEnabled: false });
-    expect(yaml.load(values).viewer.enabled).toBe(false);
+  it('target=remote: strips the viewer exporter, no viewer in values', () => {
+    const { values, gatewayConfig } = buildChartFiles({ collectorYaml: COLLECTOR, target: 'remote' });
+    expect(yaml.load(values).viewer).toBeUndefined();
     expect(yaml.load(gatewayConfig).exporters['otlphttp/helix_local_viewer']).toBeUndefined();
   });
 });

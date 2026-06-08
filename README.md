@@ -181,35 +181,24 @@ kubectl create secret generic helix-key --from-literal=HELIX_API_KEY='<TenantID:
 helm install helix . --set helix.existingSecret=helix-key
 ```
 
-**4. Verify & view** — wait for the pods, point apps at the gateway, open the viewer:
+**4. Verify** — wait for the gateway pod and point your apps at it:
 ```bash
-kubectl get pods                                 # wait for helix-gateway + helix-viewer = Running
+kubectl get pods                                 # wait for helix-gateway = Running
 # apps in-cluster send to:  http://helix-gateway:4318
-# viewer is internal by default → port-forward, then open http://localhost:8765/otel-data:
-kubectl port-forward svc/helix-viewer 8765:8765
-# (Docker Desktop shortcut: install with --set viewer.service.type=LoadBalancer to skip the port-forward)
 ```
+
+> **Local clusters (Docker Desktop k8s):** telemetry automatically flows back to
+> `localhost:8765/otel-data` — the same built-in viewer you use in Docker mode. No
+> port-forward needed; the gateway sends a copy to `host.docker.internal:8765`.
+>
+> **Remote / cloud clusters:** view your telemetry in BMC Helix. The local viewer is
+> not reachable from a remote cluster, so the gateway sends to Helix only.
 
 > **Secrets:** the chart also accepts `--set helix.apiKey=…` for throwaway demos, but that value
 > lands in your shell history *and* Helm's in-cluster release storage (`helm get values` reveals it)
 > — prefer `existingSecret`, and in production populate the Secret from a manager (External Secrets /
 > Vault / Sealed Secrets). The chart expects the key under `HELIX_API_KEY` (override with
 > `--set helix.existingSecretKey=…`).
-
-> **Viewer image:** the viewer defaults to the published, public `ghcr.io/jammicha/helixconfigurator:latest`,
-> so the cluster pulls it automatically — no image-loading needed. It's still optional: a convenience
-> window on the telemetry, while the gateway is the real payload and a live Helix deployment shows
-> everything in Helix's own UI. Drop it with `--set viewer.enabled=false` (or untick it before
-> download). If you instead override `viewer.image` to a **locally-built** image (e.g. your own
-> `helix-configurator:latest`), the cluster can't pull it and the pod `ImagePullBackOff`s until you
-> load it into *that cluster's* store:
-> - **kind:** `kind load docker-image helix-configurator:latest`
-> - **minikube:** `minikube image load helix-configurator:latest`
-> - **Docker Desktop:** its newer Kubernetes runs on containerd (node `desktop-control-plane`) and
->   won't see a plain `docker build`. Enable **Settings → General → "Use containerd for pulling and
->   storing images"**, then rebuild `docker build -t helix-configurator:latest .` so the cluster can
->   use locally-built images.
-> - **OrbStack:** shares its image store with its Kubernetes, so a `docker build` is enough.
 
 ## Features
 
@@ -287,7 +276,7 @@ What the demo plumbing does:
 What it would look like in a real-product deployment:
 - A real AIOps page would generate the install command (the configurator would not host the page).
 - A real tenant would supply the actual `HELIX_ENDPOINT` and `HELIX_API_KEY`, not the placeholder + fake.
-- The fan-out `otlphttp/helix_local_viewer` exporter in `helix-otel-collector.yaml` (which feeds the local View OTel Data page) is **not** demo plumbing — it's part of the configurator's standalone-sidecar story and ships in either world.
+- The fan-out `otlphttp/helix_local_viewer` exporter in `helix-otel-collector.yaml` (which feeds the local View OTel Data page) is **not** demo plumbing — it ships in Docker mode and in local-cluster K8s mode (rewritten to `host.docker.internal:8765` by the chart generator). Remote K8s deployments strip it.
 
 To hide the demo namespace entirely:
 

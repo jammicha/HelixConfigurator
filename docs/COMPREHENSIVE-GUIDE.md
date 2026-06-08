@@ -185,7 +185,11 @@ The gateway's traces and logs pipelines each have **two** exporters:
 configurator's `/api/otlp/*` endpoints). The local copy is what powers **View
 OTel Data** — no external trace store needed (no Jaeger/Tempo; keeping the
 configurator a single self-contained service on port 8765 was a deliberate
-kickoff constraint). **Metrics flow only to Helix**
+kickoff constraint).
+
+In K8s local-cluster mode, the chart generator rewrites the viewer exporter to target `host.docker.internal:8765` (the host's configurator); in remote mode, the exporter is stripped entirely.
+
+**Metrics flow only to Helix**
 (the viewer doesn't render metrics today — that's a roadmap item, see
 [handoff 02](handoffs/02-trace-resource-metrics.md)).
 

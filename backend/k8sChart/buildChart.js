@@ -7,9 +7,9 @@ const { renderValues } = require('./renderValues');
 
 const CHART_DIR_NAME = 'helix-otel';
 
-function buildChartFiles({ collectorYaml, endpoint = '', xSource = '', viewerEnabled = true, viewerServiceName = 'helix-viewer' }) {
-  const gatewayConfig = transformCollectorConfig(collectorYaml, { viewerEnabled, viewerServiceName });
-  const values = renderValues({ endpoint, xSource, viewerEnabled });
+function buildChartFiles({ collectorYaml, endpoint = '', xSource = '', target = 'local' }) {
+  const gatewayConfig = transformCollectorConfig(collectorYaml, { target });
+  const values = renderValues({ endpoint, xSource });
   return { values, gatewayConfig };
 }
 
