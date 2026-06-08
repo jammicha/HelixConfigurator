@@ -124,8 +124,6 @@ HelixConfigurator/
 │   ├── tailwind.config.*       # ADAPT design tokens
 │   └── package.json
 │
-├── helix-aiops-mock/           # standalone demo project (separate Express app on :9000)
-│                               # serves the mock "Manage OTel" page + install scripts
 ├── templates/                  # YAML config templates loadable from the editor
 │
 └── docs/                       # version-controlled (Markdown only)

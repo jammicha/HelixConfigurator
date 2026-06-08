@@ -315,8 +315,11 @@ The configurator exposes a public `GET /api/health` endpoint (returns `{ ok: tru
 ## Demo — `helix-aiops-mock`
 
 The demo workflow (simulating the BMC Helix AIOps "Manage OpenTelemetry" install
-page) lives in the **separate `helix-aiops-mock` project**, not in this repo. It
-is a small standalone Express app (port `:9000`) that:
+page) lives in its **own repo —
+[github.com/jammicha/helix-aiops-mock](https://github.com/jammicha/helix-aiops-mock)**,
+fully decoupled from this one. Run it with no clone:
+`npx -y github:jammicha/helix-aiops-mock`. It is a small standalone Express app
+(port `:9000`) that:
 
 - Serves a mock "Manage OTel" form where you enter an X-Source name.
 - Mints a session (token + fake API key) and returns a `curl … | bash` /

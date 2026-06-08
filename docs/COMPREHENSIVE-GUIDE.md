@@ -374,10 +374,7 @@ HelixConfigurator/
 │   ├── start.command             # macOS: ./node backend/index.js
 │   ├── start.sh                  # Linux: ./node backend/index.js
 │   └── start.bat                 # Windows: node.exe backend\index.js
-├── helix-aiops-mock/             # standalone demo app (port :9000)
-│   ├── server.js                 # session store, /configure, /install routes
-│   ├── installScripts.js         # bash + ps1 script renderers
-│   └── public/index.html         # mock "Manage OTel" form
+│   (the demo "Manage OTel" page is its OWN repo — github.com/jammicha/helix-aiops-mock)
 ├── templates/                    # loadable YAML templates: default-sidecar,
 │                                 #   prometheus-scrape, tail-sampling, k8s-attributes
 │
