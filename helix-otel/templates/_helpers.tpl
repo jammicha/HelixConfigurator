@@ -10,9 +10,3 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 app.kubernetes.io/name: {{ .Values.gateway.name }}
 app.kubernetes.io/component: gateway
 {{- end -}}
-
-{{/* Viewer selector labels. */}}
-{{- define "helix-otel.viewer.selectorLabels" -}}
-app.kubernetes.io/name: {{ .Values.viewer.name }}
-app.kubernetes.io/component: viewer
-{{- end -}}

@@ -47,6 +47,7 @@ function transformCollectorConfig(yamlString, { target = 'local' } = {}) {
     if (viewer) {
       for (const key of ['traces_endpoint', 'logs_endpoint', 'metrics_endpoint']) {
         if (typeof viewer[key] === 'string') {
+          // Replace scheme + host:port, preserve the /api/otlp/* path.
           viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, `http://${LOCAL_VIEWER_HOST}`);
         }
       }

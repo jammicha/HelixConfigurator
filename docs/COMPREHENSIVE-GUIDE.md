@@ -196,12 +196,17 @@ copy-paste of an exporter endpoint, not a credential-handling exercise.
 
 The gateway's traces and logs pipelines each have **two** exporters:
 `otlphttp/bmchelix` (out to Helix) and `otlphttp/helix_local_viewer` (HTTP to the
-configurator's `/api/otlp/*` endpoints at `http://host.docker.internal:8765`).
-The local copy is what powers **View OTel Data** — no external trace store needed
-(no Jaeger/Tempo). `ExtraHosts: host.docker.internal:host-gateway` is set on
-the gateway container spec so this resolves on Linux Docker Engine as well as
-Docker Desktop. **Metrics flow only to Helix** (the viewer doesn't render
-metrics today — see [handoff 02](handoffs/02-trace-resource-metrics.md)).
+configurator's `/api/otlp/*` endpoints. The local copy is what powers **View
+OTel Data** — no external trace store needed (no Jaeger/Tempo; keeping the
+configurator a single self-contained service on port 8765 was a deliberate
+kickoff constraint).
+
+The exporter's target depends on where the configurator runs relative to the gateway:
+- **Docker target (native):** the configurator is a host process, so the gateway fans out to `http://host.docker.internal:8765`. The gateway container spec sets `ExtraHosts: host.docker.internal:host-gateway` so this resolves on Linux Docker Engine as well as Docker Desktop.
+- **K8s local-cluster mode:** the chart generator rewrites the viewer exporter to `host.docker.internal:8765` (the host's configurator); **remote mode** strips the exporter entirely.
+
+**Metrics flow only to Helix** (the viewer doesn't render metrics today — see
+[handoff 02](handoffs/02-trace-resource-metrics.md)).
 
 ### Events vs. Situations
 

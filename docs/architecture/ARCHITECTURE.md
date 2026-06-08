@@ -31,7 +31,7 @@ introspect their telemetry without standing up Jaeger or Tempo.
 The configurator is intentionally a *sidecar*: it never modifies the customer's
 application. Customer apps point at `helix-gateway:4318` (or `:4317`); the
 gateway adds the API key and forwards to Helix, while also fanning a copy of
-traces and logs to the configurator for the local viewer.
+traces and logs to the configurator for the local viewer (in Docker mode via `helix-configurator:3001`; in K8s local mode via `host.docker.internal:8765`).
 
 ---
 

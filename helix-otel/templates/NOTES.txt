@@ -4,23 +4,6 @@ Helix OTel gateway installed as release "{{ .Release.Name }}" in namespace "{{ .
      OTEL_EXPORTER_OTLP_ENDPOINT=http://{{ .Values.gateway.name }}:4318
    (gRPC on :4317, Prometheus metrics on :8888)
 
-{{- if .Values.viewer.enabled }}
-
-2) View OTel Data ({{ .Values.viewer.name }} is a {{ .Values.viewer.service.type }} Service on :8765):
-{{- if eq .Values.viewer.service.type "LoadBalancer" }}
-   On Docker Desktop (or any cluster with a LoadBalancer) open it directly -- no port-forward:
-     http://localhost:8765/otel-data
-   Heads up: on a shared/cloud cluster this exposes the unauthenticated viewer; use
-   --set viewer.service.type=ClusterIP there.
-{{- else }}
-   Port-forward, then open http://localhost:8765/otel-data:
-     kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Values.viewer.name }} 8765:8765
-   On Docker Desktop you can skip the port-forward -- reinstall with
-   --set viewer.service.type=LoadBalancer and open http://localhost:8765/otel-data directly.
-{{- end }}
-
-   The viewer pulls {{ .Values.viewer.image.repository }}:{{ .Values.viewer.image.tag }} from a public
-   registry, so it should start automatically. To run without it, reinstall with
-   --set viewer.enabled=false (the gateway above is the payload). If you override viewer.image to a
-   local build the cluster can't pull, load it first (kind load / minikube image load).
-{{- end }}
+2) Telemetry is flowing to Helix.
+   If running on a local cluster (Docker Desktop k8s), telemetry also flows
+   to http://localhost:8765/otel-data automatically.
