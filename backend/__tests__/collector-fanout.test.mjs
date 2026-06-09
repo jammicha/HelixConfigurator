@@ -31,6 +31,36 @@ exporters:
     expect(out).toContain('${env:HELIX_ENDPOINT}');
   });
 
+  it('does NOT touch per-signal endpoints in other exporters (scoped to the viewer block)', () => {
+    const mixed = `
+exporters:
+  otlphttp/helix_local_viewer:
+    traces_endpoint: http://helix-configurator:3001/api/otlp/traces
+    logs_endpoint: http://helix-configurator:3001/api/otlp/logs
+  otlphttp/my_backup:
+    traces_endpoint: https://collector.example.com/v1/traces
+    logs_endpoint: https://collector.example.com/v1/logs
+`;
+    const out = rewriteLocalViewerToHost(mixed);
+    expect(out).toContain('http://host.docker.internal:8765/api/otlp/traces');
+    expect(out).toContain('http://host.docker.internal:8765/api/otlp/logs');
+    expect(out).toContain('https://collector.example.com/v1/traces');
+    expect(out).toContain('https://collector.example.com/v1/logs');
+  });
+
+  it('rewrites the viewer block even when a user exporter precedes it', () => {
+    const mixed = `
+exporters:
+  otlphttp/my_backup:
+    traces_endpoint: https://collector.example.com/v1/traces
+  otlphttp/helix_local_viewer:
+    traces_endpoint: http://helix-configurator:3001/api/otlp/traces
+`;
+    const out = rewriteLocalViewerToHost(mixed);
+    expect(out).toContain('https://collector.example.com/v1/traces');
+    expect(out).toContain('http://host.docker.internal:8765/api/otlp/traces');
+  });
+
   it('preserves comment lines byte-for-byte after rewrite', () => {
     const withComment = `
 exporters:
