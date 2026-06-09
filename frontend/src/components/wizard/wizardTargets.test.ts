@@ -6,6 +6,7 @@ import {
   isWizardTarget,
   isWizardTargetOrNull,
   namespacedCommands,
+  isK8sTarget,
 } from './wizardTargets';
 
 describe('getWizardSteps', () => {
@@ -80,5 +81,21 @@ describe('namespacedCommands', () => {
   });
   it('trims surrounding whitespace', () => {
     expect(namespacedCommands('  obs ', base).createNamespace).toBe('kubectl create namespace obs');
+  });
+});
+
+describe('kubernetes-operator target', () => {
+  it('is a valid target', () => {
+    expect(isWizardTarget('kubernetes-operator')).toBe(true);
+    expect(isWizardTargetOrNull('kubernetes-operator')).toBe(true);
+  });
+  it('has its own step labels (Prereqs & Generate / Annotate)', () => {
+    expect(getWizardSteps('kubernetes-operator').map(s => s.label))
+      .toEqual(['Configure', 'Prereqs & Generate', 'Annotate', 'Verify', 'Link Service']);
+  });
+  it('isK8sTarget covers both kubernetes variants, not docker', () => {
+    expect(isK8sTarget('kubernetes')).toBe(true);
+    expect(isK8sTarget('kubernetes-operator')).toBe(true);
+    expect(isK8sTarget('docker')).toBe(false);
   });
 });

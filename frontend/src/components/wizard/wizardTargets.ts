@@ -4,10 +4,10 @@
 // labels and the Kubernetes Service-DNS endpoint. Dependency-free + pure so it's
 // unit-tested (the TDD core of this round).
 
-export type WizardTarget = 'docker' | 'kubernetes';
+export type WizardTarget = 'docker' | 'kubernetes' | 'kubernetes-operator';
 
 export function isWizardTarget(v: unknown): v is WizardTarget {
-  return v === 'docker' || v === 'kubernetes';
+  return v === 'docker' || v === 'kubernetes' || v === 'kubernetes-operator';
 }
 
 // localStorage validator: null (no choice yet) or a valid target.
@@ -33,7 +33,20 @@ const KUBERNETES_STEPS: WizardStep[] = [
   { n: 5, label: 'Link Service' },
 ];
 
+const KUBERNETES_OPERATOR_STEPS: WizardStep[] = [
+  { n: 1, label: 'Configure' },
+  { n: 2, label: 'Prereqs & Generate' },
+  { n: 3, label: 'Annotate' },
+  { n: 4, label: 'Verify' },
+  { n: 5, label: 'Link Service' },
+];
+
+export function isK8sTarget(target: WizardTarget): boolean {
+  return target === 'kubernetes' || target === 'kubernetes-operator';
+}
+
 export function getWizardSteps(target: WizardTarget): WizardStep[] {
+  if (target === 'kubernetes-operator') return KUBERNETES_OPERATOR_STEPS;
   return target === 'kubernetes' ? KUBERNETES_STEPS : DOCKER_STEPS;
 }
 
