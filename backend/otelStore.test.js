@@ -175,3 +175,66 @@ describe('OtelStore corrupt-store self-heal', () => {
     expect(quarantineFiles().length).toBe(0);
   });
 });
+
+describe('OtelStore resource attributes round-trip', () => {
+  const { extractSpans } = otelStoreModule;
+  let tmpDir = null;
+  let store = null;
+
+  afterEach(() => {
+    if (store) {
+      try { store.stopMaintenance(); } catch { /* noop */ }
+      try { store.db.close(); } catch { /* noop */ }
+      store = null;
+    }
+    if (tmpDir) { fs.rmSync(tmpDir, { recursive: true, force: true }); tmpDir = null; }
+  });
+
+  it('extracts OTLP resource attributes and returns them per span from getTrace', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otelstore-res-'));
+    store = new OtelStore({ dbPath: path.join(tmpDir, 'otel-store.db') });
+
+    const traceId = 'c'.repeat(32);
+    const spanId = 'd'.repeat(16);
+    const otlp = {
+      resourceSpans: [{
+        resource: { attributes: [
+          { key: 'service.name', value: { stringValue: 'checkout-web' } },
+          { key: 'service.namespace', value: { stringValue: 'Helix-Configurator-Demo' } },
+          { key: 'service.version', value: { stringValue: '4.2.1' } },
+          { key: 'telemetry.sdk.language', value: { stringValue: 'nodejs' } },
+          { key: 'k8s.pod.name', value: { stringValue: 'checkout-web-abc-12345' } },
+          { key: 'process.pid', value: { intValue: 4242 } },
+        ] },
+        scopeSpans: [{ scope: { name: 'test' }, spans: [{
+          traceId, spanId, name: 'POST /checkout', kind: 2,
+          startTimeUnixNano: '1000000', endTimeUnixNano: '2000000',
+          status: { code: 0 },
+          attributes: [{ key: 'http.request.method', value: { stringValue: 'POST' } }],
+        }] }],
+      }],
+    };
+
+    store.ingestSpans(extractSpans(otlp));
+    const span = store.getTrace(traceId).spans.find(s => s.spanId === spanId);
+    expect(span).toBeTruthy();
+    expect(span.attributes['http.request.method']).toBe('POST'); // span attrs still work
+    expect(span.resourceAttributes['service.version']).toBe('4.2.1');
+    expect(span.resourceAttributes['telemetry.sdk.language']).toBe('nodejs');
+    expect(span.resourceAttributes['k8s.pod.name']).toBe('checkout-web-abc-12345');
+    expect(span.resourceAttributes['process.pid']).toBe(4242);
+  });
+
+  it('defaults resourceAttributes to {} for spans ingested without resource attrs', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otelstore-res2-'));
+    store = new OtelStore({ dbPath: path.join(tmpDir, 'otel-store.db') });
+    const traceId = 'e'.repeat(32);
+    store.ingestSpans([{
+      traceId, spanId: 'f'.repeat(16), parentSpanId: '',
+      serviceName: 'svc', serviceNamespace: null,
+      name: 'op', kind: 2, startTimeNs: 1000, endTimeNs: 2000,
+      durationMs: 1, statusCode: 0, statusMessage: '', attributes: {}, events: [],
+    }]);
+    expect(store.getTrace(traceId).spans[0].resourceAttributes).toEqual({});
+  });
+});

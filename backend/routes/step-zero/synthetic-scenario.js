@@ -138,13 +138,130 @@ const stripeTraceback = (type, message) => [
 const STRIPE_TIMEOUT_MSG = "HTTPSConnectionPool(host='api.stripe.com', port=443): Read timed out. (read timeout=5)";
 const STRIPE_503_MSG = '503 Server Error: Service Unavailable for url: /v1/charges';
 
-const resourceForService = (serviceName) => ({
-  attributes: [
-    { key: 'service.name', value: { stringValue: serviceName } },
-    { key: 'service.namespace', value: { stringValue: 'Helix-Configurator-Demo' } },
-    { key: 'deployment.environment', value: { stringValue: 'demo' } },
-  ],
-});
+// --- Resource identity ----------------------------------------------------
+// A believable polyglot fleet: each service runs a different language/runtime,
+// so the trace drawer's Resource section reads like a real OTel deployment
+// rather than a uniform mock.
+const SERVICE_RUNTIME = {
+  'checkout-web':     { version: '4.2.1', language: 'nodejs', runtimeName: 'nodejs',  runtimeVersion: '20.11.1',   runtimeDesc: 'Node.js v20.11.1',                         sdk: '1.27.0' },
+  'cart-api':         { version: '2.8.0', language: 'go',     runtimeName: 'go',      runtimeVersion: 'go1.22.2',  runtimeDesc: 'go version go1.22.2 linux/amd64',           sdk: '1.27.0' },
+  'payment-service':  { version: '3.1.4', language: 'python', runtimeName: 'cpython', runtimeVersion: '3.11.8',    runtimeDesc: 'CPython 3.11.8',                            sdk: '1.24.0' },
+  'inventory-db':     { version: '1.9.2', language: 'python', runtimeName: 'cpython', runtimeVersion: '3.11.8',    runtimeDesc: 'CPython 3.11.8',                            sdk: '1.24.0' },
+  'stripe-mock':      { version: '0.7.0', language: 'go',     runtimeName: 'go',      runtimeVersion: 'go1.22.2',  runtimeDesc: 'go version go1.22.2 linux/amd64',           sdk: '1.27.0' },
+  'notification-svc': { version: '2.0.5', language: 'java',   runtimeName: 'OpenJDK Runtime Environment', runtimeVersion: '17.0.10+7', runtimeDesc: 'Eclipse Adoptium OpenJDK 64-Bit Server VM 17.0.10+7', sdk: '1.36.0' },
+};
+const K8S_NAMESPACE = 'helix-demo';
+const uuidish = () => `${randomHex(4)}-${randomHex(2)}-${randomHex(2)}-${randomHex(2)}-${randomHex(6)}`;
+
+// Per-service identity is computed once and cached, so every span and metric a
+// service emits — across all traces in this process — shares one stable
+// instance id / pod / host / pid, exactly as a single running replica would.
+const SERVICE_IDENTITY = {};
+const identityFor = (serviceName) => {
+  if (!SERVICE_IDENTITY[serviceName]) {
+    const pod = `${serviceName}-${randomHex(3)}-${randomHex(2).slice(0, 5)}`;
+    SERVICE_IDENTITY[serviceName] = {
+      instanceId: uuidish(),
+      pod,
+      host: pod, // in K8s the container hostname is the pod name
+      node: `gke-helix-demo-pool-${randomHex(2)}`,
+      containerId: randomHex(32),
+      pid: 1 + (crypto.randomBytes(2).readUInt16BE(0) % 32000),
+    };
+  }
+  return SERVICE_IDENTITY[serviceName];
+};
+
+const resourceForService = (serviceName) => {
+  const rt = SERVICE_RUNTIME[serviceName] || SERVICE_RUNTIME['checkout-web'];
+  const id = identityFor(serviceName);
+  return {
+    attributes: [
+      // Identity — service.namespace is the Helix join key; do NOT change it.
+      { key: 'service.name', value: { stringValue: serviceName } },
+      { key: 'service.namespace', value: { stringValue: 'Helix-Configurator-Demo' } },
+      { key: 'service.version', value: { stringValue: rt.version } },
+      { key: 'service.instance.id', value: { stringValue: id.instanceId } },
+      { key: 'deployment.environment', value: { stringValue: 'demo' } },
+      { key: 'deployment.environment.name', value: { stringValue: 'demo' } },
+      // Telemetry SDK
+      { key: 'telemetry.sdk.name', value: { stringValue: 'opentelemetry' } },
+      { key: 'telemetry.sdk.language', value: { stringValue: rt.language } },
+      { key: 'telemetry.sdk.version', value: { stringValue: rt.sdk } },
+      // Process / runtime
+      { key: 'process.pid', value: { intValue: id.pid } },
+      { key: 'process.runtime.name', value: { stringValue: rt.runtimeName } },
+      { key: 'process.runtime.version', value: { stringValue: rt.runtimeVersion } },
+      { key: 'process.runtime.description', value: { stringValue: rt.runtimeDesc } },
+      // Host / OS
+      { key: 'host.name', value: { stringValue: id.host } },
+      { key: 'host.arch', value: { stringValue: 'amd64' } },
+      { key: 'os.type', value: { stringValue: 'linux' } },
+      { key: 'os.description', value: { stringValue: 'Debian GNU/Linux 12 (bookworm)' } },
+      // Container / Kubernetes
+      { key: 'container.id', value: { stringValue: id.containerId } },
+      { key: 'container.runtime', value: { stringValue: 'containerd' } },
+      { key: 'k8s.namespace.name', value: { stringValue: K8S_NAMESPACE } },
+      { key: 'k8s.pod.name', value: { stringValue: id.pod } },
+      { key: 'k8s.deployment.name', value: { stringValue: serviceName } },
+      { key: 'k8s.container.name', value: { stringValue: serviceName } },
+      { key: 'k8s.node.name', value: { stringValue: id.node } },
+      // Cloud
+      { key: 'cloud.provider', value: { stringValue: 'aws' } },
+      { key: 'cloud.platform', value: { stringValue: 'aws_eks' } },
+      { key: 'cloud.region', value: { stringValue: 'us-east-1' } },
+    ],
+  };
+};
+
+// --- Span attribute builders ----------------------------------------------
+// Base HTTP / messaging semantic-convention attributes that every span of a
+// service carries on the happy path. Per-pattern extras (cache.hit, retry.attempt,
+// startup.cold, db.pool.wait_ms …) are appended by the caller on top of these.
+const randByte = () => crypto.randomBytes(1)[0];
+const randomClientIp = () => `203.0.113.${1 + (randByte() % 254)}`;
+const USER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+];
+const pick = (arr) => arr[randByte() % arr.length];
+
+// service → its HTTP face (method/route/scheme/host/port).
+const SERVICE_HTTP = {
+  'checkout-web':    { method: 'POST', route: '/checkout',   scheme: 'https', host: 'shop.example.com',               port: 443 },
+  'cart-api':        { method: 'GET',  route: '/cart/items', scheme: 'http',  host: 'cart-api.helix-demo.svc',        port: 8000 },
+  'payment-service': { method: 'POST', route: '/charge',     scheme: 'https', host: 'payment-service.helix-demo.svc', port: 8443 },
+  'stripe-mock':     { method: 'POST', route: '/v1/charges', scheme: 'https', host: 'api.stripe.com',                 port: 443 },
+};
+const httpAttrs = (serviceName, status) => {
+  const h = SERVICE_HTTP[serviceName];
+  return [
+    { key: 'http.request.method', value: { stringValue: h.method } },
+    { key: 'url.path', value: { stringValue: h.route } },
+    { key: 'url.scheme', value: { stringValue: h.scheme } },
+    { key: 'http.route', value: { stringValue: h.route } },
+    { key: 'http.response.status_code', value: { intValue: status } },
+    { key: 'server.address', value: { stringValue: h.host } },
+    { key: 'server.port', value: { intValue: h.port } },
+    { key: 'network.protocol.name', value: { stringValue: 'http' } },
+    { key: 'network.protocol.version', value: { stringValue: '1.1' } },
+  ];
+};
+const stripeAttrs = (status) => [
+  ...httpAttrs('stripe-mock', status),
+  { key: 'url.full', value: { stringValue: 'https://api.stripe.com/v1/charges' } },
+  { key: 'stripe.api_version', value: { stringValue: '2024-04-10' } },
+];
+const messagingAttrs = () => [
+  { key: 'messaging.system', value: { stringValue: 'smtp' } },
+  { key: 'messaging.operation', value: { stringValue: 'publish' } },
+  { key: 'messaging.destination.name', value: { stringValue: 'order-confirmations' } },
+  { key: 'messaging.message.body.size', value: { intValue: 800 + randByte() } },
+  { key: 'network.transport', value: { stringValue: 'tcp' } },
+  { key: 'server.address', value: { stringValue: 'smtp.helix-demo.svc' } },
+  { key: 'server.port', value: { intValue: 587 } },
+];
 
 const logRecordForSpan = ({ traceId, spanId, message, startMs }) => ({
   timeUnixNano: String(BigInt(Math.round(startMs)) * 1_000_000n),
@@ -205,7 +322,7 @@ const buildRetryStormStripeSpans = ({ traceId, paymentSpanId, stripeStartMs, suc
       traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
       name: 'POST /v1/charges', startMs: t1Start, durationMs: attempt1,
       statusCode: 2, errorMessage: 'timeout',
-      attributes: [{ key: 'retry.attempt', value: { intValue: 1 } }, ...STRIPE_CLIENT_CODE_ATTRS],
+      attributes: [...stripeAttrs(504), { key: 'retry.attempt', value: { intValue: 1 } }, ...STRIPE_CLIENT_CODE_ATTRS],
       events: [buildExceptionEvent({
         type: 'requests.exceptions.ReadTimeout', message: STRIPE_TIMEOUT_MSG,
         stacktrace: stripeTraceback('requests.exceptions.ReadTimeout', STRIPE_TIMEOUT_MSG),
@@ -216,7 +333,7 @@ const buildRetryStormStripeSpans = ({ traceId, paymentSpanId, stripeStartMs, suc
       traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
       name: 'POST /v1/charges', startMs: t2Start, durationMs: attempt2,
       statusCode: 2, errorMessage: 'service_unavailable',
-      attributes: [{ key: 'retry.attempt', value: { intValue: 2 } }, ...STRIPE_CLIENT_CODE_ATTRS],
+      attributes: [...stripeAttrs(503), { key: 'retry.attempt', value: { intValue: 2 } }, ...STRIPE_CLIENT_CODE_ATTRS],
       events: [buildExceptionEvent({
         type: 'requests.exceptions.HTTPError', message: STRIPE_503_MSG,
         stacktrace: stripeTraceback('requests.exceptions.HTTPError', STRIPE_503_MSG),
@@ -226,7 +343,7 @@ const buildRetryStormStripeSpans = ({ traceId, paymentSpanId, stripeStartMs, suc
     buildSpan({
       traceId, spanId: randomHex(8), parentSpanId: paymentSpanId,
       name: 'POST /v1/charges', startMs: t3Start, durationMs: attempt3,
-      attributes: [{ key: 'retry.attempt', value: { intValue: 3 } }],
+      attributes: [...stripeAttrs(200), { key: 'retry.attempt', value: { intValue: 3 } }],
     }),
   ];
   const totalStripeDuration = attempt1 + attempt2 + attempt3;
@@ -359,6 +476,7 @@ const generateTrace = () => {
       traceId, spanId: stripeSpanId, parentSpanId: paymentSpanId,
       name: 'POST /v1/charges', startMs: stripeStartMs, durationMs: stripeBaseLatency,
       errored: false,
+      attributes: stripeAttrs(200),
     })];
     totalStripeDuration = stripeBaseLatency;
   }
@@ -375,9 +493,13 @@ const generateTrace = () => {
   const cartErrMsg = injectInventoryError ? 'upstream inventory unavailable' : undefined;
   const invErrMsg = injectInventoryError ? 'connection refused: inventory-db unreachable' : undefined;
 
-  // Cart-api attributes: cache.hit (and cold-start if applicable).
-  const cartAttributes = [];
-  if (injectCartCacheMiss) cartAttributes.push({ key: 'cache.hit', value: { boolValue: false } });
+  // Cart-api attributes: base HTTP semconv + cache.hit (false on a miss, true
+  // otherwise) and cold-start when applicable.
+  const cartAttributes = [
+    ...httpAttrs('cart-api', injectInventoryError ? 500 : 200),
+    { key: 'http.response.body.size', value: { intValue: 200 + randByte() } },
+    { key: 'cache.hit', value: { boolValue: !injectCartCacheMiss } },
+  ];
   if (coldStartService === 'cart-api') cartAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
 
   // Inventory-db: every span carries the standard OTel DB semantic-convention
@@ -391,6 +513,7 @@ const generateTrace = () => {
     const itemId = 1000 + (callIndex || 0);
     const attrs = [
       { key: 'db.system', value: { stringValue: 'postgresql' } },
+      { key: 'db.system.name', value: { stringValue: 'postgresql' } }, // semconv 1.27+ alias
       { key: 'db.name', value: { stringValue: 'inventory' } },
       { key: 'db.namespace', value: { stringValue: 'inventory' } },
       { key: 'db.operation', value: { stringValue: 'SELECT' } },
@@ -399,6 +522,10 @@ const generateTrace = () => {
         key: 'db.statement',
         value: { stringValue: `SELECT quantity, last_updated FROM stock WHERE item_id = ${itemId}` },
       },
+      { key: 'server.address', value: { stringValue: 'inventory-db.helix-demo.svc' } },
+      { key: 'server.port', value: { intValue: 5432 } },
+      { key: 'network.peer.address', value: { stringValue: '10.42.1.37' } },
+      { key: 'network.transport', value: { stringValue: 'tcp' } },
     ];
     if (injectInvPoolWait) {
       attrs.push({ key: 'db.pool.wait_ms', value: { intValue: 10 } });
@@ -415,16 +542,31 @@ const generateTrace = () => {
     return attrs;
   };
 
-  // Checkout-web attributes (cold-start).
-  const checkoutAttributes = [];
+  // Checkout-web attributes: public-facing HTTP request + cold-start when applicable.
+  const checkoutAttributes = [
+    ...httpAttrs('checkout-web', injectInventoryError ? 500 : 200),
+    { key: 'url.full', value: { stringValue: 'https://shop.example.com/checkout' } },
+    { key: 'client.address', value: { stringValue: randomClientIp() } },
+    { key: 'user_agent.original', value: { stringValue: pick(USER_AGENTS) } },
+    { key: 'http.request.body.size', value: { intValue: 280 + randByte() } },
+    { key: 'enduser.id', value: { stringValue: `cust_${randomHex(4)}` } },
+  ];
   if (coldStartService === 'checkout-web') checkoutAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
 
-  // Payment-service attributes (cold-start).
-  const paymentAttributes = [];
+  // Payment-service attributes: internal HTTP charge call + business context + cold-start.
+  const paymentAttributes = [
+    ...httpAttrs('payment-service', 200),
+    { key: 'payment.amount', value: { doubleValue: Math.round((19.99 + randByte()) * 100) / 100 } },
+    { key: 'payment.currency', value: { stringValue: 'USD' } },
+    { key: 'payment.method', value: { stringValue: 'card' } },
+  ];
   if (coldStartService === 'payment-service') paymentAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
 
-  // Notification-svc attributes (template.render_ms + cold-start).
-  const notifyAttributes = [];
+  // Notification-svc attributes: messaging semconv + template.render_ms + cold-start.
+  const notifyAttributes = [
+    ...messagingAttrs(),
+    { key: 'notification.channel', value: { stringValue: 'email' } },
+  ];
   if (injectNotifyRenderSlow) notifyAttributes.push({ key: 'template.render_ms', value: { intValue: 95 } });
   if (coldStartService === 'notification-svc') notifyAttributes.push({ key: 'startup.cold', value: { boolValue: true } });
 

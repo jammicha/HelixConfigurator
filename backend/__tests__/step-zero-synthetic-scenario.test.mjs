@@ -121,13 +121,18 @@ describe('generateTrace', () => {
 
   it('cart-api cache-miss tail fires on ~5% of traces (sample of 2000)', () => {
     let slow = 0;
-    let sample;
+    // Collect the latency of EVERY cache.hit=false cart-api span so we can
+    // assert on the distribution, not a single span. cart-api cache-miss latency
+    // is a log-normal draw (median ~40ms, sigma ~0.4) whose left tail dips to
+    // ~11ms a few percent of the time — a single-span ">15ms" check flakes there.
+    const cacheMissDurations = [];
     for (let i = 0; i < 2000; i++) {
       const t = generateTrace();
       const cartSpans = spansForService(t, 'cart-api');
-      if (cartSpans.some(s => durationMs(s) > 25)) {
-        slow++;
-        if (!sample) sample = t;
+      if (cartSpans.some(s => durationMs(s) > 25)) slow++;
+      for (const s of cartSpans) {
+        const attr = (s.attributes || []).find(a => a.key === 'cache.hit');
+        if (attr && attr.value.boolValue === false) cacheMissDurations.push(durationMs(s));
       }
     }
     // 5% over 2000 ~ 100. Note: N+1 pattern can also inflate cart-api duration
@@ -136,21 +141,19 @@ describe('generateTrace', () => {
     // increased count over baseline.
     expect(slow).toBeGreaterThan(70);
     expect(slow).toBeLessThan(250); // generous upper to account for N+1 overlap
-    // Spot-check: find a trace where cart-api > 25ms AND has cache.hit=false.
-    let foundCacheMiss = false;
-    for (let i = 0; i < 500 && !foundCacheMiss; i++) {
-      const t = generateTrace();
-      const cartSpans = spansForService(t, 'cart-api');
-      for (const s of cartSpans) {
-        const attr = (s.attributes || []).find(a => a.key === 'cache.hit');
-        if (attr && attr.value.boolValue === false) {
-          expect(durationMs(s)).toBeGreaterThan(15); // ~40ms median, allow wide
-          foundCacheMiss = true;
-          break;
-        }
-      }
-    }
-    expect(foundCacheMiss).toBe(true);
+
+    // Cache-miss spans should actually appear (~5% of 2000 ≈ 100) and carry the
+    // elevated ~40ms median vs the ~8ms baseline. Asserting the MEDIAN of the
+    // whole set is robust to the log-normal tail: with ~100 samples the median
+    // sits near 40ms and effectively never falls below 25ms (cold-start / N+1
+    // only push durations up, never down).
+    expect(cacheMissDurations.length).toBeGreaterThan(30);
+    const median = (arr) => {
+      const a = [...arr].sort((x, y) => x - y);
+      const mid = Math.floor(a.length / 2);
+      return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+    };
+    expect(median(cacheMissDurations)).toBeGreaterThan(25);
   });
 
   it('inventory-db pool wait fires on ~4% of traces with attribute on every inv span (sample of 2000)', () => {
@@ -425,5 +428,92 @@ describe('generateTrace process.* resource metrics (Resources panel)', () => {
     const cw = points.filter((p) => p.resourceKey === key);
     expect(cw.some((p) => p.metricName === 'process.cpu.utilization')).toBe(true);
     expect(cw.some((p) => p.metricName === 'process.memory.usage')).toBe(true);
+  });
+});
+
+describe('generateTrace span + resource attribute enrichment', () => {
+  const readVal = (v = {}) => {
+    if (v.stringValue !== undefined) return v.stringValue;
+    if (v.intValue !== undefined) return Number(v.intValue);
+    if (v.doubleValue !== undefined) return v.doubleValue;
+    if (v.boolValue !== undefined) return v.boolValue;
+    return undefined;
+  };
+  const flatAttrs = (arr) => Object.fromEntries((arr || []).map((a) => [a.key, readVal(a.value)]));
+  const allSpans = (t) => t.traces.resourceSpans.flatMap((rs) => rs.scopeSpans.flatMap((ss) => ss.spans));
+  const resourceFor = (t, svc) => t.traces.resourceSpans.find((r) => serviceNameOf(r) === svc);
+
+  it('every span carries at least one attribute — no bare spans on the happy path', () => {
+    // The original complaint: healthy-trace HTTP spans rendered no Attributes
+    // section because their attribute array was empty. Guard against regressing.
+    sample(40, () => {
+      for (const s of allSpans(generateTrace())) {
+        expect((s.attributes || []).length, `${s.name} must not be attribute-less`).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  it('checkout-web POST /checkout carries HTTP server semconv attributes', () => {
+    const a = flatAttrs(spansForService(generateTrace(), 'checkout-web')[0].attributes);
+    expect(a['http.request.method']).toBe('POST');
+    expect(a['http.route']).toBe('/checkout');
+    expect(a['url.path']).toBe('/checkout');
+    expect(typeof a['http.response.status_code']).toBe('number');
+    expect(a['server.address']).toBeTruthy();
+  });
+
+  it('cart-api GET /cart/items carries HTTP method GET', () => {
+    const a = flatAttrs(spansForService(generateTrace(), 'cart-api')[0].attributes);
+    expect(a['http.request.method']).toBe('GET');
+    expect(a['http.route']).toBe('/cart/items');
+    expect(typeof a['http.response.status_code']).toBe('number');
+  });
+
+  it('notification-svc carries messaging semconv attributes', () => {
+    let found = null;
+    for (let i = 0; i < 60 && !found; i++) {
+      const ns = spansForService(generateTrace(), 'notification-svc');
+      if (ns.length) found = ns[0];
+    }
+    expect(found, 'notification-svc should appear within 60 samples').toBeTruthy();
+    const a = flatAttrs(found.attributes);
+    expect(a['messaging.system']).toBeTruthy();
+    expect(a['messaging.operation']).toBeTruthy();
+  });
+
+  it('inventory-db keeps its db.* semconv attributes after enrichment', () => {
+    const inv = spansForService(generateTrace(), 'inventory-db')[0];
+    const a = flatAttrs(inv.attributes);
+    expect(a['db.system']).toBe('postgresql');
+    expect(a['db.statement']).toMatch(/^SELECT/);
+  });
+
+  it('every resource carries a full OTel resource attribute set', () => {
+    const t = generateTrace();
+    const a = flatAttrs(resourceFor(t, 'checkout-web').resource.attributes);
+    expect(a['service.name']).toBe('checkout-web');
+    expect(a['service.namespace']).toBe('Helix-Configurator-Demo'); // unchanged join key
+    expect(a['service.version']).toBeTruthy();
+    expect(a['service.instance.id']).toBeTruthy();
+    expect(a['telemetry.sdk.name']).toBe('opentelemetry');
+    expect(a['telemetry.sdk.language']).toBeTruthy();
+    expect(a['process.runtime.name']).toBeTruthy();
+    expect(a['host.name']).toBeTruthy();
+    expect(a['os.type']).toBe('linux');
+    expect(a['k8s.pod.name']).toBeTruthy();
+  });
+
+  it('service.instance.id is stable for a service across traces (one process = one instance)', () => {
+    const id1 = flatAttrs(resourceFor(generateTrace(), 'cart-api').resource.attributes)['service.instance.id'];
+    const id2 = flatAttrs(resourceFor(generateTrace(), 'cart-api').resource.attributes)['service.instance.id'];
+    expect(id1).toBeTruthy();
+    expect(id1).toBe(id2);
+  });
+
+  it('different services get different telemetry.sdk.language (multi-language fleet)', () => {
+    const t = generateTrace();
+    const langOf = (svc) => flatAttrs(resourceFor(t, svc).resource.attributes)['telemetry.sdk.language'];
+    const langs = new Set(['checkout-web', 'cart-api', 'payment-service'].map(langOf));
+    expect(langs.size).toBeGreaterThan(1);
   });
 });

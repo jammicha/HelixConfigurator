@@ -65,6 +65,10 @@ export type SpanDetail = {
   statusCode: number;
   statusMessage: string;
   attributes: Record<string, any>;
+  // Full OTel resource attribute set for the span's service (service.version,
+  // telemetry.sdk.*, process.*, host.*, k8s.*, cloud.* …). Optional because
+  // rows predating the backend column return it absent; treat missing as {}.
+  resourceAttributes?: Record<string, any>;
   events: { name: string; timeUnixNano: number; attributes: Record<string, any> }[];
 };
 

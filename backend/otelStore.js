@@ -179,6 +179,7 @@ const extractSpans = (body) => {
           serviceName,
           serviceNamespace,
           containerName,
+          resourceAttributes: resourceAttrs,
           name: s.name || '',
           kind: Number(s.kind || 0),
           startTimeNs: startNs,
@@ -490,6 +491,7 @@ class OtelStore {
         status_code INTEGER,
         status_message TEXT,
         attributes_json TEXT,
+        resource_attributes_json TEXT,
         events_json TEXT,
         PRIMARY KEY (span_id, trace_id)
       );
@@ -542,6 +544,10 @@ class OtelStore {
     };
     addColumn('spans', 'service_namespace', 'TEXT');
     addColumn('spans', 'container_name', 'TEXT');
+    // Full OTel resource attribute set per span (service.version, host.*,
+    // process.*, k8s.* …) for the trace drawer's Resource section. Stored as
+    // JSON because it's display-only — filters use the dedicated columns above.
+    addColumn('spans', 'resource_attributes_json', 'TEXT');
     // traces.service_namespace is denormalized from the root span (below) so
     // the trace summary — and the "View in Helix" deep-link built from it —
     // can scope to the namespace the trace actually lives in. Pre-existing
@@ -573,11 +579,11 @@ class OtelStore {
       INSERT INTO spans (span_id, trace_id, parent_span_id, service_name,
                           service_namespace, container_name, name, kind,
                           start_time_ns, end_time_ns, duration_ms, status_code, status_message,
-                          attributes_json, events_json)
+                          attributes_json, resource_attributes_json, events_json)
       VALUES (@spanId, @traceId, @parentSpanId, @serviceName,
               @serviceNamespace, @containerName, @name, @kind,
               @startTimeNs, @endTimeNs, @durationMs, @statusCode, @statusMessage,
-              @attributesJson, @eventsJson)
+              @attributesJson, @resourceAttributesJson, @eventsJson)
       ON CONFLICT(span_id, trace_id) DO UPDATE SET
         parent_span_id = excluded.parent_span_id,
         service_name = excluded.service_name,
@@ -591,6 +597,7 @@ class OtelStore {
         status_code = excluded.status_code,
         status_message = excluded.status_message,
         attributes_json = excluded.attributes_json,
+        resource_attributes_json = excluded.resource_attributes_json,
         events_json = excluded.events_json
     `);
     this.recomputeTrace = this.db.prepare(`
@@ -709,6 +716,7 @@ class OtelStore {
           statusCode: span.statusCode,
           statusMessage: span.statusMessage,
           attributesJson: JSON.stringify(span.attributes || {}),
+          resourceAttributesJson: JSON.stringify(span.resourceAttributes || {}),
           eventsJson: JSON.stringify(span.events || []),
         });
         touchedTraces.add(span.traceId);
@@ -1329,6 +1337,7 @@ class OtelStore {
       statusCode: s.status_code,
       statusMessage: s.status_message,
       attributes: safeJson(s.attributes_json, {}),
+      resourceAttributes: safeJson(s.resource_attributes_json, {}),
       events: safeJson(s.events_json, []),
     }));
     return { summary, spans };

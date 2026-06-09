@@ -26,6 +26,11 @@ export const SpanRow: React.FC<{
 }> = ({ span, depth, traceStartNs, traceDurationNs, logs, isOnCriticalPath, criticalInterval, descendantCount, isCollapsed, onToggleCollapsed, isHighlighted = false, isDimmed = false }) => {
   const slowThresholdMs = useSlowThreshold();
   const [open, setOpen] = useState(false);
+  // Resource attributes are identical for every span of a service and verbose
+  // (~25 keys), so the section is collapsed by default — a labelled toggle the
+  // user expands on demand, the way Jaeger/Tempo present process/resource tags.
+  const [showResource, setShowResource] = useState(false);
+  const resourceAttributes = span.resourceAttributes || {};
   const offsetNs = Math.max(0, span.startTimeNs - traceStartNs);
   const widthNs = Math.max(1, span.endTimeNs - span.startTimeNs);
   const leftPct = (offsetNs / traceDurationNs) * 100;
@@ -305,6 +310,40 @@ export const SpanRow: React.FC<{
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {Object.keys(resourceAttributes).length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <button
+                  type="button"
+                  onClick={() => setShowResource(s => !s)}
+                  className="flex items-center gap-1.5 text-tiny text-gray-500 uppercase tracking-wider font-semibold hover:text-gray-300 transition-colors"
+                  title={showResource ? 'Hide resource attributes' : 'Show resource attributes'}
+                  aria-expanded={showResource}
+                >
+                  {showResource ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  Resource ({Object.keys(resourceAttributes).length})
+                </button>
+                {showResource && (
+                  <CopyButton
+                    value={JSON.stringify(resourceAttributes, null, 2)}
+                    label="Copy all"
+                    title="Copy all resource attributes as JSON"
+                  />
+                )}
+              </div>
+              {showResource && (
+                <div className="bg-gray-1000 border border-gray-800 rounded p-2 text-tiny font-mono space-y-0.5 max-h-48 overflow-auto" style={{ fontFamily: "'Source Code Pro', monospace" }}>
+                  {Object.entries(resourceAttributes).map(([k, v]) => (
+                    <div key={k} className="flex gap-3">
+                      <span className="text-gray-500 flex-shrink-0">{k}</span>
+                      <span className="text-gray-200 break-all">{String(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
