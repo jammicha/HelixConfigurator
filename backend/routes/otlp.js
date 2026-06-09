@@ -8,11 +8,17 @@ const { extractSpans, extractLogRecords, extractMetricPoints } = require('../ote
 // Decode an OTLP/HTTP request body. The gateway is configured for JSON +
 // no compression, but we still tolerate gzip in case the user wires their
 // own collector at this endpoint.
+// Cap decompressed size: these are public routes and the 32MB raw-body limit
+// applies to the COMPRESSED payload — without this cap a small gzip body can
+// legally inflate ~1000× into multi-GB allocations (zip-bomb → OOM). 64MB is
+// far above any real OTLP batch. Overflow throws → the routes answer 400.
+const MAX_DECODED_BYTES = 64 * 1024 * 1024;
+
 const decodeOtlpBody = (req) => {
   let buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
   const enc = (req.headers['content-encoding'] || '').toLowerCase();
-  if (enc.includes('gzip')) buf = zlib.gunzipSync(buf);
-  else if (enc.includes('deflate')) buf = zlib.inflateSync(buf);
+  if (enc.includes('gzip')) buf = zlib.gunzipSync(buf, { maxOutputLength: MAX_DECODED_BYTES });
+  else if (enc.includes('deflate')) buf = zlib.inflateSync(buf, { maxOutputLength: MAX_DECODED_BYTES });
   const ct = (req.headers['content-type'] || '').toLowerCase();
   if (ct.includes('protobuf')) {
     // Protobuf encoding not supported here — the local_store exporter is

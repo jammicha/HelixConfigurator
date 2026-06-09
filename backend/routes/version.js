@@ -18,14 +18,29 @@ async function defaultFetchLatestTag() {
 const normalize = (t) => String(t || '').replace(/^v/, '');
 
 function register(app, { current, fetchLatestTag = defaultFetchLatestTag } = {}) {
+  // Cache the GitHub lookup: /api/version is public and unauthenticated GitHub
+  // allows 60 req/hr per IP — uncached, any visitor (or a reload-happy tab)
+  // could burn the limit and blind the update banner for everyone behind the
+  // same NAT. Successes live 1h; failures 5min so transient outages retry soon.
+  const OK_TTL_MS = 60 * 60 * 1000, FAIL_TTL_MS = 5 * 60 * 1000;
+  let cache = null; // { latest: string|null, expires: epoch-ms }
   app.get('/api/version', async (req, res) => {
-    let latest = null, updateAvailable = false;
-    try {
-      latest = normalize(await fetchLatestTag());
-      // String inequality, not semver ordering — a downgrade also reads as
-      // "update available". Acceptable for a single-tenant operator tool.
-      updateAvailable = !!latest && latest !== normalize(current);
-    } catch { /* offline-safe */ }
+    let latest = null;
+    const now = Date.now();
+    if (cache && cache.expires > now) {
+      latest = cache.latest;
+    } else {
+      try {
+        latest = normalize(await fetchLatestTag());
+        cache = { latest, expires: now + OK_TTL_MS };
+      } catch {
+        // offline-safe
+        cache = { latest: null, expires: now + FAIL_TTL_MS };
+      }
+    }
+    // String inequality, not semver ordering — a downgrade also reads as
+    // "update available". Acceptable for a single-tenant operator tool.
+    const updateAvailable = !!latest && latest !== normalize(current);
     res.json({ current: normalize(current), latest, updateAvailable });
   });
 }

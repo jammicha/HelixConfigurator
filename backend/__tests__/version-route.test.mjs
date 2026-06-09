@@ -20,4 +20,15 @@ describe('GET /api/version', () => {
     const res = await request(app).get('/api/version');
     expect(res.body.updateAvailable).toBe(false);
   });
+  it('caches the latest-tag lookup across requests (GitHub rate-limit guard)', async () => {
+    const app = express();
+    const fetcher = vi.fn(async () => 'v1.1.0');
+    version.register(app, { current: '1.0.5', fetchLatestTag: fetcher });
+    await request(app).get('/api/version');
+    await request(app).get('/api/version');
+    const res = await request(app).get('/api/version');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(res.body.latest).toBe('1.1.0');
+    expect(res.body.updateAvailable).toBe(true);
+  });
 });

@@ -197,7 +197,7 @@ const readEnvAsArray = async () => {
 // until the container was recreated. Now this endpoint does that recreate.
 const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) => {
   const old = docker.getContainer(name);
-  const inspect = await old.inspect();
+  const inspect = await withDockerTimeout(old.inspect(), 'container.inspect', 5_000);
 
   const freshEnv = await readEnvAsArray();
   const envArray = freshEnv && freshEnv.length > 0 ? freshEnv : (inspect.Config?.Env || []);
@@ -211,17 +211,17 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
 
   // Generous stop timeout so the exporter has a chance to flush its sending
   // queue. Tolerate 304 ("already stopped") and 404 (already gone).
-  try { await old.stop({ t: 10 }); } catch (e) {
+  try { await withDockerTimeout(old.stop({ t: 10 }), 'container.stop', 30_000); } catch (e) {
     if (e.statusCode !== 304 && e.statusCode !== 404) {
       console.warn(`recreateGateway: stop ${name} warning:`, e.message);
       errorLog.push('gateway.recreate.stop', `stop ${name}: ${e.message}`);
     }
   }
-  try { await old.remove(); } catch (e) {
+  try { await withDockerTimeout(old.remove(), 'container.remove', 15_000); } catch (e) {
     if (e.statusCode !== 404) throw e;
   }
 
-  const fresh = await docker.createContainer({
+  const fresh = await withDockerTimeout(docker.createContainer({
     name,
     Image: inspect.Config?.Image,
     Cmd: inspect.Config?.Cmd,
@@ -230,7 +230,7 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
     Labels: inspect.Config?.Labels,
     ExposedPorts: inspect.Config?.ExposedPorts,
     HostConfig: inspect.HostConfig,
-  });
+  }), 'container.create', 30_000);
 
   // CRITICAL — attach extras BEFORE start, not after. A Docker network
   // attached after the container's process starts is invisible to any
@@ -246,7 +246,7 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
   for (const net of allNetworks) {
     if (net === primary) continue;
     try {
-      await docker.getNetwork(net).connect({ Container: name });
+      await withDockerTimeout(docker.getNetwork(net).connect({ Container: name }), 'network.connect', 5_000);
     } catch (e) {
       if (e.statusCode !== 403) {
         console.warn(`recreateGateway: pre-start connect ${name} to ${net} warning:`, e.message);
@@ -255,7 +255,7 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
     }
   }
 
-  await fresh.start();
+  await withDockerTimeout(fresh.start(), 'container.start', 15_000);
 };
 
 function register(app, { docker, configPath }) {

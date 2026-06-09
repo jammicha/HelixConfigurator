@@ -1463,8 +1463,8 @@ const safeJson = (raw, fallback) => {
 
 // Compute p50 and p95 from an unsorted array of numbers in place. Returns
 // {p50, p95} or null if the array is empty. Sorts a copy so the caller's data
-// is untouched; the histogram callers pass a per-bucket slice so this is fine
-// even at TRACE_CAP (500 entries) per request.
+// is untouched; the histogram callers pass a per-bucket slice, far smaller than
+// the full store, so the copy+sort stays cheap per request.
 const computePercentiles = (arr) => {
   if (!arr.length) return null;
   const sorted = arr.slice().sort((a, b) => a - b);
