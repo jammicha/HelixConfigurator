@@ -32,7 +32,10 @@ services:
       - helix-bridge
 
   helix-gateway:
-    image: otel/opentelemetry-collector-contrib:latest
+    # Pinned to the same contrib release the generated Helm charts pin
+    # (backend/k8sChart/renderValues.js DEFAULTS) — `latest` meant one breaking
+    # upstream release could brick every fresh install. Bump deliberately.
+    image: otel/opentelemetry-collector-contrib:0.119.0
     container_name: helix-gateway
     ports:
       - '4317:4317'

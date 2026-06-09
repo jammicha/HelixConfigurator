@@ -26,9 +26,9 @@ describe('createGatewayFromScratch', () => {
       env: ['X_SOURCE=svc'],
       configHostPath: '/opt/helix/helix-otel-collector.yaml',
     });
-    expect(docker.calls.pulled).toBe('otel/opentelemetry-collector-contrib:latest');
+    expect(docker.calls.pulled).toBe('otel/opentelemetry-collector-contrib:0.119.0');
     expect(docker.calls.networkCreated).toBe(true);
-    expect(docker.calls.createArgs.Image).toBe('otel/opentelemetry-collector-contrib:latest');
+    expect(docker.calls.createArgs.Image).toBe('otel/opentelemetry-collector-contrib:0.119.0');
     expect(docker.calls.started).toBe(true);
   });
 

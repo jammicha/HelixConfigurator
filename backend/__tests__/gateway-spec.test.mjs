@@ -6,8 +6,9 @@ describe('buildGatewayCreateSpec', () => {
   const env = ['HELIX_ENDPOINT=https://t.onbmc.com', 'HELIX_API_KEY=k::a::s', 'X_SOURCE=svc'];
   const spec = buildGatewayCreateSpec({ name: 'helix-gateway', env, configHostPath: '/opt/helix/helix-otel-collector.yaml' });
 
-  it('uses the contrib collector image', () => {
-    expect(spec.Image).toBe('otel/opentelemetry-collector-contrib:latest');
+  it('uses the pinned contrib collector image (never :latest)', () => {
+    expect(spec.Image).toBe('otel/opentelemetry-collector-contrib:0.119.0');
+    expect(spec.Image).not.toContain(':latest');
   });
   it('publishes 4317, 4318, 8888 to the host', () => {
     expect(spec.HostConfig.PortBindings['4317/tcp']).toEqual([{ HostPort: '4317' }]);

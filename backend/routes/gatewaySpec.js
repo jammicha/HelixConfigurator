@@ -3,7 +3,11 @@
 // gateway from scratch — the job docker-compose.yml does in the container path.
 // Mirrors docker-compose.yml: contrib collector, ports 4317/4318/8888 published,
 // collector yaml mounted, env from .env, on the helix-bridge network.
-const GATEWAY_IMAGE = 'otel/opentelemetry-collector-contrib:latest';
+// Pinned to the same contrib release the generated Helm charts use (single
+// source of truth in k8sChart DEFAULTS). `latest` meant a breaking upstream
+// release could brick every fresh gateway create at first-run time.
+const { DEFAULTS: CHART_DEFAULTS } = require('../k8sChart/renderValues');
+const GATEWAY_IMAGE = `${CHART_DEFAULTS.collectorImage}:${CHART_DEFAULTS.collectorTag}`;
 
 function buildGatewayCreateSpec({ name, env, configHostPath }) {
   return {

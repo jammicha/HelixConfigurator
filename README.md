@@ -18,12 +18,17 @@ Docker Compose required to run the configurator itself.
 **Primary path — native package (recommended)**
 
 1. Download the platform zip from **GitHub Releases**
-   (`helix-configurator-darwin-arm64.zip`, `darwin-amd64`, `linux-amd64`, or
-   `windows-amd64`).
+   (`helix-configurator-darwin-arm64.zip`, `linux-amd64`, or `windows-amd64`).
+   Intel Macs: use the Docker image path below — GitHub retired its Intel-Mac
+   runners, so no `darwin-amd64` zip is built.
 2. Extract the zip.
 3. Run the launcher: `./start.command` (macOS), `./start.sh` (Linux), or
    `start.bat` (Windows). The launcher runs `./node backend/index.js` and opens
    the browser to `http://localhost:8765`.
+   **macOS:** the package isn't code-signed yet, so Gatekeeper may block the
+   first launch — right-click `start.command` → **Open** once, or clear the
+   quarantine flag after extracting:
+   `xattr -dr com.apple.quarantine helix-configurator/`.
 
 No Docker is needed to run the configurator. Docker Engine (not necessarily
 Docker Desktop) is needed only when you choose the **Docker** onboarding target
@@ -293,11 +298,11 @@ Diagnostics popover (top-right of the page) lists detected upstream OTel collect
 | **Docker image (secondary)** | `helix-configurator` | Container on `helix-bridge` | 8765 → 3001 | Configurator UI + backend API |
 | **Docker image (secondary)** | `helix-gateway` | Container on `helix-bridge` | 4317 / 4318 / 8888 | OTLP gRPC / HTTP receiver; Prometheus metrics |
 
-In the native path the configurator is a **host process** (port `PORT`, default 8765). When you choose the Docker onboarding target, the configurator creates `helix-gateway` itself via dockerode — pulling `otel/opentelemetry-collector-contrib:latest`, creating the `helix-bridge` network, and publishing ports 4317/4318/8888. The gateway's local fan-out endpoint is `http://host.docker.internal:8765` (the configurator is on the host, not in a container); `ExtraHosts: host.docker.internal:host-gateway` is injected so this resolves on Linux Docker Engine as well as Docker Desktop.
+In the native path the configurator is a **host process** (port `PORT`, default 8765). When you choose the Docker onboarding target, the configurator creates `helix-gateway` itself via dockerode — pulling the pinned `otel/opentelemetry-collector-contrib` release (same tag the generated Helm charts use), creating the `helix-bridge` network, and publishing ports 4317/4318/8888. The gateway's local fan-out endpoint is `http://host.docker.internal:8765` (the configurator is on the host, not in a container); `ExtraHosts: host.docker.internal:host-gateway` is injected so this resolves on Linux Docker Engine as well as Docker Desktop.
 
 Application containers can be attached to the same `helix-bridge` network at runtime via the *Discovered Services* panel — once attached, point your app's OTel exporter at `helix-gateway:4317` or `:4318`.
 
-The gateway fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is SQLite at `./data/otel-store.db` (capped at 1000 traces, sliding window) and persists across restarts.
+The gateway fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is SQLite at `./data/otel-store.db` (time-based retention with a 100,000-trace safety cap) and persists across restarts.
 
 The configurator exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes and an `GET /api/version` endpoint that compares the embedded version to the latest GitHub release — the UI shows an "update available" banner when they differ.
 
@@ -376,5 +381,5 @@ configuration.
 
 ## Known Issues
 
-- **`dompurify` advisories via `monaco-editor` 0.55.1.** `npm audit` reports moderate XSS advisories in `dompurify`, pulled in transitively by `monaco-editor`. The fix is only available in monaco-editor `0.56.0-dev-*` prereleases; there is no stable release with the patch yet. Practical risk is low — the editor only loads our own YAML config and never renders user-controlled HTML/markdown. Revisit when monaco-editor 0.56.0 stable ships.
-- **`esbuild` advisory via `vite` ≤ 6.4.1.** Affects only the Vite dev server and does not ship in production builds. The fix requires upgrading to Vite 8 (a major migration); deferred.
+- **macOS Gatekeeper on first launch (native zips).** The bundled `node` binary and launcher aren't code-signed/notarized yet, so macOS blocks the first run of a browser-downloaded zip. Workaround: right-click `start.command` → **Open** once, or `xattr -dr com.apple.quarantine helix-configurator/`. Signing/notarization is on the productization backlog.
+- _Resolved 2026-06:_ the previously documented `dompurify`/`monaco-editor` and `esbuild`/Vite advisories are gone — the editor moved to `@monaco-editor/react` and the build runs Vite 8. `npm audit` is clean in both packages.
