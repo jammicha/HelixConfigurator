@@ -680,10 +680,10 @@ const App = () => {
     setSetupError('');
 
     try {
-      // Kubernetes target: just persist the creds (POST /api/env reloads
-      // process.env so the Step-2 chart preview bakes them in) and advance.
-      // No gateway container to recreate, no Docker network diagnostic.
-      if (target === 'kubernetes') {
+      // Kubernetes targets (plain + Operator): just persist the creds (POST
+      // /api/env reloads process.env so the Step-2 chart preview bakes them in)
+      // and advance. No gateway container to recreate, no Docker network diagnostic.
+      if (isK8sTarget(target)) {
         const envRes = await fetch('/api/env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
