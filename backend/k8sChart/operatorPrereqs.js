@@ -11,7 +11,7 @@ function prereqCommands() {
     certManager: `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml`,
     waitCertManager: 'kubectl wait --for=condition=Available --timeout=180s -n cert-manager deploy/cert-manager-webhook',
     operator: `kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/download/${OPERATOR_VERSION}/opentelemetry-operator.yaml`,
-    waitOperator: 'kubectl rollout status -n opentelemetry-operator-system deploy/opentelemetry-operator --timeout=180s',
+    waitOperator: 'kubectl rollout status -n opentelemetry-operator-system deploy/opentelemetry-operator-controller-manager --timeout=180s',
   };
 }
 

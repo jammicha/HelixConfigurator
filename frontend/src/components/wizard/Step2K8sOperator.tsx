@@ -31,7 +31,7 @@ kubectl wait --for=condition=Available --timeout=180s -n cert-manager deploy/cer
 
 # 2. OpenTelemetry Operator
 kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/download/v0.152.0/opentelemetry-operator.yaml
-kubectl rollout status -n opentelemetry-operator-system deploy/opentelemetry-operator --timeout=180s`} />
+kubectl rollout status -n opentelemetry-operator-system deploy/opentelemetry-operator-controller-manager --timeout=180s`} />
       <p className="text-tiny text-gray-500">Already run the Operator? Skip straight to generating the chart.</p>
     </div>
 
