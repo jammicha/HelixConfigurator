@@ -15,11 +15,14 @@ RUN apt-get update && apt-get install -y python3 make g++ && \
     apt-get purge -y python3 make g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 COPY backend/ ./backend/
 COPY templates/ ./templates/
-# The Helm chart skeleton the "Generate K8s chart" feature streams at runtime.
-# Without this the backend can't build the chart (and historically crashed at
-# startup listing it). It is NOT bind-mounted by docker-compose, so it must be
-# baked into the image.
+# The Helm chart skeletons the "Generate K8s chart" feature streams at runtime.
+# Without these the backend can't build the chart (and historically crashed at
+# startup listing it). They are NOT bind-mounted by docker-compose, so they must
+# be baked into the image. BOTH engines ship: helix-otel (Deployment) AND
+# helix-otel-operator (OpenTelemetryCollector/Instrumentation CRs) — the
+# operator dir was once missing here, so engine=operator downloads were hollow.
 COPY helix-otel/ ./helix-otel/
+COPY helix-otel-operator/ ./helix-otel-operator/
 COPY --from=frontend-build /app/frontend/dist ./frontend-dist
 
 # Copy root .env and config if needed (though they are mounted in compose)

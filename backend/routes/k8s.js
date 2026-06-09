@@ -13,6 +13,27 @@ const { prereqCommands } = require('../k8sChart/operatorPrereqs');
 
 const getEngine = (req) => String(req.query.engine || 'deployment') === 'operator' ? 'operator' : 'deployment';
 
+// ?langs=java,nodejs → explicit enable/disable map for renderValues (which
+// merges over all-true defaults, so disabling needs explicit false). Absent
+// param → undefined → chart default (all four runtimes on).
+const KNOWN_LANGS = ['java', 'nodejs', 'python', 'dotnet'];
+const getLanguages = (req) => {
+  if (req.query.langs === undefined) return undefined;
+  const enabled = new Set(String(req.query.langs).split(',').map(s => s.trim()).filter(Boolean));
+  return Object.fromEntries(KNOWN_LANGS.map(l => [l, enabled.has(l)]));
+};
+
+// Chart.yaml is the cheapest proof the engine's skeleton shipped with this
+// install. Without it the zip would be hollow (values+config only) and helm
+// can't install it — fail loudly instead of streaming a broken artifact.
+// (This exact gap shipped once: helix-otel-operator/ was missing from the
+// Docker image and the native zips, and only a console.warn noticed.)
+function skeletonPresent(projectRoot, engine) {
+  try {
+    return fsSync.statSync(path.join(projectRoot, chartDirForEngine(engine), 'Chart.yaml')).isFile();
+  } catch { return false; }
+}
+
 const KEY_PLACEHOLDER = '<TenantID::AccessKey::SecretKey>';
 
 function buildCommands({ handoff, engine }) {
@@ -42,7 +63,9 @@ function listChartFiles(projectRoot, engine = 'deployment') {
     console.warn(`k8s: chart skeleton missing at ${path.join(projectRoot, dir)} (${e.code || e.message}); chart generation will be unavailable.`);
   }
   const result = [...new Set([...skeletonFiles, ...generated])].sort();
-  chartFilesCache.set(cacheKey, result);
+  // Cache only when the skeleton was actually found — caching a miss would pin
+  // "unavailable" until restart even if the directory appears later.
+  if (skeletonFiles.length) chartFilesCache.set(cacheKey, result);
   return result;
 }
 
@@ -51,6 +74,15 @@ const wantsHandoff = (req) => String(req.query.handoff) === 'true';
 
 function register(app, { configPath, projectRoot }) {
   async function generate(req, res) {
+    const engine = getEngine(req);
+    if (!skeletonPresent(projectRoot, engine)) {
+      const dir = chartDirForEngine(engine);
+      res.status(500).json({
+        error: `Chart skeleton missing: ${dir}/ is not bundled in this installation, so a usable chart cannot be generated`,
+        code: 'CHART_SKELETON_MISSING',
+      });
+      return null;
+    }
     let collectorYaml;
     try {
       collectorYaml = await fsPromises.readFile(configPath, 'utf8');
@@ -64,7 +96,8 @@ function register(app, { configPath, projectRoot }) {
         endpoint: process.env.HELIX_ENDPOINT || '',
         xSource: process.env.X_SOURCE || '',
         target: getTarget(req),
-        engine: getEngine(req),
+        engine,
+        languages: getLanguages(req),
       });
     } catch (e) {
       if (e.code === 'INVALID_COLLECTOR_YAML') res.status(400).json({ error: 'Invalid collector YAML', mark: e.mark });

@@ -27,11 +27,13 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
 
-      - name: Build frontend
-        run: cd frontend && npm ci && npm run build
+      - name: Build frontend (typecheck + tests gate the build)
+        run: cd frontend && npm ci && npx tsc --noEmit && npm test && npm run build
 
-      - name: Install backend prod deps (native addons)
-        run: cd backend && npm ci --omit=dev
+      - name: Backend tests, then prune to prod deps (native addons)
+        # Full install to run the test suite, then prune devDeps so the staged
+        # package ships prod-only node_modules (as --omit=dev did before).
+        run: cd backend && npm ci && npm test && npm prune --omit=dev
 
       - name: Verify native addon loaded
         # better-sqlite3 is the only native dep and the main cross-platform risk
@@ -50,7 +52,12 @@ jobs:
           cp -R frontend/dist "$STAGE/frontend-dist"
           cp -R templates "$STAGE/templates"
           cp -R helix-otel "$STAGE/helix-otel"
+          # Both chart skeletons must ship — the operator dir was once missing
+          # here, so engine=operator chart downloads were hollow in native zips.
+          cp -R helix-otel-operator "$STAGE/helix-otel-operator"
           cp helix-otel-collector.yaml "$STAGE/helix-otel-collector.yaml"
+          # Tests don't belong in the shipped package.
+          rm -rf "$STAGE/backend/__tests__"
           # Bundle the matching Node runtime
           node -e "const v=process.version;console.log(v)"
           NODE_DIR="$(dirname "$(command -v node)")"

@@ -100,16 +100,18 @@ describe('GET /api/k8s/chart/preview', () => {
     expect(res.body.secretCommand).not.toContain('TENANT::ACCESS::SECRET');
   });
 
-  it('does not crash at register or preview when the chart skeleton is missing', async () => {
+  it('fails loudly (500 CHART_SKELETON_MISSING) when the chart skeleton is absent — never a hollow chart', async () => {
     const app = express();
     const { register } = require('../routes/k8s.js');
     expect(() => register(app, { configPath, projectRoot: '/no/such/dir' })).not.toThrow();
-    const res = await request(app).get('/api/k8s/chart/preview?target=local');
-    expect(res.status).toBe(200);
-    expect(res.body.files).toEqual(expect.arrayContaining([
-      'helix-otel/values.yaml',
-      'helix-otel/config/gateway-collector.yaml',
-    ]));
+    const preview = await request(app).get('/api/k8s/chart/preview?target=local');
+    expect(preview.status).toBe(500);
+    expect(preview.body.code).toBe('CHART_SKELETON_MISSING');
+    expect(preview.body.error).toMatch(/helix-otel\//);
+    const zip = await request(app).get('/api/k8s/chart?engine=operator');
+    expect(zip.status).toBe(500);
+    expect(zip.body.code).toBe('CHART_SKELETON_MISSING');
+    expect(zip.body.error).toMatch(/helix-otel-operator\//);
   });
 });
 
@@ -171,6 +173,25 @@ describe('GET /api/k8s/chart/preview?engine=operator', () => {
     expect(res.body.engine).toBe('deployment');
     expect(res.body.prereqs).toBeUndefined();
     expect(res.body.installCommand).toMatch(/helm install helix \.\/helix-otel\b/);
+  });
+
+  it('langs param disables unticked runtimes in values.yaml (preview + zip agree)', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?engine=operator&langs=java,python');
+    expect(res.status).toBe(200);
+    expect(yaml.load(res.body.values).instrumentation.languages)
+      .toEqual({ java: true, nodejs: false, python: true, dotnet: false });
+
+    const zipRes = await request(makeApp()).get('/api/k8s/chart?engine=operator&langs=java,python')
+      .buffer(true).parse(binaryParser);
+    const zip = new AdmZip(zipRes.body);
+    expect(yaml.load(zip.getEntry('helix-otel-operator/values.yaml').getData().toString()).instrumentation.languages)
+      .toEqual({ java: true, nodejs: false, python: true, dotnet: false });
+  });
+
+  it('absent langs param keeps all four runtimes enabled', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?engine=operator');
+    expect(yaml.load(res.body.values).instrumentation.languages)
+      .toEqual({ java: true, nodejs: true, python: true, dotnet: true });
   });
 });
 
