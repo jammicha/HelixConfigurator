@@ -22,23 +22,30 @@ type DerivedStatus = {
   showSyntheticRun?: boolean;
 };
 
-const deriveStatus = (h: SystemHealth | null): DerivedStatus => {
+const deriveStatus = (h: SystemHealth | null, k8sMode: boolean): DerivedStatus => {
   if (!h) return { status: 'degraded', headline: 'Checking pipeline…', detail: 'Loading health data.' };
 
-  if (h.gatewayStatus === 'exited' || h.gatewayStatus === 'error') {
-    return {
-      status: 'broken',
-      headline: 'Telemetry is not reaching Helix.',
-      detail: `helix-gateway is ${h.gatewayStatus}${h.gatewayExitCode != null ? ` (exit ${h.gatewayExitCode})` : ''}. Restart it from the gateway controls below.`,
-    };
-  }
+  // Kubernetes/operator targets: the gateway runs in the user's cluster, not in
+  // local Docker — gatewayStatus here describes a container that is intentionally
+  // unused (often Exited), so judging the pipeline by it produced a false red
+  // "not reaching Helix" right after a successful K8s onboarding. Judge by
+  // received telemetry instead.
+  if (!k8sMode) {
+    if (h.gatewayStatus === 'exited' || h.gatewayStatus === 'error') {
+      return {
+        status: 'broken',
+        headline: 'Telemetry is not reaching Helix.',
+        detail: `helix-gateway is ${h.gatewayStatus}${h.gatewayExitCode != null ? ` (exit ${h.gatewayExitCode})` : ''}. Restart it from the gateway controls below.`,
+      };
+    }
 
-  if (h.gatewayStatus === 'restarting') {
-    return {
-      status: 'degraded',
-      headline: 'Pipeline restarting.',
-      detail: 'helix-gateway is coming back up. Telemetry may be paused for a few seconds.',
-    };
+    if (h.gatewayStatus === 'restarting') {
+      return {
+        status: 'degraded',
+        headline: 'Pipeline restarting.',
+        detail: 'helix-gateway is coming back up. Telemetry may be paused for a few seconds.',
+      };
+    }
   }
 
   // Gateway is running (or 'unknown' on first probe — treat as running).
@@ -50,7 +57,9 @@ const deriveStatus = (h: SystemHealth | null): DerivedStatus => {
     return {
       status: 'receiving',
       headline: 'Ready to receive telemetry.',
-      detail: 'No traffic yet. Run the demo scenario to populate your dashboards with realistic data, or instrument an app.',
+      detail: k8sMode
+        ? 'No traffic seen here yet. Point your cluster apps at the helix-gateway Service (:4318) — on a local cluster, telemetry loops back to this viewer automatically. Or run the demo scenario.'
+        : 'No traffic yet. Run the demo scenario to populate your dashboards with realistic data, or instrument an app.',
       showSyntheticRun: true,
     };
   }
@@ -86,11 +95,11 @@ const STYLES: Record<PipelineStatus, { bg: string; icon: React.ReactNode }> = {
   },
 };
 
-type Props = { health: SystemHealth | null };
+type Props = { health: SystemHealth | null; k8sMode?: boolean };
 
-export const PipelineStatusBanner: React.FC<Props> = ({ health }) => {
+export const PipelineStatusBanner: React.FC<Props> = ({ health, k8sMode = false }) => {
   const loading = !health;
-  const { status, headline, detail, showSyntheticRun } = deriveStatus(health);
+  const { status, headline, detail, showSyntheticRun } = deriveStatus(health, k8sMode);
   const style = STYLES[status];
   return (
     <div className={`rounded-lg border p-4 flex items-start gap-3 ${style.bg}`}>

@@ -147,7 +147,14 @@ const App = () => {
   const [showK8sChart, setShowK8sChart] = useState(false);
   // Gateway namespace the user enters in the K8s "Point apps" step; lifted here
   // so Step 4's kubectl commands show the same namespace they typed in Step 3.
-  const [k8sNamespace, setK8sNamespace] = useState('default');
+  // Persisted: every kubectl/helm snippet on Steps 2–4 embeds this namespace,
+  // so a mid-wizard refresh must not silently reset the commands to `default`
+  // while setupStep (also persisted) keeps the user on a later step.
+  const [k8sNamespace, setK8sNamespace] = useLocalStorageState<string>(
+    'helix-configurator.k8sNamespace',
+    'default',
+    (v): v is string => typeof v === 'string',
+  );
   const [step3Tab, setStep3Tab] = useState<'detected' | 'manual'>('detected');
   const [k8sApplying, setK8sApplying] = useState<boolean>(false);
   const [k8sApplyResult, setK8sApplyResult] = useState<'applied' | 'failed' | null>(null);
@@ -1364,6 +1371,7 @@ const App = () => {
                 <Step4K8s
                   otelDashboardUrl={externalApps.otelDashboardUrl}
                   namespace={k8sNamespace}
+                  engine={target === 'kubernetes-operator' ? 'operator' : 'deployment'}
                   onBack={() => setSetupStep(3)}
                   onFinishStep={() => setSetupStep(5)}
                 />
@@ -1411,8 +1419,10 @@ const App = () => {
             )
           ) : (
             <>
-              {/* Pipeline status banner — "is this thing working?" at the top */}
-              <PipelineStatusBanner health={systemHealth} />
+              {/* Pipeline status banner — "is this thing working?" at the top.
+                  K8s/operator targets judge by received telemetry, not by the
+                  (intentionally unused) local Docker gateway. */}
+              <PipelineStatusBanner health={systemHealth} k8sMode={target !== null && isK8sTarget(target)} />
 
               {/* System Health: 3-cell summary with inline gateway controls */}
               <SystemHealthPanel
@@ -1422,6 +1432,7 @@ const App = () => {
                 onStart={handleStart}
                 onStop={handleStop}
                 onRestart={handleRestart}
+                k8sMode={target !== null && isK8sTarget(target)}
               />
 
               {/* Quick actions: 4 in-app actions only (Re-verify, Diagnostic,

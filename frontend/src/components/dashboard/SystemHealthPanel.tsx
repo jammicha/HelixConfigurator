@@ -19,6 +19,9 @@ type Props = {
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
+  // Kubernetes/operator onboarding target: the gateway is cluster-managed, so
+  // hide the local Docker container state + start/stop/restart controls.
+  k8sMode?: boolean;
 };
 
 const fmtRate = (rate: number): string => {
@@ -34,7 +37,7 @@ const fmtAgo = (ts: number): string => {
   return `${Math.floor(ms / 3_600_000)}h ago`;
 };
 
-export const SystemHealthPanel: React.FC<Props> = ({ health, gatewayStatus, actionLoading, onStart, onStop, onRestart }) => {
+export const SystemHealthPanel: React.FC<Props> = ({ health, gatewayStatus, actionLoading, onStart, onStop, onRestart, k8sMode = false }) => {
   const [showErrors, setShowErrors] = useState(false);
   if (!health) {
     return (
@@ -62,16 +65,26 @@ export const SystemHealthPanel: React.FC<Props> = ({ health, gatewayStatus, acti
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-gray-1000 border border-gray-800 rounded p-3">
           <div className="text-tiny text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Server className="w-3 h-3" /> Gateway</div>
-          <div className="flex items-center justify-between gap-2">
-            <div className={`text-sm font-semibold ${health.gatewayStatus === 'running' ? 'text-success-text' : 'text-warning'}`}>
-              {health.gatewayStatus}{health.gatewayExitCode != null ? ` (${health.gatewayExitCode})` : ''}
+          {k8sMode ? (
+            // K8s/operator targets: the gateway lives in the user's cluster and
+            // the configurator is generate-only — the local Docker container
+            // state (and its start/stop controls) would mislead here.
+            <>
+              <div className="text-sm font-semibold text-gray-200">in your cluster</div>
+              <div className="text-tiny text-gray-500">Helm/Operator-managed — check it with kubectl</div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <div className={`text-sm font-semibold ${health.gatewayStatus === 'running' ? 'text-success-text' : 'text-warning'}`}>
+                {health.gatewayStatus}{health.gatewayExitCode != null ? ` (${health.gatewayExitCode})` : ''}
+              </div>
+              <div className="flex items-center gap-0.5 flex-shrink-0">
+                {iconBtn('start', gatewayStatus === 'running', onStart, 'Start', Play)}
+                {iconBtn('stop', gatewayStatus === 'exited', onStop, 'Stop', Pause)}
+                {iconBtn('restart', false, onRestart, 'Restart', RotateCw)}
+              </div>
             </div>
-            <div className="flex items-center gap-0.5 flex-shrink-0">
-              {iconBtn('start', gatewayStatus === 'running', onStart, 'Start', Play)}
-              {iconBtn('stop', gatewayStatus === 'exited', onStop, 'Stop', Pause)}
-              {iconBtn('restart', false, onRestart, 'Restart', RotateCw)}
-            </div>
-          </div>
+          )}
         </div>
         <div className="bg-gray-1000 border border-gray-800 rounded p-3">
           <div className="text-tiny text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Activity className="w-3 h-3" /> Throughput (1h)</div>
