@@ -1,6 +1,8 @@
 # 06 — Branch the onboarding wizard by target (Docker vs Kubernetes)
 
-> **Handoff brief** · Priority: **High** · Created 2026-06-04 · Status: Not started
+> **Handoff brief** · Priority: **High** · Created 2026-06-04 · Status: **Shipped** —
+> merged to main `07213f6` (2026-06-05); the third (OTel Operator) target followed on 06-09.
+> Kept as the original brainstorm record.
 > Shape: **brainstorm brief** — explore widely before converging.
 > Read the Phase 1 spec + the decision memo first (see Cross-links).
 

@@ -110,7 +110,7 @@ HelixConfigurator/
 │   ├── package.json
 │   └── data/                   # gitignored; trace store at otel-store.db
 │
-├── frontend/                   # React 19 + Vite + TypeScript
+├── frontend/                   # React 18 + Vite + TypeScript
 │   ├── src/
 │   │   ├── main.tsx            # path-based switch into top-level pages
 │   │   ├── App.tsx             # Onboarding wizard + Gateway Dashboard
@@ -433,8 +433,8 @@ cd backend && npm install && npm run dev   # :8765
 cd frontend && npm install && npm run dev  # :3000
 ```
 
-The dev server proxies `/api/*` to the backend at `:3001`, so you can iterate
-on the UI without a Docker build.
+The dev server proxies `/api/*` to the backend at `:8765` (the backend's
+default port), so you can iterate on the UI without a Docker build.
 
 To validate the Docker image path:
 

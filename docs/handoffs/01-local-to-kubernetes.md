@@ -1,6 +1,8 @@
 # 01 — Local Docker Desktop → Production Kubernetes
 
-> **Handoff brief** · Priority: **High** · Created 2026-06-03 · Status: Not started
+> **Handoff brief** · Priority: **High** · Created 2026-06-03 · Status: **Shipped** —
+> Phase 1 chart generator (`1def94a`, 06-03), Phase 1.5 target-branched wizard (`07213f6`, 06-05),
+> and the OTel Operator target (`1a5f3f2`, 06-09) are all on main. Kept as the original brainstorm record.
 > Shape: **brainstorm brief** — explore widely before converging.
 > Read [`../ARCHITECTURE.md`](../architecture/ARCHITECTURE.md) and the README first.
 
