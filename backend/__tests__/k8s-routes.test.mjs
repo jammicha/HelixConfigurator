@@ -151,3 +151,42 @@ describe('GET /api/k8s/chart', () => {
     expect(preview.body.files.slice().sort()).toEqual(fileEntries);
   });
 });
+
+// --- appended: operator engine ---
+describe('GET /api/k8s/chart/preview?engine=operator', () => {
+  it('returns operator values, prereq commands, operator install cmd, and operator file list', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview?engine=operator&target=local');
+    expect(res.status).toBe(200);
+    expect(res.body.engine).toBe('operator');
+    expect(yaml.load(res.body.values).instrumentation.languages.java).toBe(true);
+    expect(res.body.installCommand).toMatch(/helm install helix \.\/helix-otel-operator/);
+    expect(res.body.prereqs.certManager).toMatch(/cert-manager\.yaml/);
+    expect(res.body.prereqs.operator).toMatch(/opentelemetry-operator\.yaml/);
+    expect(res.body.files).toContain('helix-otel-operator/templates/collector.yaml');
+    expect(res.body.files).toContain('helix-otel-operator/templates/instrumentation.yaml');
+  });
+
+  it('default engine (no param) stays deployment and omits prereqs', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart/preview');
+    expect(res.body.engine).toBe('deployment');
+    expect(res.body.prereqs).toBeUndefined();
+    expect(res.body.installCommand).toMatch(/helm install helix \.\/helix-otel\b/);
+  });
+});
+
+describe('GET /api/k8s/chart?engine=operator', () => {
+  it('streams a zip with the operator CRs', async () => {
+    const res = await request(makeApp()).get('/api/k8s/chart?engine=operator&target=local')
+      .buffer(true).parse(binaryParser);
+    expect(res.status).toBe(200);
+    const names = new AdmZip(res.body).getEntries().map(e => e.entryName);
+    for (const f of [
+      'helix-otel-operator/Chart.yaml',
+      'helix-otel-operator/values.yaml',
+      'helix-otel-operator/config/gateway-collector.yaml',
+      'helix-otel-operator/templates/collector.yaml',
+      'helix-otel-operator/templates/instrumentation.yaml',
+    ]) expect(names).toContain(f);
+    expect(names).not.toContain('helix-otel-operator/templates/gateway-deployment.yaml');
+  });
+});
