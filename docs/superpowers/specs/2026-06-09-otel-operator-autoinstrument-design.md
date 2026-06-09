@@ -51,6 +51,24 @@ not a runtime conditional.
   emit* the commands; the user runs them (they need cluster-admin once).
 - Touching the Docker target at all.
 
+## Terminology (Kubernetes primer)
+
+- **Resource** — a typed object you describe in YAML and hand to the cluster,
+  which makes it real. Built-in types: `Pod`, `Deployment`, `Service`,
+  `ConfigMap`, `Secret`.
+- **CR (Custom Resource)** — a *new* kind of object that isn't built in. Here:
+  `OpenTelemetryCollector` and `Instrumentation`.
+- **CRD (Custom Resource Definition)** — the thing you install to teach the
+  cluster a new `kind:`. Installing the OpenTelemetry Operator registers the two
+  CRDs above.
+- **Operator** — a program in the cluster that *watches* for CRs and does the work
+  to make reality match them ("reconciling"). The OTel Operator turns an
+  `OpenTelemetryCollector` CR into a real Deployment + Service, and uses the
+  `Instrumentation` CR + a pod annotation to inject the agent.
+- **Why the Operator is a prerequisite:** without it (and its CRDs) installed, the
+  cluster has never heard of `kind: OpenTelemetryCollector`, so `helm install`
+  fails with *"no matches for kind OpenTelemetryCollector"* (see Edge cases).
+
 ## Background: what's there today
 
 - **Wizard target toggle.** `frontend/.../wizard/TargetSelector.tsx` renders a
