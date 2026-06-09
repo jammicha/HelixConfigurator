@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deploy the Helix OTel gateway via the OpenTelemetry Operator — Walkthrough</title>
+  <!--
+    Self-contained local walkthrough served by the Helix Configurator
+    (frontend/public/ → served at /k8s-walkthrough.html in dev and prod).
+    No external assets, so it works fully offline. The "Full walkthrough"
+    link in the Generate-K8s step opens this page instead of an online doc.
+  -->
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #11161f;
+      --panel-2: #0d1117;
+      --border: #232a36;
+      --text: #e6edf3;
+      --muted: #9aa4b2;
+      --faint: #6b7585;
+      --accent: #8b7cf6;
+      --accent-2: #5b3df5;
+      --ok: #3fb950;
+      --warn: #d8a657;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); }
+    body {
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 40px 24px 96px; }
+    header.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+    header.brand img { height: 26px; }
+    header.brand .sep { color: var(--faint); }
+    header.brand .kicker { color: var(--muted); font-size: 13px; letter-spacing: .02em; }
+    h1 { font-size: 28px; line-height: 1.25; margin: 0 0 8px; }
+    .lede { color: var(--muted); font-size: 16px; margin: 0 0 8px; }
+    h2 {
+      font-size: 19px; margin: 40px 0 12px; padding-top: 18px;
+      border-top: 1px solid var(--border);
+    }
+    h2 .num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 6px; margin-right: 10px;
+      background: var(--accent-2); color: #fff; font-size: 14px; font-weight: 600;
+      vertical-align: middle;
+    }
+    h3 { font-size: 15px; margin: 22px 0 8px; color: var(--text); }
+    p { margin: 10px 0; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: "SF Mono", "Source Code Pro", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 13px; background: var(--panel-2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 5px; color: #cdd6e4;
+    }
+    pre {
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px 16px; overflow-x: auto; margin: 12px 0;
+    }
+    pre code { background: none; border: none; padding: 0; font-size: 13px; color: #cdd6e4; }
+    .muted { color: var(--muted); }
+    .faint { color: var(--faint); font-size: 13px; }
+    ul { margin: 10px 0; padding-left: 22px; }
+    li { margin: 6px 0; }
+    .callout {
+      border: 1px solid var(--border); border-left: 3px solid var(--accent);
+      background: var(--panel); border-radius: 8px; padding: 12px 16px; margin: 16px 0;
+      font-size: 14px;
+    }
+    .callout.warn { border-left-color: var(--warn); }
+    .callout .label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--faint); font-weight: 600; margin-bottom: 4px;
+    }
+    .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin: 24px 0 8px; }
+    .toc .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 600; margin-bottom: 8px; }
+    .toc ol { margin: 0; padding-left: 20px; color: var(--muted); }
+    .toc a { color: var(--muted); }
+    .toc a:hover { color: var(--accent); }
+    kbd { background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="brand">
+      <img src="/bmc-logo.svg" alt="BMC Helix" onerror="this.style.display='none'" />
+      <span class="sep">/</span>
+      <span class="kicker">Helix OTel Configurator</span>
+    </header>
+
+    <h1>Deploy via the OpenTelemetry Operator (auto-instrumentation)</h1>
+    <p class="lede">
+      This chart deploys the Helix gateway as an <code>OpenTelemetryCollector</code> custom resource and ships
+      an <code>Instrumentation</code> custom resource, so you can auto-instrument apps (Java, Node.js, Python,
+      .NET) with <strong>no code changes</strong> — just a pod annotation. It needs the OpenTelemetry Operator
+      installed first.
+    </p>
+
+    <div class="toc">
+      <div class="label">On this page</div>
+      <ol>
+        <li><a href="#prereqs">Install prerequisites (cert-manager + Operator)</a></li>
+        <li><a href="#generate">Generate &amp; download the chart</a></li>
+        <li><a href="#secret">Create the Helix API-key secret</a></li>
+        <li><a href="#install">Install with Helm</a></li>
+        <li><a href="#annotate">Annotate your pods</a></li>
+        <li><a href="#verify">Verify telemetry is flowing</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ol>
+    </div>
+
+    <h2 id="prereqs"><span class="num">1</span>Install prerequisites</h2>
+    <p>The Operator extends Kubernetes with two new resource types (the CRs this chart uses). Install
+    cert-manager (for the Operator's admission-webhook certs), then the Operator. One-time, per cluster:</p>
+    <pre><code>kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.19.5/cert-manager.yaml
+kubectl wait --for=condition=Available --timeout=180s -n cert-manager deploy/cert-manager-webhook
+
+kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/download/v0.152.0/opentelemetry-operator.yaml
+kubectl rollout status -n opentelemetry-operator-system deploy/opentelemetry-operator --timeout=180s</code></pre>
+    <div class="callout">
+      <div class="label">Already running the Operator?</div>
+      Skip this step. The chart only needs the <code>OpenTelemetryCollector</code> and
+      <code>Instrumentation</code> CRDs to exist.
+    </div>
+
+    <h2 id="generate"><span class="num">2</span>Generate &amp; download the chart</h2>
+    <p>In the configurator's <strong>Prereqs &amp; Generate</strong> step, pick which runtimes to
+    auto-instrument, then <strong>Download chart (.zip)</strong>. Unzip and <code>cd</code> in:</p>
+    <pre><code>unzip helix-otel-operator-chart.zip
+cd helix-otel-operator</code></pre>
+    <p class="muted">Your <code>HELIX_ENDPOINT</code> and <code>X_SOURCE</code> are baked into
+    <code>values.yaml</code>; your live collector pipeline becomes the CR's <code>spec.config</code>. Your API
+    key is never written into the chart.</p>
+
+    <h2 id="secret"><span class="num">3</span>Create the Helix API-key secret</h2>
+    <pre><code>kubectl create secret generic helix-key \
+  --from-literal=HELIX_API_KEY='&lt;TenantID&gt;::&lt;AccessKey&gt;::&lt;SecretKey&gt;'</code></pre>
+    <div class="callout">
+      <div class="label">Already manage secrets your way?</div>
+      <code>--set helix.existingSecret=&lt;your-secret-name&gt;</code> (it must expose a <code>HELIX_API_KEY</code> key).
+    </div>
+
+    <h2 id="install"><span class="num">4</span>Install with Helm</h2>
+    <pre><code>helm install helix . --set helix.existingSecret=helix-key</code></pre>
+    <p>Into a specific namespace, create the Secret there too:</p>
+    <pre><code>kubectl create namespace observability
+kubectl create secret generic helix-key -n observability \
+  --from-literal=HELIX_API_KEY='&lt;TenantID&gt;::&lt;AccessKey&gt;::&lt;SecretKey&gt;'
+helm install helix . -n observability --set helix.existingSecret=helix-key</code></pre>
+    <p class="muted">The Operator reconciles the CR into a managed collector Deployment and a Service named
+    <code>helix-gateway-collector</code>. The chart also adds a stable alias Service <code>helix-gateway</code>
+    (on <code>4317</code>/<code>4318</code>) so apps can use the familiar name.</p>
+
+    <h2 id="annotate"><span class="num">5</span>Annotate your pods</h2>
+    <p>Add a pod-template annotation to your app's Deployment — the Operator injects the agent on the next
+    rollout. No app image or code changes:</p>
+    <pre><code>instrumentation.opentelemetry.io/inject-java:    "&lt;namespace&gt;/helix-instrumentation"
+instrumentation.opentelemetry.io/inject-nodejs:  "&lt;namespace&gt;/helix-instrumentation"
+instrumentation.opentelemetry.io/inject-python:  "&lt;namespace&gt;/helix-instrumentation"
+instrumentation.opentelemetry.io/inject-dotnet:  "&lt;namespace&gt;/helix-instrumentation"</code></pre>
+    <p>Apply to a running Deployment and roll it out:</p>
+    <pre><code>kubectl patch deployment &lt;app&gt; -n &lt;app-ns&gt; -p \
+  '{"spec":{"template":{"metadata":{"annotations":{"instrumentation.opentelemetry.io/inject-java":"&lt;namespace&gt;/helix-instrumentation"}}}}}'</code></pre>
+    <div class="callout warn">
+      <div class="label">Namespace rule</div>
+      The <code>Instrumentation</code> CR is namespaced. Reference it as
+      <code>&lt;namespace&gt;/helix-instrumentation</code> (where you installed the chart). The bare value
+      <code>"true"</code> only works when the app is in that <em>same</em> namespace.
+    </div>
+    <p class="faint">Prefer not to annotate? Apps can send OTLP straight to
+    <code>http://helix-gateway.&lt;namespace&gt;.svc.cluster.local:4318</code>.</p>
+
+    <h2 id="verify"><span class="num">6</span>Verify telemetry is flowing</h2>
+    <h3>The Operator reconciled the gateway</h3>
+    <pre><code>kubectl get opentelemetrycollector,pods -l app.kubernetes.io/component=opentelemetry-collector -n &lt;namespace&gt;</code></pre>
+    <h3>The agent was injected into your app</h3>
+    <pre><code>kubectl get pod &lt;app-pod&gt; -n &lt;app-ns&gt; \
+  -o jsonpath='{.spec.initContainers[*].name}{"\n"}'</code></pre>
+    <p class="faint">You should see an <code>opentelemetry-auto-instrumentation-*</code> init container.</p>
+    <h3>See it in Helix</h3>
+    <p>Open your tenant's <strong>OTel Namespace Overview</strong> dashboard — telemetry from your
+    annotated apps should appear within a couple of minutes of the rollout.</p>
+
+    <h2 id="troubleshooting"><span class="num">?</span>Troubleshooting</h2>
+    <h3><code>helm install</code> fails: <em>no matches for kind "OpenTelemetryCollector"</em></h3>
+    <p>The Operator (or its CRDs) isn't installed. Do step 1 first, then retry.</p>
+    <h3>Annotated a pod but no telemetry / no init container</h3>
+    <p>The webhook only fires on pod <em>creation</em> — annotate the pod <em>template</em> (not the live
+    pod) and roll out: <code>kubectl rollout restart deployment/&lt;app&gt; -n &lt;app-ns&gt;</code>. Confirm the
+    annotation key matches the runtime, and the value's namespace points at where the chart is installed.</p>
+    <h3>Apps in another namespace can't reach the gateway</h3>
+    <p>Use the fully-qualified endpoint
+    <code>http://helix-gateway.&lt;install-namespace&gt;.svc.cluster.local:4318</code>, and annotate with the
+    <code>&lt;install-namespace&gt;/helix-instrumentation</code> form.</p>
+    <div class="callout warn">
+      <div class="label">OpenShift / restricted Pod Security</div>
+      The Operator and the collector run non-root. If a <code>restricted</code>-PSA namespace rejects the
+      injected init container, grant the app's ServiceAccount the appropriate SCC or instrument via the
+      direct-OTLP fallback instead.
+    </div>
+
+  </div>
+</body>
+</html>
