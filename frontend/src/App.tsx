@@ -28,8 +28,10 @@ import { Step5 } from './components/wizard/Step5';
 import { Step2K8s } from './components/wizard/Step2K8s';
 import { Step3K8s } from './components/wizard/Step3K8s';
 import { Step4K8s } from './components/wizard/Step4K8s';
+import { Step2K8sOperator } from './components/wizard/Step2K8sOperator';
+import { Step3K8sOperator } from './components/wizard/Step3K8sOperator';
 import { TargetSelector } from './components/wizard/TargetSelector';
-import { getWizardSteps, isWizardTargetOrNull, type WizardTarget } from './components/wizard/wizardTargets';
+import { getWizardSteps, isWizardTargetOrNull, isK8sTarget, type WizardTarget } from './components/wizard/wizardTargets';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle, extractServiceKey } from './utils/helixKey';
 import { isHelixRelevant } from './utils/logFilter';
@@ -1265,7 +1267,7 @@ const App = () => {
                   className="text-tiny text-gray-400 hover:text-gray-200 border border-gray-800 rounded px-2 py-1"
                   title="Switch between Docker and Kubernetes"
                 >
-                  Target: {target === 'kubernetes' ? 'Kubernetes' : 'Docker'} · change
+                  Target: {target === 'kubernetes' ? 'Kubernetes' : target === 'kubernetes-operator' ? 'Kubernetes · Operator' : 'Docker'} · change
                 </button>
               </div>
 
@@ -1297,8 +1299,8 @@ const App = () => {
 
               {setupStep === 1 && (
                 <Step1
-                  primaryLabel={target === 'kubernetes' ? 'Save & continue →' : 'Save & initialize →'}
-                  heading={target === 'kubernetes' ? 'Step 1: Configure your Helix connection' : 'Step 1: Configure helix-gateway'}
+                  primaryLabel={isK8sTarget(target) ? 'Save & continue →' : 'Save & initialize →'}
+                  heading={isK8sTarget(target) ? 'Step 1: Configure your Helix connection' : 'Step 1: Configure helix-gateway'}
                   envVars={envVars}
                   setEnvVars={setEnvVars}
                   showApiKey={showApiKey}
@@ -1312,45 +1314,53 @@ const App = () => {
                 />
               )}
 
-              {setupStep === 2 && (target === 'kubernetes' ? (
-                <Step2K8s namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
-              ) : (
-                <Step2
-                  smartAddProposal={smartAdd.proposal}
-                  smartAddResult={smartAdd.result}
-                  smartAddLoading={smartAdd.loading}
-                  onOpenSmartAddPreview={() => smartAdd.setPreviewOpen(true)}
-                  onOpenGatewayConfig={openGatewayConfigModal}
-                  onDismissResult={smartAdd.dismissResult}
-                  onVerifyExporter={smartAdd.proposal ? () => smartAdd.refresh(smartAdd.proposal!.name) : null}
-                  onBack={() => setSetupStep(1)}
-                  onNext={() => setSetupStep(3)}
-                />
-              ))}
+              {setupStep === 2 && (
+                target === 'kubernetes-operator' ? (
+                  <Step2K8sOperator namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
+                ) : target === 'kubernetes' ? (
+                  <Step2K8s namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
+                ) : (
+                  <Step2
+                    smartAddProposal={smartAdd.proposal}
+                    smartAddResult={smartAdd.result}
+                    smartAddLoading={smartAdd.loading}
+                    onOpenSmartAddPreview={() => smartAdd.setPreviewOpen(true)}
+                    onOpenGatewayConfig={openGatewayConfigModal}
+                    onDismissResult={smartAdd.dismissResult}
+                    onVerifyExporter={smartAdd.proposal ? () => smartAdd.refresh(smartAdd.proposal!.name) : null}
+                    onBack={() => setSetupStep(1)}
+                    onNext={() => setSetupStep(3)}
+                  />
+                )
+              )}
 
-              {setupStep === 3 && (target === 'kubernetes' ? (
-                <Step3K8s namespace={k8sNamespace} onBack={() => setSetupStep(2)} onNext={() => setSetupStep(4)} />
-              ) : (
-                <Step3
-                  bridgeStatus={bridgeStatus}
-                  tab={step3Tab}
-                  setTab={setStep3Tab}
-                  detectedCollectors={detectedCollectors}
-                  attachingNetwork={attachingNetwork}
-                  attachResult={attachResult}
-                  onAttachNetwork={attachSidecarToNetwork}
-                  onDetachNetwork={detachSidecarFromNetwork}
-                  detachingNetwork={detachingNetwork}
-                  k8sApplying={k8sApplying}
-                  k8sApplyResult={k8sApplyResult}
-                  onApplyK8sTemplate={requestApplyK8sTemplate}
-                  onBack={() => setSetupStep(2)}
-                  onNext={() => setSetupStep(4)}
-                  onJumpToStep={setSetupStep}
-                />
-              ))}
+              {setupStep === 3 && (
+                target === 'kubernetes-operator' ? (
+                  <Step3K8sOperator namespace={k8sNamespace} onBack={() => setSetupStep(2)} onNext={() => setSetupStep(4)} />
+                ) : target === 'kubernetes' ? (
+                  <Step3K8s namespace={k8sNamespace} onBack={() => setSetupStep(2)} onNext={() => setSetupStep(4)} />
+                ) : (
+                  <Step3
+                    bridgeStatus={bridgeStatus}
+                    tab={step3Tab}
+                    setTab={setStep3Tab}
+                    detectedCollectors={detectedCollectors}
+                    attachingNetwork={attachingNetwork}
+                    attachResult={attachResult}
+                    onAttachNetwork={attachSidecarToNetwork}
+                    onDetachNetwork={detachSidecarFromNetwork}
+                    detachingNetwork={detachingNetwork}
+                    k8sApplying={k8sApplying}
+                    k8sApplyResult={k8sApplyResult}
+                    onApplyK8sTemplate={requestApplyK8sTemplate}
+                    onBack={() => setSetupStep(2)}
+                    onNext={() => setSetupStep(4)}
+                    onJumpToStep={setSetupStep}
+                  />
+                )
+              )}
 
-              {setupStep === 4 && (target === 'kubernetes' ? (
+              {setupStep === 4 && (isK8sTarget(target) ? (
                 <Step4K8s
                   otelDashboardUrl={externalApps.otelDashboardUrl}
                   namespace={k8sNamespace}
