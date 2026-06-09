@@ -1,5 +1,5 @@
 import React from 'react';
-import { Container, Ship } from 'lucide-react';
+import { Container, Ship, Boxes } from 'lucide-react';
 import type { WizardTarget } from './wizardTargets';
 
 type Props = { onSelect: (t: WizardTarget) => void };
@@ -19,9 +19,16 @@ const CARDS: Card[] = [
   {
     target: 'kubernetes',
     icon: <Ship className="w-6 h-6" />,
-    title: 'Kubernetes',
+    title: 'Kubernetes (manual instrument)',
     tagline: 'Generate a Helm chart you install in your cluster.',
-    detail: 'We emit a self-contained chart pre-wired to Helix; you helm install it and point apps at the gateway Service.',
+    detail: 'We emit a self-contained gateway chart pre-wired to Helix; you helm install it and instrument your apps yourself. No Operator required.',
+  },
+  {
+    target: 'kubernetes-operator',
+    icon: <Boxes className="w-6 h-6" />,
+    title: 'Kubernetes — OTel Operator (auto-instrument)',
+    tagline: 'Operator-managed gateway + zero-code auto-instrumentation.',
+    detail: 'Generates an OpenTelemetryCollector CR plus an Instrumentation CR — annotate a pod and the Operator injects the agent (Java/Node/Python/.NET). Requires installing cert-manager + the OpenTelemetry Operator once.',
   },
 ];
 
