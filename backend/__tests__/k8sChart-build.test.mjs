@@ -34,3 +34,26 @@ describe('buildChartFiles', () => {
     expect(yaml.load(gatewayConfig).exporters['otlphttp/helix_local_viewer']).toBeUndefined();
   });
 });
+
+// --- appended: operator engine ---
+describe('buildChartFiles (engine=operator)', () => {
+  it('produces operator values + the same gateway config, viewer rewritten for local', () => {
+    const { values, gatewayConfig } = buildChartFiles({
+      collectorYaml: COLLECTOR, endpoint: 'https://h/otlp', xSource: 'acme', target: 'local', engine: 'operator',
+    });
+    const v = yaml.load(values);
+    const g = yaml.load(gatewayConfig);
+    expect(v.instrumentation.languages.java).toBe(true);
+    expect(v.gateway.aliasService).toBe(true);
+    expect(g.exporters['otlphttp/helix_local_viewer'].traces_endpoint).toBe('http://host.docker.internal:8765/api/otlp/traces');
+  });
+});
+
+describe('CHART_DIR_NAME by engine', () => {
+  it('resolves operator vs deployment skeleton dir', async () => {
+    const { chartDirForEngine } = await import('../k8sChart/buildChart.js');
+    expect(chartDirForEngine('operator')).toBe('helix-otel-operator');
+    expect(chartDirForEngine('deployment')).toBe('helix-otel');
+    expect(chartDirForEngine(undefined)).toBe('helix-otel');
+  });
+});
