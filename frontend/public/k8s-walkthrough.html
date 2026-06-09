@@ -95,10 +95,12 @@
 
     <h1>Deploy the Helix OTel gateway to Kubernetes</h1>
     <p class="lede">
-      The configurator generates a self-contained Helm chart — the Helix OTel gateway (and an optional
-      local viewer) pre-wired to your Helix tenant. You <code>helm install</code> it in your cluster, then
-      point your apps at the gateway&rsquo;s in-cluster Service. This is the full walkthrough behind the
-      in-app <em>Generate&nbsp;Kubernetes&nbsp;deployment</em> step.
+      The configurator generates a self-contained Helm chart — the Helix OTel gateway, pre-wired to your
+      Helix tenant. You <code>helm install</code> it in your cluster, then point your apps at the
+      gateway&rsquo;s in-cluster Service. On a <strong>local cluster</strong> (Docker Desktop) the gateway also
+      loops a copy of your telemetry back to this app, so <code>localhost:8765/otel-data</code> keeps working
+      exactly like the Docker setup — no extra deployments, ports, or port-forwards. This is the full
+      walkthrough behind the in-app <em>Generate&nbsp;Kubernetes&nbsp;deployment</em> step.
     </p>
 
     <div class="toc">
@@ -117,8 +119,8 @@
     <h2 id="generate"><span class="num">1</span>Generate &amp; download the chart</h2>
     <p>
       In the configurator&rsquo;s <strong>Generate</strong> step (or the dashboard&rsquo;s
-      <em>Generate&nbsp;Kubernetes&nbsp;deployment</em> action), choose whether to include the local viewer,
-      then click <strong>Download chart (.zip)</strong>. Unzip it and <code>cd</code> into the chart folder &mdash;
+      <em>Generate&nbsp;Kubernetes&nbsp;deployment</em> action), click
+      <strong>Download chart (.zip)</strong>. Unzip it and <code>cd</code> into the chart folder &mdash;
       run the rest of these steps from inside it:
     </p>
     <pre><code>unzip helix-otel-chart.zip
@@ -162,8 +164,8 @@ helm install helix . -n observability \
     <p class="muted">
       This brings up the gateway <code>Deployment</code> + <code>Service</code> (named
       <code>helix-gateway</code>, listening on <code>4317</code>/<code>4318</code> with metrics on
-      <code>8888</code>), and — unless you disabled it — the local viewer
-      (<code>helix-viewer</code>) on a small PVC.
+      <code>8888</code>). That&rsquo;s the whole chart — the local viewer stays in this app on your machine;
+      nothing else is deployed.
     </p>
 
     <h2 id="point"><span class="num">4</span>Point your apps at the gateway</h2>
@@ -205,37 +207,41 @@ OTEL_RESOURCE_ATTRIBUTES=service.namespace=&lt;app&gt;,deployment.environment=&l
     <p>The configurator is generate-only — it doesn&rsquo;t reach into your cluster — so verify from your own <code>kubectl</code> and in Helix.</p>
     <h3>Gateway pods are up</h3>
     <pre><code>kubectl get pods -l app.kubernetes.io/component=gateway -n &lt;namespace&gt;</code></pre>
-    <h3>Watch it locally (if you included the viewer)</h3>
-    <p>The viewer lives at <code>http://localhost:8765/otel-data</code>. By default it&rsquo;s internal (ClusterIP — safe anywhere); reach it with a port-forward:</p>
-    <pre><code>kubectl port-forward svc/helix-viewer 8765:8765 -n &lt;namespace&gt;</code></pre>
-    <p class="faint">On Docker Desktop, skip the port-forward: install with <code>--set viewer.service.type=LoadBalancer</code> and open <code>http://localhost:8765/otel-data</code> directly. Avoid LoadBalancer on shared/cloud clusters — it exposes the unauthenticated viewer.</p>
+    <h3>Watch it locally (local clusters)</h3>
+    <p>
+      On a local cluster (Docker Desktop, kind, minikube on this machine) the gateway automatically sends a
+      copy of your telemetry back to this app via <code>host.docker.internal:8765</code> — no port-forward,
+      no extra Service. Just open <a href="/otel-data"><code>http://localhost:8765/otel-data</code></a>,
+      the same built-in viewer the Docker setup uses.
+    </p>
+    <p class="faint">On a remote / cloud cluster the local viewer isn&rsquo;t reachable; the chart sends to Helix only — verify there instead.</p>
     <h3>See it in Helix</h3>
     <p>Open your tenant&rsquo;s <strong>OTel Namespace Overview</strong> dashboard — traces, metrics, and logs from your apps should appear within a couple of minutes of pointing them at the gateway.</p>
 
     <h2 id="options"><span class="num">★</span>Options &amp; flags</h2>
     <ul>
-      <li><strong>Local viewer</strong> — on by default (a Deployment + PVC). Disable it with <code>--set viewer.enabled=false</code>, or untick it before downloading.</li>
-      <li><strong>Viewer exposure</strong> — internal (<code>ClusterIP</code>) by default; reach it via <code>kubectl port-forward svc/helix-viewer 8765:8765</code>, then <code>localhost:8765/otel-data</code>. On Docker Desktop / local clusters, <code>--set viewer.service.type=LoadBalancer</code> serves it directly with no port-forward. Don&rsquo;t use LoadBalancer on shared/cloud clusters — the viewer is unauthenticated.</li>
+      <li><strong>Local viewer loopback</strong> — generated for local-cluster charts: the gateway&rsquo;s config carries an extra exporter pointed at <code>host.docker.internal:8765</code> (this app). Charts generated for a remote cluster omit it, so nothing in the cluster tries to reach your laptop.</li>
       <li><strong>Existing secret</strong> — <code>--set helix.existingSecret=&lt;name&gt;</code> to reference a Secret you manage yourself.</li>
       <li><strong>Override the baked endpoint/source</strong> at install — <code>--set helix.endpoint=… --set helix.xSource=…</code>.</li>
-      <li><strong>OpenTelemetry Operator flavor</strong> — <em>coming soon</em>: an <code>OpenTelemetryCollector</code> CR + zero-code auto-instrumentation, for clusters that already run the Operator.</li>
+      <li><strong>OpenTelemetry Operator flavor</strong> — available as its own onboarding path (<em>Onboarding → Kubernetes: Operator</em>): an <code>OpenTelemetryCollector</code> CR + zero-code auto-instrumentation via the <code>Instrumentation</code> CR. See the <a href="/k8s-operator-walkthrough.html">operator walkthrough</a>.</li>
     </ul>
 
     <h2 id="troubleshooting"><span class="num">?</span>Troubleshooting</h2>
-    <h3>Viewer pod stuck in <code>ImagePullBackOff</code></h3>
-    <p>By default the viewer pulls a published image, so it should start on its own. This usually only happens
-    if you <strong>override</strong> <code>viewer.image</code> to a local build the cluster can&rsquo;t pull — load it into the
-    cluster first, or just run without the viewer (<code>--set viewer.enabled=false</code>):</p>
-    <pre><code>kind:           kind load docker-image &lt;your-image&gt;
-minikube:       minikube image load &lt;your-image&gt;
-Docker Desktop:  push it to a local registry, or point viewer.image at a pullable one</code></pre>
+    <h3>Nothing shows up in the local viewer</h3>
+    <ul>
+      <li><strong>Remote cluster?</strong> Expected — the local viewer is only fed from clusters on this
+        machine. Verify in Helix instead (and generate remote charts with the <em>Remote / cloud cluster</em>
+        option so the gateway doesn&rsquo;t log retry noise trying to reach your laptop).</li>
+      <li><strong>Local cluster:</strong> the loopback needs this app running on <code>localhost:8765</code>
+        and the cluster to resolve <code>host.docker.internal</code> (Docker Desktop does out of the box).
+        Check the gateway logs for export errors:
+        <code>kubectl logs deploy/helix-gateway -n &lt;namespace&gt;</code>.</li>
+      <li><strong>Nothing in Helix either?</strong> The apps probably aren&rsquo;t reaching the gateway —
+        re-check the endpoint from step 4 and the gateway pods from step 5.</li>
+    </ul>
     <div class="callout warn">
       <div class="label">OpenShift / restricted Pod Security</div>
-      The gateway runs fully non-root and passes the restricted Pod Security Standard. The local viewer
-      image currently runs as root — on OpenShift or a <code>restricted</code>-PSA namespace it needs a
-      non-root image rebuild or a namespace exception. If that&rsquo;s a blocker, install with
-      <code>--set viewer.enabled=false</code> and use Helix (or port-forward from a permissive namespace)
-      to view data.
+      The gateway runs fully non-root and passes the restricted Pod Security Standard — no exceptions needed.
     </div>
 
   </div>

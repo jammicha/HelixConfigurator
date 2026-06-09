@@ -79,10 +79,11 @@ export const K8sChartModal: React.FC<Props> = ({ isOpen, onClose }) => {
             Generating this for someone else (omit my key)
           </label>
 
-          <div className="flex items-center gap-3 text-sm text-gray-500">
-            <input type="checkbox" checked={false} disabled className="w-4 h-4" />
-            Use the OpenTelemetry Operator <span className="text-tiny px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">coming soon</span>
-          </div>
+          <p className="text-tiny text-gray-500">
+            Need the OpenTelemetry Operator flavor (CR-managed gateway + zero-code auto-instrumentation)?
+            Generate it from <span className="text-gray-300">Onboarding → Kubernetes: Operator</span> — that
+            wizard path builds the operator chart with prereq commands and runtime toggles.
+          </p>
 
           {error && <div className="text-xs text-error-text bg-error/10 border border-error/40 rounded p-3">{error}</div>}
           {loading && <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> Generating preview…</div>}
