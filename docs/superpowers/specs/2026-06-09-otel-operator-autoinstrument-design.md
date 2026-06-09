@@ -112,15 +112,16 @@ not a runtime conditional.
 
 `WizardTarget` gains `'kubernetes-operator'`. `TargetSelector` gets a third card:
 
-| Card | target | What it generates |
+| Card title | target | What it generates |
 |---|---|---|
 | Docker Desktop / Compose | `docker` | (unchanged) |
-| Kubernetes | `kubernetes` | (unchanged) `helix-otel/` plain Deployment chart |
-| **Kubernetes — OTel Operator** | `kubernetes-operator` | **new** `helix-otel-operator/` chart (CRs) |
+| Kubernetes (manual instrument) | `kubernetes` | (unchanged) `helix-otel/` plain Deployment chart — title relabeled, behavior identical |
+| **Kubernetes — OTel Operator (auto-instrument)** | `kubernetes-operator` | **new** `helix-otel-operator/` chart (CRs) |
 
 The new card's copy makes the tradeoff explicit: *"Operator-managed gateway +
 zero-code auto-instrumentation (Java/Node/Python/.NET). Requires installing
-cert-manager and the OpenTelemetry Operator once."*
+cert-manager and the OpenTelemetry Operator once."* The plain card's tagline is
+nudged to clarify it's the no-Operator, instrument-your-own-apps path.
 
 ### Frontend changes (additive)
 
@@ -132,13 +133,18 @@ cert-manager and the OpenTelemetry Operator once."*
 - **`TargetSelector.tsx`**: one new entry in the `CARDS` array.
 - **New components** (the two steps that genuinely differ):
   - `Step2K8sOperator.tsx` — a **Prerequisites** block (copy-paste cert-manager +
-    Operator `kubectl apply` + wait commands) above the existing
-    generate/download panel (reuse `K8sChartPanel` with the operator chart).
+    Operator `kubectl apply` at **pinned versions** + wait commands) above the
+    existing generate/download panel (reuse `K8sChartPanel` with the operator
+    chart). Deep-links to `k8s-operator-walkthrough.html#prereqs`.
   - `Step3K8sOperator.tsx` — **"Annotate your pods."** Per-language annotation
     snippets; explains the Operator injects an init-container + env on the **next
     pod restart**; calls out the **namespace rule** (Instrumentation CR must be in
     the app's namespace or referenced `<ns>/helix-instrumentation`). Keeps the
-    manual `OTEL_EXPORTER_OTLP_ENDPOINT` env as a labelled fallback.
+    manual `OTEL_EXPORTER_OTLP_ENDPOINT` env as a labelled fallback. Deep-links to
+    `k8s-operator-walkthrough.html#annotate`.
+- **New static page** `frontend/public/k8s-operator-walkthrough.html` — mirrors the
+  existing `k8s-walkthrough.html` scaffold/CSS; full operator runbook (`#prereqs` →
+  `#generate` → `#secret` → `#install` → `#annotate` → `#verify` + troubleshooting).
 - **Reused as-is**: `Step1` (Configure) and `Step4K8s` (Verify) — Verify gains one
   optional operator-only tip ("confirm the init container was injected:
   `kubectl get pod <p> -o jsonpath=...initContainers`"). Existing `Step2K8s` /
@@ -178,9 +184,10 @@ cert-manager and the OpenTelemetry Operator once."*
     `engine` (`helix-otel` vs `helix-otel-operator`).
 - **`routes/k8s.js`** — add an `engine=deployment|operator` query param (default
   `deployment`, so existing callers are unchanged). For `operator`, `buildCommands`
-  returns the **prereq commands** (cert-manager apply, Operator apply, waits) plus
-  the `helm install` of the operator chart. Preview JSON gains the operator file
-  list + prereqs.
+  returns the **prereq commands** (cert-manager apply, Operator apply, waits — at
+  **pinned versions** sourced from named constants, e.g. a small
+  `k8sChart/operatorPrereqs.js`) plus the `helm install` of the operator chart.
+  Preview JSON gains the operator file list + prereqs.
 
 ### Data flow (operator path)
 
@@ -251,13 +258,26 @@ Mirror the existing `backend/__tests__/k8sChart-*.test.mjs` + `k8s-routes` +
 4. **Annotation-first Step 3** with manual env as fallback.
 5. **Don't pin auto-instrumentation images** by default; allow override.
 
-## Open questions for review
+## Decisions resolved (review round, 2026-06-09)
 
-- **Engine param name**: `engine=deployment|operator` (proposed) vs `mode`
-  (collides with the CR's `mode: deployment`) vs `chart`. Leaning `engine`.
-- **Two K8s cards both say "Kubernetes."** Acceptable, or relabel the plain one
-  (e.g. "Kubernetes — manual") to sharpen the contrast?
-- **Pin a known-good Operator/cert-manager version** in the docs/commands, or use
-  `latest`? `latest` is simplest; a pin is more reproducible for a demo.
-- **Reference docs**: should the chart ship a short `README.md` with the full
-  prereq → install → annotate runbook (in addition to NOTES.txt)?
+6. **Engine param = `engine=deployment|operator`** (default `deployment`). Avoids
+   collision with the CR's own `mode: deployment` and the existing
+   `target=local|remote`.
+7. **Relabel both K8s cards for contrast** — plain → *"Kubernetes (manual
+   instrument)"*; new → *"Kubernetes — OTel Operator (auto-instrument)"*. This is a
+   **copy-only** edit to `TargetSelector`; the plain card's `target` value stays
+   `'kubernetes'` and its behavior is unchanged.
+8. **Pin known-good prerequisite versions.** cert-manager + the OTel Operator are
+   pinned to specific validated versions held as **named constants** (mirroring the
+   collector-image `0.119.0` pin), chosen and smoke-validated at implementation
+   time and easy to bump. Note: pinning the **Operator** version transitively pins
+   the **default auto-instrumentation agent images** (we don't pin those directly,
+   per decision 5), so the two image decisions compose cleanly.
+9. **Document the runbook in a parallel walkthrough page**, not a chart README.
+   Add `frontend/public/k8s-operator-walkthrough.html` mirroring the existing
+   `k8s-walkthrough.html` scaffold/CSS, with operator sections:
+   `#prereqs` → `#generate` → `#secret` → `#install` → `#annotate` → `#verify` +
+   troubleshooting (CRD-not-found, agent-not-injected, cross-namespace). The
+   operator step components deep-link into it, exactly as `Step3K8s`/`Step4K8s`
+   link into the existing page today. A minimal `NOTES.txt` still renders
+   post-install with the annotate hint + a link to the walkthrough.
