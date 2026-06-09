@@ -1,0 +1,22 @@
+Helix OTel Operator chart installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+PREREQUISITE: this chart needs the OpenTelemetry Operator (and cert-manager) already
+installed. If `helm install` failed with 'no matches for kind "OpenTelemetryCollector"',
+install them first — see k8s-operator-walkthrough.html (the in-app "Full walkthrough" link).
+
+1) The Operator is reconciling the gateway as an OpenTelemetryCollector CR.
+   Check it came up:
+     kubectl get opentelemetrycollector,pods -l app.kubernetes.io/component=opentelemetry-collector -n {{ .Release.Namespace }}
+   Apps reach it in-cluster at:
+     http://{{ .Values.gateway.name }}:4318    (same namespace)
+     http://{{ .Values.gateway.name }}.{{ .Release.Namespace }}.svc.cluster.local:4318  (any namespace)
+
+2) Auto-instrument an app WITHOUT changing its code — add a pod annotation, then
+   restart it so the Operator injects the agent:
+     kubectl patch deployment <app> -n <app-ns> -p \
+       '{"spec":{"template":{"metadata":{"annotations":{"instrumentation.opentelemetry.io/inject-java":"{{ .Release.Namespace }}/helix-instrumentation"}}}}}'
+   (use -nodejs / -python / -dotnet for other runtimes; value "true" works when the
+   app is in THIS namespace.)
+
+3) Telemetry flows to Helix. On a local cluster it also fans out to
+   http://localhost:8765/otel-data.

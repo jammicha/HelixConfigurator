@@ -1,0 +1,47 @@
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: helix-instrumentation
+  labels:
+    {{- include "helix-otel-operator.labels" . | nindent 4 }}
+spec:
+  exporter:
+    endpoint: "http://{{ .Values.gateway.name }}.{{ .Release.Namespace }}.svc.cluster.local:4318"
+  propagators:
+    - tracecontext
+    - baggage
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1.0"
+{{- if .Values.instrumentation.languages.java }}
+{{- if .Values.instrumentation.images.java }}
+  java:
+    image: {{ .Values.instrumentation.images.java | quote }}
+{{- else }}
+  java: {}
+{{- end }}
+{{- end }}
+{{- if .Values.instrumentation.languages.nodejs }}
+{{- if .Values.instrumentation.images.nodejs }}
+  nodejs:
+    image: {{ .Values.instrumentation.images.nodejs | quote }}
+{{- else }}
+  nodejs: {}
+{{- end }}
+{{- end }}
+{{- if .Values.instrumentation.languages.python }}
+{{- if .Values.instrumentation.images.python }}
+  python:
+    image: {{ .Values.instrumentation.images.python | quote }}
+{{- else }}
+  python: {}
+{{- end }}
+{{- end }}
+{{- if .Values.instrumentation.languages.dotnet }}
+{{- if .Values.instrumentation.images.dotnet }}
+  dotnet:
+    image: {{ .Values.instrumentation.images.dotnet | quote }}
+{{- else }}
+  dotnet: {}
+{{- end }}
+{{- end }}

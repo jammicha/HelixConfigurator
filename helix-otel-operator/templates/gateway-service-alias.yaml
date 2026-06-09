@@ -1,0 +1,18 @@
+{{- if .Values.gateway.aliasService }}
+{{- /* Stable DNS alias so apps + the Instrumentation exporter can reach the
+       gateway at helix-gateway:4318 (the Operator's own Service is named
+       <cr-name>-collector). Selects the Operator-managed collector pods. */ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gateway.name }}
+  labels:
+    {{- include "helix-otel-operator.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "helix-otel-operator.collectorSelector" . | nindent 4 }}
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: 4317, protocol: TCP }
+    - { name: otlp-http, port: 4318, targetPort: 4318, protocol: TCP }
+{{- end }}

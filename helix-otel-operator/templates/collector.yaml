@@ -1,0 +1,25 @@
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: {{ .Values.gateway.name }}
+  labels:
+    {{- include "helix-otel-operator.labels" . | nindent 4 }}
+spec:
+  mode: deployment
+  replicas: {{ .Values.gateway.replicas }}
+  image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+  imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+  resources:
+    {{- toYaml .Values.gateway.resources | nindent 4 }}
+  env:
+    - name: HELIX_ENDPOINT
+      value: {{ .Values.helix.endpoint | quote }}
+    - name: X_SOURCE
+      value: {{ .Values.helix.xSource | quote }}
+    - name: HELIX_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: {{ .Values.helix.existingSecret | default (printf "%s-helix" .Values.gateway.name) }}
+          key: {{ .Values.helix.existingSecretKey | default "HELIX_API_KEY" }}
+  config:
+{{ .Files.Get "config/gateway-collector.yaml" | indent 4 }}
