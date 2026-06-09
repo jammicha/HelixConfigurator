@@ -74,6 +74,7 @@ const HeaderUserMenu: React.FC = () => {
   }, []);
   return (
     <NavAvatar
+      currentPage="otel-data"
       authStatus={authStatus}
       externalApps={externalApps}
       onLogout={async () => {
@@ -764,6 +765,24 @@ export const OtelDataPage: React.FC = () => {
     return () => clearInterval(id);
   }, [serviceFilter, namespaceFilter, containerFilter, range, customRange]);
 
+  // Same 30s fallback for the Logs & Errors tab: when SSE drops, traces
+  // recovered via the poll above but logs/errors froze until reload.
+  // Latest-closure refs (the page's standard pattern) keep the poll honoring
+  // the current time window without rebuilding the interval every render.
+  const refreshLogsRef = useRef(refreshLogs);
+  refreshLogsRef.current = refreshLogs;
+  const refreshErrorsRef = useRef(refreshErrors);
+  refreshErrorsRef.current = refreshErrors;
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (logsPausedRef.current) return;
+      if (streamModeRef.current === 'live' && sseConnectedRef.current) return;
+      refreshLogsRef.current();
+      refreshErrorsRef.current();
+    }, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Page-wide refresh cadence. useOverview auto-fetches when its inputs
   // (serviceFilter, chart window) change; this hook drives the periodic
   // re-poll cadence. Auto-pauses when the tab is hidden, and now also
@@ -836,10 +855,17 @@ export const OtelDataPage: React.FC = () => {
 
   // Realtime SSE — push new traces and errors into the lists without polling.
   // The connection is shared across both tabs; tab switches don't tear it down.
+  // `sseAttempt` re-runs the effect to rebuild the EventSource: the browser's
+  // built-in retry gives up permanently on fatal responses (e.g. a tunnel
+  // answering 5xx while it recycles an ~1h-idle stream), so onerror schedules
+  // a capped-backoff reopen — without it, one drop froze the page until reload.
+  const [sseAttempt, setSseAttempt] = useState(0);
+  const sseBackoffRef = useRef(0);
+  const sseReopenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const es = new EventSource('/api/traces/stream');
     eventSourceRef.current = es;
-    es.addEventListener('connected', () => setSseConnected(true));
+    es.addEventListener('connected', () => { setSseConnected(true); sseBackoffRef.current = 0; });
     es.addEventListener('trace', (evt: MessageEvent) => {
       // Pause: stop merging incoming traces so the user's view stays stable
       // while they read. Unpausing resumes the live feed; a fresh /api/traces
@@ -955,12 +981,22 @@ export const OtelDataPage: React.FC = () => {
         setLogs(prev => [record, ...prev].slice(0, 500));
       } catch { /* ignore */ }
     });
-    es.onerror = () => setSseConnected(false);
+    es.onerror = () => {
+      setSseConnected(false);
+      if (sseReopenTimerRef.current) return; // one pending reopen at a time
+      const delay = Math.min(30_000, 1_000 * 2 ** Math.min(sseBackoffRef.current, 5));
+      sseReopenTimerRef.current = setTimeout(() => {
+        sseReopenTimerRef.current = null;
+        sseBackoffRef.current += 1;
+        setSseAttempt(a => a + 1);
+      }, delay);
+    };
     return () => {
+      if (sseReopenTimerRef.current) { clearTimeout(sseReopenTimerRef.current); sseReopenTimerRef.current = null; }
       es.close();
       eventSourceRef.current = null;
     };
-  }, []);
+  }, [sseAttempt]);
 
   // Trace detail load on selection.
   useEffect(() => {
