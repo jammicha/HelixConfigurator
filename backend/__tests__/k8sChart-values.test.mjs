@@ -31,3 +31,34 @@ describe('renderValues', () => {
     expect(v.gateway.replicas).toBe(1);
   });
 });
+
+// --- appended: operator engine ---
+import { renderValues as rv2 } from '../k8sChart/renderValues.js';
+
+describe('renderValues (engine=operator)', () => {
+  it('emits instrumentation languages (all four on) and empty image overrides', () => {
+    const v = yaml.load(rv2({ endpoint: 'https://h/otlp', xSource: 'acme', engine: 'operator' }));
+    expect(v.instrumentation.languages).toEqual({ java: true, nodejs: true, python: true, dotnet: true });
+    expect(v.instrumentation.images).toEqual({ java: '', nodejs: '', python: '', dotnet: '' });
+  });
+
+  it('bakes endpoint/xSource, never the apiKey, and sets aliasService', () => {
+    const v = yaml.load(rv2({ endpoint: 'https://h/otlp', xSource: 'acme', engine: 'operator' }));
+    expect(v.helix.endpoint).toBe('https://h/otlp');
+    expect(v.helix.xSource).toBe('acme');
+    expect(v.helix.apiKey).toBe('');
+    expect(v.gateway.name).toBe('helix-gateway');
+    expect(v.gateway.aliasService).toBe(true);
+  });
+
+  it('respects an explicit languages override', () => {
+    const v = yaml.load(rv2({ engine: 'operator', languages: { java: true, nodejs: false, python: false, dotnet: false } }));
+    expect(v.instrumentation.languages).toEqual({ java: true, nodejs: false, python: false, dotnet: false });
+  });
+
+  it('engine=deployment (default) is unchanged — no instrumentation key', () => {
+    const v = yaml.load(rv2({ endpoint: 'x' }));
+    expect(v.instrumentation).toBeUndefined();
+    expect(v.gateway.service.type).toBe('ClusterIP');
+  });
+});
