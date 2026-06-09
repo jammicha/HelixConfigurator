@@ -1,5 +1,13 @@
 node_modules
 **/node_modules
 frontend/dist
+frontend-dist
 .git
 .env
+# Live local state, docs, and design references — never build-context material
+# (data/ alone is ~70MB of live SQLite store uploaded on every --build).
+data
+backend/data
+docs
+ADAPT Design System
+*.zip

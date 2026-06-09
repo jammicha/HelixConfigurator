@@ -18,6 +18,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # Gate the image on the same checks the repo treats as its safety net
+      # (backend unit tests, frontend typecheck + tests). Before this, a push
+      # to main shipped straight to ghcr.io/…:latest with zero verification.
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Backend tests
+        run: cd backend && npm ci && npm test
+
+      - name: Frontend typecheck + tests
+        run: cd frontend && npm ci && npx tsc --noEmit && npm test
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
