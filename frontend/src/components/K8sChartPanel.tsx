@@ -10,18 +10,21 @@ type Preview = {
   installCommand: string;
   files: string[];
   keyEmbedded: boolean;
+  prereqs?: { certManager: string; waitCertManager: string; operator: string; waitOperator: string };
 };
 
 // The generate-a-Helm-chart UX, shared by the dashboard K8sChartModal and the
 // onboarding wizard's Kubernetes "Generate" step. Self-contained: owns the
 // viewer/handoff toggles, fetches the preview, and renders the install steps +
 // previews + download. Generate-only — no cluster calls.
-type Props = { namespace: string; onNamespaceChange: (ns: string) => void };
+type Props = { namespace: string; onNamespaceChange: (ns: string) => void; engine?: 'deployment' | 'operator' };
 
-export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange }) => {
+export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, engine = 'deployment' }) => {
+  const isOperator = engine === 'operator';
   const [viewerEnabled, setViewerEnabled] = useState(true);
   const [exposeViewer, setExposeViewer] = useState(false);
   const [handoff, setHandoff] = useState(false);
+  const [langs, setLangs] = useState({ java: true, nodejs: true, python: true, dotnet: true });
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +33,9 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/k8s/chart/preview?viewer=${viewerEnabled}&handoff=${handoff}&expose=${exposeViewer}`)
+    const q = new URLSearchParams({ engine, handoff: String(handoff) });
+    if (!isOperator) { q.set('viewer', String(viewerEnabled)); q.set('expose', String(exposeViewer)); }
+    fetch(`/api/k8s/chart/preview?${q.toString()}`)
       .then(async r => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`);
         return r.json();
@@ -39,7 +44,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
       .catch(e => { if (!cancelled) setError(String(e.message || e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [viewerEnabled, handoff, exposeViewer]);
+  }, [engine, isOperator, viewerEnabled, handoff, exposeViewer]);
 
   const cmds = namespacedCommands(namespace, preview ?? { secretCommand: '', installCommand: '' });
 
@@ -53,27 +58,37 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
         />
         <p className="text-tiny text-gray-500 mt-1">The secret &amp; install commands below target this namespace (they must match). Leave as <code className="font-mono">default</code> for a quick try.</p>
       </div>
-      <label className="flex items-center gap-3 text-sm text-gray-300">
-        <input type="checkbox" checked={viewerEnabled} onChange={e => { setViewerEnabled(e.target.checked); if (!e.target.checked) setExposeViewer(false); }} className="accent-primary w-4 h-4" />
-        Include the local &quot;View OTel Data&quot; viewer (Deployment + PVC)
-      </label>
-
-      {viewerEnabled && (
-        <label className="flex items-start gap-3 text-sm text-gray-300 ml-7">
-          <input type="checkbox" checked={exposeViewer} onChange={e => setExposeViewer(e.target.checked)} className="accent-primary w-4 h-4 mt-0.5" />
-          <span>Expose it at <code className="font-mono text-gray-100">localhost:8765</code> — no port-forward <span className="text-tiny text-gray-500">(Caution: meant for local clusters only — don&apos;t use this on a shared/cloud cluster)</span></span>
-        </label>
+      {isOperator ? (
+        <div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Auto-instrument these runtimes</p>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {(['java', 'nodejs', 'python', 'dotnet'] as const).map(l => (
+              <label key={l} className="flex items-center gap-2 text-sm text-gray-300">
+                <input type="checkbox" checked={langs[l]} onChange={e => setLangs(s => ({ ...s, [l]: e.target.checked }))} className="accent-primary w-4 h-4" />
+                {l === 'nodejs' ? 'Node.js' : l === 'dotnet' ? '.NET' : l[0].toUpperCase() + l.slice(1)}
+              </label>
+            ))}
+          </div>
+          <p className="text-tiny text-gray-500 mt-2">These set the default <code className="font-mono">instrumentation.languages.*</code> in <code className="font-mono">values.yaml</code>; you can also toggle them with <code className="font-mono">--set</code> at install. Annotate pods in Step 3.</p>
+        </div>
+      ) : (
+        <>
+          <label className="flex items-center gap-3 text-sm text-gray-300">
+            <input type="checkbox" checked={viewerEnabled} onChange={e => { setViewerEnabled(e.target.checked); if (!e.target.checked) setExposeViewer(false); }} className="accent-primary w-4 h-4" />
+            Include the local &quot;View OTel Data&quot; viewer (Deployment + PVC)
+          </label>
+          {viewerEnabled && (
+            <label className="flex items-start gap-3 text-sm text-gray-300 ml-7">
+              <input type="checkbox" checked={exposeViewer} onChange={e => setExposeViewer(e.target.checked)} className="accent-primary w-4 h-4 mt-0.5" />
+              <span>Expose it at <code className="font-mono text-gray-100">localhost:8765</code> — no port-forward <span className="text-tiny text-gray-500">(Caution: local clusters only)</span></span>
+            </label>
+          )}
+          <label className="flex items-center gap-3 text-sm text-gray-300">
+            <input type="checkbox" checked={handoff} onChange={e => setHandoff(e.target.checked)} className="accent-primary w-4 h-4" />
+            Generating this for someone else (omit my key)
+          </label>
+        </>
       )}
-
-      <label className="flex items-center gap-3 text-sm text-gray-300">
-        <input type="checkbox" checked={handoff} onChange={e => setHandoff(e.target.checked)} className="accent-primary w-4 h-4" />
-        Generating this for someone else (omit my key)
-      </label>
-
-      <div className="flex items-center gap-3 text-sm text-gray-500">
-        <input type="checkbox" checked={false} disabled className="w-4 h-4" />
-        Use the OpenTelemetry Operator <span className="text-tiny px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">coming soon</span>
-      </div>
 
       {error && <div className="text-xs text-error-text bg-error/10 border border-error/40 rounded p-3">{error}</div>}
       {!preview && loading && <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> Generating preview…</div>}
@@ -83,7 +98,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
           <div className="flex items-center justify-between">
             <p className="text-tiny uppercase tracking-wide text-gray-500">Install steps</p>
             <a
-              href="/k8s-walkthrough.html"
+              href={isOperator ? '/k8s-operator-walkthrough.html' : '/k8s-walkthrough.html'}
               target="_blank" rel="noopener noreferrer"
               className="text-tiny text-[#8b7cf6] hover:underline"
             >Full walkthrough ↗</a>
@@ -91,7 +106,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
           <div>
             <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">1 · Download &amp; unzip</p>
             <a
-              href={`/api/k8s/chart?viewer=${viewerEnabled}`}
+              href={`/api/k8s/chart?engine=${engine}`}
               className="bg-primary hover:bg-[#3006c2] text-white px-4 py-1.5 rounded text-tiny font-semibold transition-colors inline-flex items-center gap-2"
             >
               <Download className="w-4 h-4" /> Download chart (.zip)
@@ -99,7 +114,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange })
             <p className="text-tiny text-gray-500 mt-2">
               Then unzip and <code className="bg-gray-1000 px-1 py-0.5 rounded">cd</code> into the chart folder — steps 2 &amp; 3 run from inside it:
             </p>
-            <SnippetBlock text={`unzip helix-otel-chart.zip && cd helix-otel`} />
+            <SnippetBlock text={`unzip ${isOperator ? 'helix-otel-operator' : 'helix-otel'}-chart.zip && cd ${isOperator ? 'helix-otel-operator' : 'helix-otel'}`} />
           </div>
           <div>
             <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">2 · Create the secret</p>
