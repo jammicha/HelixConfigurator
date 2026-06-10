@@ -312,6 +312,13 @@ const App = () => {
         }
         setEnvVars(data);
         setEnvLoaded(true);
+        // A persisted wizard step is only meaningful while the credentials it
+        // was earned with still exist. A cleared .env (fresh install over old
+        // localStorage, reset, rolled-back container) would otherwise land the
+        // user deep in the wizard where every Helix call silently no-ops.
+        if (!data.HELIX_ENDPOINT || !data.HELIX_API_KEY) {
+          setSetupStep(s => (s > 1 ? 1 : s));
+        }
         // First-time visitors see the onboarding wizard even when .env is
         // pre-populated (e.g., by the AIOps install script). Only auto-jump
         // to the dashboard if the user has explicitly clicked through
