@@ -2,10 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { SnippetBlock } from './SnippetBlock';
 import { namespacedCommands } from './wizard/wizardTargets';
-import { useLocalStorageState } from '../hooks/useLocalStorageState';
 
-type ClusterTarget = 'local' | 'remote';
-const isClusterTarget = (v: unknown): v is ClusterTarget => v === 'local' || v === 'remote';
+export type ClusterTarget = 'local' | 'remote';
+export const isClusterTarget = (v: unknown): v is ClusterTarget => v === 'local' || v === 'remote';
 
 type Preview = {
   values: string;
@@ -24,19 +23,21 @@ type Preview = {
 // gateway-only: on local clusters telemetry loops back to this app's viewer
 // automatically (host.docker.internal:8765), so there is no viewer Deployment
 // and nothing to expose or port-forward.
-type Props = { namespace: string; onNamespaceChange: (ns: string) => void; engine?: 'deployment' | 'operator' };
+// clusterTarget is lifted to the owner (App for the wizard): it decides whether
+// the generated gateway config keeps the loopback exporter
+// (host.docker.internal:8765 → this app's viewer) or strips it — and the
+// Verify step + dashboard banner branch on the same value, so one component
+// can't own it.
+type Props = {
+  namespace: string; onNamespaceChange: (ns: string) => void;
+  clusterTarget: ClusterTarget; onClusterTargetChange: (t: ClusterTarget) => void;
+  engine?: 'deployment' | 'operator';
+};
 
 const NS_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 
-export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, engine = 'deployment' }) => {
+export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, clusterTarget, onClusterTargetChange, engine = 'deployment' }) => {
   const isOperator = engine === 'operator';
-  // Local vs remote cluster decides whether the generated gateway config keeps
-  // the loopback exporter (host.docker.internal:8765 → this app's viewer) or
-  // strips it — remote clusters can't reach it and would just log retry noise.
-  // Persisted: the wizard spans several steps/refreshes, like the namespace.
-  const [clusterTarget, setClusterTarget] = useLocalStorageState<ClusterTarget>(
-    'helix-configurator.k8sClusterTarget', 'local', isClusterTarget,
-  );
   const [handoff, setHandoff] = useState(false);
   const [langs, setLangs] = useState({ java: true, nodejs: true, python: true, dotnet: true });
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -99,14 +100,14 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, e
       <fieldset className="space-y-2">
         <legend className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Where does the cluster run?</legend>
         <label className="flex items-start gap-3 text-sm text-gray-300 cursor-pointer">
-          <input type="radio" name="k8s-cluster-target" value="local" checked={clusterTarget === 'local'} onChange={() => setClusterTarget('local')} className="accent-primary mt-0.5" />
+          <input type="radio" name="k8s-cluster-target" value="local" checked={clusterTarget === 'local'} onChange={() => onClusterTargetChange('local')} className="accent-primary mt-0.5" />
           <span>
             <span className="font-medium text-gray-200">Local cluster (Docker Desktop, kind, minikube on this machine)</span>
             <span className="block text-tiny text-gray-500 mt-0.5">Telemetry flows back to this app at <code className="font-mono">localhost:8765/otel-data</code> — same view as Docker.</span>
           </span>
         </label>
         <label className="flex items-start gap-3 text-sm text-gray-300 cursor-pointer">
-          <input type="radio" name="k8s-cluster-target" value="remote" checked={clusterTarget === 'remote'} onChange={() => setClusterTarget('remote')} className="accent-primary mt-0.5" />
+          <input type="radio" name="k8s-cluster-target" value="remote" checked={clusterTarget === 'remote'} onChange={() => onClusterTargetChange('remote')} className="accent-primary mt-0.5" />
           <span>
             <span className="font-medium text-gray-200">Remote / cloud cluster</span>
             <span className="block text-tiny text-gray-500 mt-0.5">View your telemetry in BMC Helix — the chart sends to Helix only (this app&apos;s viewer isn&apos;t reachable from there).</span>

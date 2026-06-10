@@ -6,6 +6,7 @@ type Props = {
   otelDashboardUrl: string | null;
   namespace: string;
   engine?: 'deployment' | 'operator';
+  clusterTarget?: 'local' | 'remote';
   onBack: () => void;
   onFinishStep: () => void;
 };
@@ -17,7 +18,7 @@ type Props = {
 // The chart is gateway-only: on local clusters the gateway loops telemetry back
 // to this app (host.docker.internal:8765), so the viewer "just works" with no
 // port-forward and no extra Service — mirror of the Docker experience.
-export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, engine = 'deployment', onBack, onFinishStep }) => {
+export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, engine = 'deployment', clusterTarget = 'local', onBack, onFinishStep }) => {
   // Pod label differs per engine: the Deployment chart labels its gateway pod
   // component=gateway; Operator-managed collector pods carry the Operator's
   // component=opentelemetry-collector.
@@ -25,6 +26,10 @@ export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, engine 
     ? 'app.kubernetes.io/component=opentelemetry-collector'
     : 'app.kubernetes.io/component=gateway';
   const walkthroughHref = engine === 'operator' ? '/k8s-operator-walkthrough.html' : '/k8s-walkthrough.html#verify';
+  const ns = namespace.trim() || 'default';
+  // The Operator names the Deployment <cr>-collector; the manual chart is just
+  // helix-gateway.
+  const gatewayDeploy = engine === 'operator' ? 'deploy/helix-gateway-collector' : 'deploy/helix-gateway';
   return (
     <div className="adapt-card">
       <div className="flex items-start justify-between gap-3 mb-2">
@@ -43,22 +48,29 @@ export const Step4K8s: React.FC<Props> = ({ otelDashboardUrl, namespace, engine 
       <div className="space-y-5">
         <div>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">1 · Gateway pods are up</p>
-          <SnippetBlock text={`kubectl get pods -l ${podLabel} -n ${namespace.trim() || 'default'}`} />
+          <SnippetBlock text={`kubectl get pods -l ${podLabel} -n ${ns}`} />
         </div>
-        <div>
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">2 · Watch it locally (local clusters)</p>
-          <p className="text-tiny text-gray-500 mb-2">
-            On a local cluster (Docker Desktop, kind, minikube on this machine) the gateway automatically sends a copy
-            of your telemetry back to this app — no port-forward, no extra Service. Just open the built-in viewer,
-            the same one the Docker setup uses:
-          </p>
-          <a href="/otel-data" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-link hover:underline text-sm font-semibold">
-            <ExternalLink className="w-4 h-4" /> Open View OTel Data
-          </a>
-          <p className="text-tiny text-gray-500 mt-2">
-            On a remote / cloud cluster the local viewer isn&apos;t reachable — verify in Helix below instead.
-          </p>
-        </div>
+        {clusterTarget === 'remote' ? (
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">2 · Telemetry is leaving the cluster</p>
+            <p className="text-tiny text-gray-500 mb-2">
+              Your chart sends telemetry to Helix only — the local viewer can&apos;t be reached from a remote cluster,
+              so the place to see your data is Helix (step 3). Gateway-side, the exporter logs confirm data is flowing out:
+            </p>
+            <SnippetBlock text={`kubectl logs ${gatewayDeploy} -n ${ns} --tail=20`} />
+          </div>
+        ) : (
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">2 · Watch it locally</p>
+            <p className="text-tiny text-gray-500 mb-2">
+              On a local cluster the gateway automatically sends a copy of your telemetry back to this app — no
+              port-forward, no extra Service. Just open the built-in viewer, the same one the Docker setup uses:
+            </p>
+            <a href="/otel-data" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-link hover:underline text-sm font-semibold">
+              <ExternalLink className="w-4 h-4" /> Open View OTel Data
+            </a>
+          </div>
+        )}
         <div>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">3 · See it in Helix</p>
           {otelDashboardUrl ? (

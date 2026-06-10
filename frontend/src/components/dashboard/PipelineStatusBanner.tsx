@@ -22,8 +22,19 @@ type DerivedStatus = {
   showSyntheticRun?: boolean;
 };
 
-const deriveStatus = (h: SystemHealth | null, k8sMode: boolean): DerivedStatus => {
+const deriveStatus = (h: SystemHealth | null, k8sMode: boolean, k8sRemote: boolean): DerivedStatus => {
   if (!h) return { status: 'degraded', headline: 'Checking pipeline…', detail: 'Loading health data.' };
+
+  // Remote cluster: telemetry goes to Helix only — this app's store never sees
+  // it, so neither "no traffic yet" nor local span counts say anything about
+  // the real pipeline. Point at Helix instead of guessing.
+  if (k8sMode && k8sRemote) {
+    return {
+      status: 'receiving',
+      headline: 'Remote cluster — verify in BMC Helix.',
+      detail: 'Your chart sends telemetry to Helix only; this app can’t observe a remote cluster. Use the Open in Helix links below — gateway-side, kubectl logs on the gateway deployment shows the exporter at work.',
+    };
+  }
 
   // Kubernetes/operator targets: the gateway runs in the user's cluster, not in
   // local Docker — gatewayStatus here describes a container that is intentionally
@@ -95,11 +106,11 @@ const STYLES: Record<PipelineStatus, { bg: string; icon: React.ReactNode }> = {
   },
 };
 
-type Props = { health: SystemHealth | null; k8sMode?: boolean };
+type Props = { health: SystemHealth | null; k8sMode?: boolean; k8sRemote?: boolean };
 
-export const PipelineStatusBanner: React.FC<Props> = ({ health, k8sMode = false }) => {
+export const PipelineStatusBanner: React.FC<Props> = ({ health, k8sMode = false, k8sRemote = false }) => {
   const loading = !health;
-  const { status, headline, detail, showSyntheticRun } = deriveStatus(health, k8sMode);
+  const { status, headline, detail, showSyntheticRun } = deriveStatus(health, k8sMode, k8sRemote);
   const style = STYLES[status];
   return (
     <div className={`rounded-lg border p-4 flex items-start gap-3 ${style.bg}`}>

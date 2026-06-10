@@ -31,6 +31,7 @@ import { Step4K8s } from './components/wizard/Step4K8s';
 import { Step2K8sOperator } from './components/wizard/Step2K8sOperator';
 import { Step3K8sOperator } from './components/wizard/Step3K8sOperator';
 import { TargetSelector } from './components/wizard/TargetSelector';
+import { type ClusterTarget, isClusterTarget } from './components/K8sChartPanel';
 import { getWizardSteps, isWizardTargetOrNull, isK8sTarget, type WizardTarget } from './components/wizard/wizardTargets';
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle, extractServiceKey } from './utils/helixKey';
@@ -154,6 +155,16 @@ const App = () => {
     'helix-configurator.k8sNamespace',
     'default',
     (v): v is string => typeof v === 'string',
+  );
+  // Local vs remote cluster. Owned here (not inside the Generate panel)
+  // because three surfaces branch on it: the chart generation (loopback
+  // exporter in or out), Step 4's verify guidance, and the dashboard's
+  // pipeline banner — a remote cluster never feeds the local viewer, so
+  // those must point at Helix instead.
+  const [k8sClusterTarget, setK8sClusterTarget] = useLocalStorageState<ClusterTarget>(
+    'helix-configurator.k8sClusterTarget',
+    'local',
+    isClusterTarget,
   );
   const [step3Tab, setStep3Tab] = useState<'detected' | 'manual'>('detected');
   const [k8sApplying, setK8sApplying] = useState<boolean>(false);
@@ -1330,9 +1341,9 @@ const App = () => {
 
               {setupStep === 2 && (
                 target === 'kubernetes-operator' ? (
-                  <Step2K8sOperator namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
+                  <Step2K8sOperator namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} clusterTarget={k8sClusterTarget} onClusterTargetChange={setK8sClusterTarget} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
                 ) : target === 'kubernetes' ? (
-                  <Step2K8s namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
+                  <Step2K8s namespace={k8sNamespace} onNamespaceChange={setK8sNamespace} clusterTarget={k8sClusterTarget} onClusterTargetChange={setK8sClusterTarget} onBack={() => setSetupStep(1)} onNext={() => setSetupStep(3)} />
                 ) : (
                   <Step2
                     smartAddProposal={smartAdd.proposal}
@@ -1379,6 +1390,7 @@ const App = () => {
                   otelDashboardUrl={externalApps.otelDashboardUrl}
                   namespace={k8sNamespace}
                   engine={target === 'kubernetes-operator' ? 'operator' : 'deployment'}
+                  clusterTarget={k8sClusterTarget}
                   onBack={() => setSetupStep(3)}
                   onFinishStep={() => setSetupStep(5)}
                 />
@@ -1429,7 +1441,11 @@ const App = () => {
               {/* Pipeline status banner — "is this thing working?" at the top.
                   K8s/operator targets judge by received telemetry, not by the
                   (intentionally unused) local Docker gateway. */}
-              <PipelineStatusBanner health={systemHealth} k8sMode={target !== null && isK8sTarget(target)} />
+              <PipelineStatusBanner
+                health={systemHealth}
+                k8sMode={target !== null && isK8sTarget(target)}
+                k8sRemote={target !== null && isK8sTarget(target) && k8sClusterTarget === 'remote'}
+              />
 
               {/* System Health: 3-cell summary with inline gateway controls */}
               <SystemHealthPanel

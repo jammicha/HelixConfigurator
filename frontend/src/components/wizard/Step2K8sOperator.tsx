@@ -1,13 +1,17 @@
 import React from 'react';
 import { Boxes } from 'lucide-react';
 import { SnippetBlock } from '../SnippetBlock';
-import { K8sChartPanel } from '../K8sChartPanel';
+import { K8sChartPanel, type ClusterTarget } from '../K8sChartPanel';
 
-type Props = { namespace: string; onNamespaceChange: (ns: string) => void; onBack: () => void; onNext: () => void };
+type Props = {
+  namespace: string; onNamespaceChange: (ns: string) => void;
+  clusterTarget: ClusterTarget; onClusterTargetChange: (t: ClusterTarget) => void;
+  onBack: () => void; onNext: () => void;
+};
 
 // Kubernetes (Operator) Step 2 — install the OTel Operator prerequisites, then
 // generate the CR chart. Reuses K8sChartPanel in operator mode.
-export const Step2K8sOperator: React.FC<Props> = ({ namespace, onNamespaceChange, onBack, onNext }) => (
+export const Step2K8sOperator: React.FC<Props> = ({ namespace, onNamespaceChange, clusterTarget, onClusterTargetChange, onBack, onNext }) => (
   <div className="adapt-card">
     <div className="flex items-start justify-between gap-3 mb-2">
       <h2 className="text-lg font-semibold text-gray-200">Step 2: Install prerequisites &amp; generate</h2>
@@ -36,7 +40,7 @@ kubectl rollout status -n opentelemetry-operator-system deploy/opentelemetry-ope
     </div>
 
     <p className="text-sm text-gray-400 mb-4">Then generate the chart, pre-wired to Helix, and <code className="font-mono text-gray-100 bg-gray-900 px-1 rounded">helm install</code> it:</p>
-    <K8sChartPanel namespace={namespace} onNamespaceChange={onNamespaceChange} engine="operator" />
+    <K8sChartPanel namespace={namespace} onNamespaceChange={onNamespaceChange} clusterTarget={clusterTarget} onClusterTargetChange={onClusterTargetChange} engine="operator" />
 
     <div className="flex gap-4 mt-6">
       <button onClick={onBack} className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-6 py-3 rounded font-semibold transition-colors text-sm">Back</button>
