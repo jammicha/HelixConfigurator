@@ -84,3 +84,20 @@ describe('routes', () => {
     expect(apply.status).toBe(409);
   });
 });
+
+describe('resolveGatewayOtlpBase / resolveGatewayMetricsBase', () => {
+  it('uses published host ports for native installs', async () => {
+    const { resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util.js');
+    expect(resolveGatewayOtlpBase({ containerized: false })).toBe('http://localhost:4318');
+    expect(resolveGatewayMetricsBase({ containerized: false })).toBe('http://localhost:8888');
+  });
+  it('uses container DNS inside the Docker image', () => {
+    const { resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util.js');
+    expect(resolveGatewayOtlpBase({ containerized: true, targetName: 'helix-gateway' })).toBe('http://helix-gateway:4318');
+    expect(resolveGatewayMetricsBase({ containerized: true, targetName: 'custom-gw' })).toBe('http://custom-gw:8888');
+  });
+  it('honors explicit overrides and strips trailing slashes', () => {
+    const { resolveGatewayOtlpBase } = require('../util.js');
+    expect(resolveGatewayOtlpBase({ override: 'http://10.0.0.5:4318///' })).toBe('http://10.0.0.5:4318');
+  });
+});

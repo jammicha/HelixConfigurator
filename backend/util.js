@@ -2,6 +2,33 @@
 // possible; the docker-dependent containerLogs is exposed as a factory so
 // callers can bind it to their own Docker client.
 
+// OTLP/HTTP base URL for reaching helix-gateway FROM THIS PROCESS. In the
+// Docker image the configurator shares the helix-bridge network, so the
+// container name resolves; natively (the PRIMARY path since native
+// packaging) the configurator is a host process where that DNS name does
+// not exist — it must use the gateway's published host ports instead.
+// Found live in the 2026-06-10 dry-run: every gateway-bound probe/send used
+// the container name, so native installs silently fell back to local sinks
+// ("destination: local") and reported the receiver unreachable.
+const resolveGatewayBase = (port, override, opts = {}) => {
+  const {
+    containerized = require('fs').existsSync('/app'),
+    targetName = process.env.TARGET_CONTAINER_NAME || 'helix-gateway',
+  } = opts;
+  if (override) return override.replace(/\/+$/, '');
+  return containerized ? `http://${targetName}:${port}` : `http://localhost:${port}`;
+};
+
+// OTLP receiver (gateway :4318, published to the host natively).
+const resolveGatewayOtlpBase = (opts = {}) =>
+  resolveGatewayBase(4318, opts.override ?? process.env.GATEWAY_OTLP_URL, opts);
+
+// Prometheus metrics (gateway :8888, published to the host natively). The
+// same container-DNS assumption blanked the diagnostic counters/sparklines
+// and raw-metrics modal on native installs.
+const resolveGatewayMetricsBase = (opts = {}) =>
+  resolveGatewayBase(8888, opts.override ?? process.env.GATEWAY_METRICS_URL, opts);
+
 // Demultiplex docker logs() output when the container isn't TTY-attached.
 // Each multiplexed frame is: [streamType:1][padding:3][length:4_BE][payload].
 const demuxLogBuffer = (buf) => {
@@ -171,6 +198,8 @@ module.exports = {
   demuxLogBuffer,
   makeContainerLogs,
   isValidContainerName,
+  resolveGatewayOtlpBase,
+  resolveGatewayMetricsBase,
   DockerTimeoutError,
   withDockerTimeout,
   sendDockerTimeoutResponse,

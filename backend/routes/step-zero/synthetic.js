@@ -5,10 +5,10 @@ const crypto = require('crypto');
 const axios = require('axios');
 const { buildHelixServiceMapLink } = require('./helix-link');
 const { generateTrace } = require('./synthetic-scenario');
+const { resolveGatewayOtlpBase } = require('../../util');
 
 const DEFAULT_DURATION_S = 60;
 const DEFAULT_TRACES_PER_S = 8;
-const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 // Resolve the same way index.js binds the server (default 8765), so the
 // Layer-2 "local" destination posts to where the configurator actually listens
 // on the native path. (Was hard-defaulted to 3001 — the container-only port.)
@@ -54,7 +54,10 @@ const snapshot = () => {
 
 const defaultProbeGateway = async () => {
   try {
-    await axios.get(`http://${TARGET_CONTAINER()}:4318/`, {
+    // resolveGatewayOtlpBase: container DNS in the Docker image, published
+    // host ports natively — the old hardcoded container name made this probe
+    // always fail on native installs, silently demoting runs to the local sink.
+    await axios.get(`${resolveGatewayOtlpBase()}/`, {
       timeout: 1000, validateStatus: () => true,
     });
     return true;
@@ -80,13 +83,14 @@ const defaultReadEnv = () => {
 // viewer's /api/otlp/metrics feeds the trace drawer's Resources panel.
 const defaultSend = async ({ destination, payload }) => {
   const isGateway = destination === 'gateway';
+  const gatewayBase = resolveGatewayOtlpBase();
   const tracesUrl = isGateway
-    ? `http://${TARGET_CONTAINER()}:4318/v1/traces`
+    ? `${gatewayBase}/v1/traces`
     : `${SELF_BASE()}/api/otlp/traces`;
   const logsUrl = isGateway
-    ? `http://${TARGET_CONTAINER()}:4318/v1/logs`
+    ? `${gatewayBase}/v1/logs`
     : `${SELF_BASE()}/api/otlp/logs`;
-  const metricsUrl = isGateway ? `http://${TARGET_CONTAINER()}:4318/v1/metrics` : `${SELF_BASE()}/api/otlp/metrics`;
+  const metricsUrl = isGateway ? `${gatewayBase}/v1/metrics` : `${SELF_BASE()}/api/otlp/metrics`;
 
   const headers = { 'Content-Type': 'application/json' };
   // Best-effort: each signal posts independently. A trace landing without

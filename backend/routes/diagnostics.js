@@ -13,7 +13,7 @@ const yaml = require('js-yaml');
 const axios = require('axios');
 const crypto = require('crypto');
 const { PassThrough } = require('stream');
-const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse } = require('../util');
+const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse, resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util');
 const errorLog = require('../errorLog');
 const { analyzeCollectorErrorLog } = require('../exportErrorScan');
 
@@ -67,7 +67,7 @@ const healedMetricsTelemetry = () => ({
 // { received, sent, failed }. Counters are cumulative since collector start;
 // callers that need rates must compute deltas.
 const fetchCounters = async (targetContainer) => {
-  const url = `http://${targetContainer}:8888/metrics`;
+  const url = `${resolveGatewayMetricsBase()}/metrics`;
   const response = await axios.get(url, { timeout: 2000 });
   const metrics = response.data;
 
@@ -109,7 +109,7 @@ const checkExporterFailing = async (targetContainer) => {
 // metric isn't exposed (older otelcol versions or scrape failed).
 const fetchHelixQueueSize = async (targetContainer) => {
   try {
-    const url = `http://${targetContainer}:8888/metrics`;
+    const url = `${resolveGatewayMetricsBase()}/metrics`;
     const response = await axios.get(url, { timeout: 2000 });
     for (const line of response.data.split('\n')) {
       if (!line.startsWith('otelcol_exporter_queue_size')) continue;
@@ -455,7 +455,9 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
       const deadline = Date.now() + 3500;
       for (;;) {
         try {
-          await axios.get(`http://${targetContainer}:4318/`, { timeout: 2000, validateStatus: () => true });
+          // Container DNS in the Docker image, published host ports natively —
+          // the hardcoded container name read "unreachable" on every native install.
+          await axios.get(`${resolveGatewayOtlpBase()}/`, { timeout: 2000, validateStatus: () => true });
           return 'ok';
         } catch (err) {
           const transient = err.code === 'ECONNREFUSED' || err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
@@ -638,8 +640,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
       }]
     };
 
-    const targetContainer = TARGET_CONTAINER();
-    const url = `http://${targetContainer}:4318/v1/traces`;
+    const url = `${resolveGatewayOtlpBase()}/v1/traces`;
 
     let attempts = 0;
     const maxAttempts = 10;
@@ -678,7 +679,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   // broken out by signal type so we can label "spans / metrics / logs".
   app.get('/api/diagnostics/receiver-counters', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
-    const url = `http://${targetContainer}:8888/metrics`;
+    const url = `${resolveGatewayMetricsBase()}/metrics`;
     try {
       const response = await axios.get(url, { timeout: 2000 });
       const sumOf = (baseName) => sumPromCounter(response.data, baseName);
@@ -842,7 +843,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   // GET raw Prometheus metrics output from the gateway (debug aid).
   app.get('/api/diagnostics/metrics/raw', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
-    const url = `http://${targetContainer}:8888/metrics`;
+    const url = `${resolveGatewayMetricsBase()}/metrics`;
     try {
       const response = await axios.get(url, { timeout: 2000 });
       res.type('text/plain').send(response.data);
@@ -911,7 +912,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     try {
       const targetContainer = TARGET_CONTAINER();
       // Query collector's own metrics if available.
-      const response = await axios.get(`http://${targetContainer}:8888/metrics`);
+      const response = await axios.get(`${resolveGatewayMetricsBase()}/metrics`);
       // Simple check if metrics are being exposed.
       if (response.data.includes('otelcol_exporter_sent_spans')) {
         res.json({ status: 'Healthy', details: 'Collector is emitting spans' });
