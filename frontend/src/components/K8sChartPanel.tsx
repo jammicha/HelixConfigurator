@@ -2,6 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { SnippetBlock } from './SnippetBlock';
 import { namespacedCommands } from './wizard/wizardTargets';
+import { useLocalStorageState } from '../hooks/useLocalStorageState';
+
+type ClusterTarget = 'local' | 'remote';
+const isClusterTarget = (v: unknown): v is ClusterTarget => v === 'local' || v === 'remote';
 
 type Preview = {
   values: string;
@@ -26,6 +30,13 @@ const NS_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 
 export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, engine = 'deployment' }) => {
   const isOperator = engine === 'operator';
+  // Local vs remote cluster decides whether the generated gateway config keeps
+  // the loopback exporter (host.docker.internal:8765 → this app's viewer) or
+  // strips it — remote clusters can't reach it and would just log retry noise.
+  // Persisted: the wizard spans several steps/refreshes, like the namespace.
+  const [clusterTarget, setClusterTarget] = useLocalStorageState<ClusterTarget>(
+    'helix-configurator.k8sClusterTarget', 'local', isClusterTarget,
+  );
   const [handoff, setHandoff] = useState(false);
   const [langs, setLangs] = useState({ java: true, nodejs: true, python: true, dotnet: true });
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -43,7 +54,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, e
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const q = new URLSearchParams({ engine, handoff: String(handoff) });
+    const q = new URLSearchParams({ engine, handoff: String(handoff), target: clusterTarget });
     if (isOperator) q.set('langs', enabledLangs);
     fetch(`/api/k8s/chart/preview?${q.toString()}`)
       .then(async r => {
@@ -54,7 +65,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, e
       .catch(e => { if (!cancelled) setError(String(e.message || e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [engine, isOperator, handoff, enabledLangs]);
+  }, [engine, isOperator, handoff, enabledLangs, clusterTarget]);
 
   const cmds = namespacedCommands(namespace, preview ?? { secretCommand: '', installCommand: '' });
 
@@ -85,9 +96,23 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, e
           <p className="text-tiny text-gray-500 mt-2">These set the default <code className="font-mono">instrumentation.languages.*</code> in <code className="font-mono">values.yaml</code>; you can also toggle them with <code className="font-mono">--set</code> at install. Annotate pods in Step 3.</p>
         </div>
       )}
-      <p className="text-tiny text-gray-500">
-        The chart deploys the gateway only — on a <span className="text-gray-300">local cluster</span> (Docker Desktop) it automatically sends a copy of your telemetry back to this app, so <code className="font-mono">localhost:8765/otel-data</code> keeps working exactly like the Docker setup. On a remote cluster, view your telemetry in BMC Helix.
-      </p>
+      <fieldset className="space-y-2">
+        <legend className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Where does the cluster run?</legend>
+        <label className="flex items-start gap-3 text-sm text-gray-300 cursor-pointer">
+          <input type="radio" name="k8s-cluster-target" value="local" checked={clusterTarget === 'local'} onChange={() => setClusterTarget('local')} className="accent-primary mt-0.5" />
+          <span>
+            <span className="font-medium text-gray-200">Local cluster (Docker Desktop, kind, minikube on this machine)</span>
+            <span className="block text-tiny text-gray-500 mt-0.5">Telemetry flows back to this app at <code className="font-mono">localhost:8765/otel-data</code> — same view as Docker.</span>
+          </span>
+        </label>
+        <label className="flex items-start gap-3 text-sm text-gray-300 cursor-pointer">
+          <input type="radio" name="k8s-cluster-target" value="remote" checked={clusterTarget === 'remote'} onChange={() => setClusterTarget('remote')} className="accent-primary mt-0.5" />
+          <span>
+            <span className="font-medium text-gray-200">Remote / cloud cluster</span>
+            <span className="block text-tiny text-gray-500 mt-0.5">View your telemetry in BMC Helix — the chart sends to Helix only (this app&apos;s viewer isn&apos;t reachable from there).</span>
+          </span>
+        </label>
+      </fieldset>
       <label className="flex items-center gap-3 text-sm text-gray-300">
         <input type="checkbox" checked={handoff} onChange={e => setHandoff(e.target.checked)} className="accent-primary w-4 h-4" />
         Generating this for someone else (omit my key)
@@ -109,7 +134,7 @@ export const K8sChartPanel: React.FC<Props> = ({ namespace, onNamespaceChange, e
           <div>
             <p className="text-tiny uppercase tracking-wide text-gray-500 mb-1">1 · Download &amp; unzip</p>
             <a
-              href={`/api/k8s/chart?engine=${engine}${isOperator ? `&langs=${encodeURIComponent(enabledLangs)}` : ''}`}
+              href={`/api/k8s/chart?engine=${engine}&target=${clusterTarget}${isOperator ? `&langs=${encodeURIComponent(enabledLangs)}` : ''}`}
               className="bg-primary hover:bg-[#3006c2] text-white px-4 py-1.5 rounded text-tiny font-semibold transition-colors inline-flex items-center gap-2"
             >
               <Download className="w-4 h-4" /> Download chart (.zip)
