@@ -21,7 +21,7 @@ jobs:
       # Gate the image on the same checks the repo treats as its safety net
       # (backend unit tests, frontend typecheck + tests). Before this, a push
       # to main shipped straight to ghcr.io/…:latest with zero verification.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: '22' }
 
       - name: Backend tests
