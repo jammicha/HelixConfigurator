@@ -302,7 +302,7 @@ In the native path the configurator is a **host process** (port `PORT`, default 
 
 Application containers can be attached to the same `helix-bridge` network at runtime via the *Discovered Services* panel — once attached, point your app's OTel exporter at `helix-gateway:4317` or `:4318`.
 
-The gateway fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is SQLite at `./data/otel-store.db` (time-based retention with a 100,000-trace safety cap) and persists across restarts.
+The gateway fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is SQLite at `./data/otel-store.db` (time-based retention, 24h default, with a 25,000-trace safety cap — tune via `TRACE_RETENTION_HOURS` / `TRACE_CAP`) and persists across restarts.
 
 The configurator exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes and an `GET /api/version` endpoint that compares the embedded version to the latest GitHub release — the UI shows an "update available" banner when they differ.
 
