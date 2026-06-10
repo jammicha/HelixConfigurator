@@ -1,6 +1,6 @@
 {
   "name": "helix-configurator-backend",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Backend for Helix Configurator POC",
   "main": "index.js",
   "scripts": {
