@@ -28,7 +28,12 @@ jobs:
         with: { node-version: '22' }
 
       - name: Build frontend (typecheck + tests gate the build)
-        run: cd frontend && npm ci && npx tsc --noEmit && npm test && npm run build
+        # TZ via step env + vitest invoked directly: the npm script's POSIX
+        # `TZ=… vitest run` prefix is unparseable by cmd.exe on the Windows
+        # runner ('TZ' is not recognized…) — env: is cross-platform and set
+        # before node starts, which Windows honors.
+        env: { TZ: America/Chicago }
+        run: cd frontend && npm ci && npx tsc --noEmit && npx vitest run && npm run build
 
       - name: Backend tests, then prune to prod deps (native addons)
         # Full install to run the test suite, then prune devDeps so the staged
