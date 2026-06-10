@@ -87,6 +87,9 @@ require('./routes/k8s').register(app, {
   configPath: CONFIG_PATH,
   projectRoot: path.resolve(__dirname, '..'),
 });
+// One-click self-update (native macOS/Linux installs; others report
+// supported:false and the banner shows instructions instead of a button).
+require('./routes/update').register(app, { currentVersion: VERSION });
 
 const diagnostics = require('./routes/diagnostics');
 diagnostics.register(app, { docker, containerLogs, configPath: CONFIG_PATH, otelStore });

@@ -1,0 +1,86 @@
+// backend/__tests__/update-route.test.mjs
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import express from 'express';
+import request from 'supertest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { register, detectCapability, PLATFORM_ASSETS, PRESERVED_ENTRIES } = require('../routes/update.js');
+
+let nativeRoot; // temp dir shaped like a native install (has a bundled ./node)
+let devRoot;    // temp dir shaped like a dev checkout (no bundled runtime)
+
+beforeAll(() => {
+  nativeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'upd-native-'));
+  fs.writeFileSync(path.join(nativeRoot, 'node'), '#!/bin/sh\n');
+  devRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'upd-dev-'));
+});
+afterAll(() => {
+  fs.rmSync(nativeRoot, { recursive: true, force: true });
+  fs.rmSync(devRoot, { recursive: true, force: true });
+});
+
+describe('detectCapability', () => {
+  it('reports docker mode (with compose hint) inside the container', () => {
+    const c = detectCapability({ platform: 'linux', arch: 'x64', installRoot: nativeRoot, appDirExists: true });
+    expect(c.supported).toBe(false);
+    expect(c.mode).toBe('docker');
+    expect(c.hint).toMatch(/docker compose/);
+  });
+
+  it('supports native darwin-arm64 with the matching release asset', () => {
+    const c = detectCapability({ platform: 'darwin', arch: 'arm64', installRoot: nativeRoot, appDirExists: false });
+    expect(c).toEqual({ supported: true, mode: 'native', asset: 'helix-configurator-darwin-arm64.zip' });
+  });
+
+  it('supports native linux-x64 with the matching release asset', () => {
+    const c = detectCapability({ platform: 'linux', arch: 'x64', installRoot: nativeRoot, appDirExists: false });
+    expect(c).toEqual({ supported: true, mode: 'native', asset: 'helix-configurator-linux-amd64.zip' });
+  });
+
+  it('declines Windows (file locking) but still knows its asset exists', () => {
+    const c = detectCapability({ platform: 'win32', arch: 'x64', installRoot: nativeRoot, appDirExists: false });
+    expect(c.supported).toBe(false);
+    expect(c.mode).toBe('windows');
+    expect(PLATFORM_ASSETS['win32-x64']).toBe('helix-configurator-windows-amd64.zip');
+  });
+
+  it('declines unknown platforms', () => {
+    const c = detectCapability({ platform: 'freebsd', arch: 'x64', installRoot: nativeRoot, appDirExists: false });
+    expect(c.supported).toBe(false);
+    expect(c.mode).toBe('unsupported-platform');
+  });
+
+  it('declines a dev checkout (no bundled runtime at the install root)', () => {
+    const c = detectCapability({ platform: 'darwin', arch: 'arm64', installRoot: devRoot, appDirExists: false });
+    expect(c.supported).toBe(false);
+    expect(c.mode).toBe('dev-checkout');
+  });
+});
+
+describe('preserved user state', () => {
+  it('never swaps .env, data/, the collector yaml, or the update workspace', () => {
+    for (const must of ['.env', 'data', 'helix-otel-collector.yaml', '.update']) {
+      expect(PRESERVED_ENTRIES).toContain(must);
+    }
+  });
+});
+
+describe('routes', () => {
+  it('status starts idle; start refuses where self-update is unsupported', async () => {
+    const app = express();
+    register(app, { currentVersion: '1.0.0', installRoot: devRoot }); // dev checkout → unsupported
+    const status = await request(app).get('/api/update/status');
+    expect(status.body.phase).toBe('idle');
+    const start = await request(app).post('/api/update/start');
+    // In a real container this is mode:docker; in this test it's dev-checkout —
+    // either way the route must refuse rather than half-update.
+    expect(start.status).toBe(400);
+    expect(start.body.supported).toBe(false);
+    const apply = await request(app).post('/api/update/apply');
+    expect(apply.status).toBe(409);
+  });
+});
