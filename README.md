@@ -78,6 +78,13 @@ UI_AUTH_PASSWORD=
 # Internal: container the configurator manages. Leave as default unless renaming.
 TARGET_CONTAINER_NAME=helix-gateway
 
+# Internal: where the configurator itself reaches the gateway's OTLP receiver
+# and Prometheus metrics. Auto-detected (container DNS inside Docker,
+# localhost:4318/8888 natively) — only set these if you remapped the
+# gateway's published host ports.
+# GATEWAY_OTLP_URL=http://localhost:4318
+# GATEWAY_METRICS_URL=http://localhost:8888
+
 # Internal: update-check repo (matches GitHub Releases). Leave as default.
 # RELEASES_REPO=jammicha/HelixConfigurator
 ```

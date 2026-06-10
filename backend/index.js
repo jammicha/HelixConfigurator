@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const Docker = require('dockerode');
 const { OtelStore } = require('./otelStore');
-const { makeContainerLogs } = require('./util');
+const { makeContainerLogs, IS_CONTAINERIZED } = require('./util');
 require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
 const VERSION = require('./package.json').version;
@@ -64,7 +64,7 @@ require('./routes/version').register(app, { current: VERSION });
 // SQLite lives in a mounted volume so traces survive container restarts.
 // Outside Docker we fall back to backend/data so dev is self-contained.
 const { resolveDataDir } = require('./statePaths');
-const DATA_DIR = resolveDataDir({ appDirExists: fs.existsSync('/app'), backendDir: __dirname });
+const DATA_DIR = resolveDataDir({ appDirExists: IS_CONTAINERIZED, backendDir: __dirname });
 const OTEL_DB_PATH = process.env.OTEL_DB_PATH || path.join(DATA_DIR, 'otel-store.db');
 const otelStore = new OtelStore({ dbPath: OTEL_DB_PATH });
 console.log(`OTel trace store: ${OTEL_DB_PATH}`);

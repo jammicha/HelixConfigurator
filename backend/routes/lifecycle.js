@@ -8,7 +8,7 @@
 const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
-const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers } = require('../util');
+const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers, IS_CONTAINERIZED } = require('../util');
 const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
 
@@ -76,7 +76,7 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
 // container restarts. Single-writer assumption: only this process mutates it.
 const { resolveDataDir } = require('../statePaths');
 const BRIDGED_NETWORKS_PATH = path.join(
-  resolveDataDir({ appDirExists: fs.existsSync('/app'), backendDir: path.join(__dirname, '..') }),
+  resolveDataDir({ appDirExists: IS_CONTAINERIZED, backendDir: path.join(__dirname, '..') }),
   'bridged-networks.json',
 );
 

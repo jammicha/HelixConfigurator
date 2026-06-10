@@ -17,6 +17,9 @@ const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeo
 const errorLog = require('../errorLog');
 const { analyzeCollectorErrorLog } = require('../exportErrorScan');
 
+// Docker-API name (logs / inspect / restart) only. HTTP requests from this
+// process must go through resolveGateway*Base — container DNS doesn't exist
+// on native installs.
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 
 // Synthetic diagnostic traces (inject-trace) carry an explicit OTel namespace
@@ -66,7 +69,7 @@ const healedMetricsTelemetry = () => ({
 // Shared helper: parse the gateway's Prometheus metrics endpoint into
 // { received, sent, failed }. Counters are cumulative since collector start;
 // callers that need rates must compute deltas.
-const fetchCounters = async (targetContainer) => {
+const fetchCounters = async () => {
   const url = `${resolveGatewayMetricsBase()}/metrics`;
   const response = await axios.get(url, { timeout: 2000 });
   const metrics = response.data;
@@ -97,29 +100,9 @@ const fetchCounters = async (targetContainer) => {
 // signal that auth/network is broken rather than intermittent flakiness.
 // Used by the apikey check to escalate even when log scraping misses the
 // failure window.
-const checkExporterFailing = async (targetContainer) => {
-  const c = await fetchCounters(targetContainer);
+const checkExporterFailing = async () => {
+  const c = await fetchCounters();
   return { failing: c.failed > 0 && c.sent === 0, ...c };
-};
-
-// Read the otlphttp/bmchelix exporter's sending-queue size from the gateway's
-// Prometheus metrics. A non-zero value during the verify wait means Helix is
-// accepting connections but the gateway hasn't drained the queue yet — usually
-// "Helix is slow" rather than "your config is broken." Returns null when the
-// metric isn't exposed (older otelcol versions or scrape failed).
-const fetchHelixQueueSize = async (targetContainer) => {
-  try {
-    const url = `${resolveGatewayMetricsBase()}/metrics`;
-    const response = await axios.get(url, { timeout: 2000 });
-    for (const line of response.data.split('\n')) {
-      if (!line.startsWith('otelcol_exporter_queue_size')) continue;
-      if (!line.includes('exporter="otlphttp/bmchelix"')) continue;
-      const parts = line.trim().split(/\s+/);
-      const val = parseFloat(parts[parts.length - 1]);
-      if (!isNaN(val)) return val;
-    }
-  } catch { /* metrics scrape failed — treat as unknown */ }
-  return null;
 };
 
 // Read counters from the *customer's* collector — same metrics shape as the
@@ -664,9 +647,8 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
 
   // GET live metrics parsing.
   app.get('/api/diagnostics/metrics/live', async (req, res) => {
-    const targetContainer = TARGET_CONTAINER();
     try {
-      const result = await fetchCounters(targetContainer);
+      const result = await fetchCounters();
       res.json(result);
     } catch (e) {
       console.error(`Failed to fetch metrics:`, e.message);
@@ -678,7 +660,6 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   // to show whether the user's app is actually sending data into our gateway,
   // broken out by signal type so we can label "spans / metrics / logs".
   app.get('/api/diagnostics/receiver-counters', async (req, res) => {
-    const targetContainer = TARGET_CONTAINER();
     const url = `${resolveGatewayMetricsBase()}/metrics`;
     try {
       const response = await axios.get(url, { timeout: 2000 });
@@ -842,7 +823,6 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
 
   // GET raw Prometheus metrics output from the gateway (debug aid).
   app.get('/api/diagnostics/metrics/raw', async (req, res) => {
-    const targetContainer = TARGET_CONTAINER();
     const url = `${resolveGatewayMetricsBase()}/metrics`;
     try {
       const response = await axios.get(url, { timeout: 2000 });
@@ -910,7 +890,6 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   // GET telemetry diagnostics.
   app.get('/api/diagnostics/telemetry', async (req, res) => {
     try {
-      const targetContainer = TARGET_CONTAINER();
       // Query collector's own metrics if available.
       const response = await axios.get(`${resolveGatewayMetricsBase()}/metrics`);
       // Simple check if metrics are being exposed.
@@ -1026,7 +1005,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
       // matching log line in the 15s window, the apikey check would otherwise
       // pass silently while telemetry is being dropped.
       try {
-        const failedSignal = await checkExporterFailing(targetContainer);
+        const failedSignal = await checkExporterFailing();
         if (failedSignal.failing) {
           return res.json({
             status: 'FAIL',

@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { register, detectCapability, PLATFORM_ASSETS, PRESERVED_ENTRIES } = require('../routes/update.js');
+const { resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util.js');
 
 let nativeRoot; // temp dir shaped like a native install (has a bundled ./node)
 let devRoot;    // temp dir shaped like a dev checkout (no bundled runtime)
@@ -86,18 +87,15 @@ describe('routes', () => {
 });
 
 describe('resolveGatewayOtlpBase / resolveGatewayMetricsBase', () => {
-  it('uses published host ports for native installs', async () => {
-    const { resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util.js');
+  it('uses published host ports for native installs', () => {
     expect(resolveGatewayOtlpBase({ containerized: false })).toBe('http://localhost:4318');
     expect(resolveGatewayMetricsBase({ containerized: false })).toBe('http://localhost:8888');
   });
   it('uses container DNS inside the Docker image', () => {
-    const { resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util.js');
     expect(resolveGatewayOtlpBase({ containerized: true, targetName: 'helix-gateway' })).toBe('http://helix-gateway:4318');
     expect(resolveGatewayMetricsBase({ containerized: true, targetName: 'custom-gw' })).toBe('http://custom-gw:8888');
   });
   it('honors explicit overrides and strips trailing slashes', () => {
-    const { resolveGatewayOtlpBase } = require('../util.js');
     expect(resolveGatewayOtlpBase({ override: 'http://10.0.0.5:4318///' })).toBe('http://10.0.0.5:4318');
   });
 });

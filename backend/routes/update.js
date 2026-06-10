@@ -19,6 +19,7 @@ const fsp = require('fs').promises;
 const path = require('path');
 const { spawn } = require('child_process');
 const AdmZip = require('adm-zip');
+const { IS_CONTAINERIZED } = require('../util');
 
 const REPO = process.env.RELEASES_REPO || 'jammicha/HelixConfigurator';
 
@@ -39,7 +40,7 @@ function detectCapability({
   platform = process.platform,
   arch = process.arch,
   installRoot,
-  appDirExists = fs.existsSync('/app'),
+  appDirExists = IS_CONTAINERIZED,
 } = {}) {
   if (appDirExists) {
     return {
