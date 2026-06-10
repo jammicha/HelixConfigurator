@@ -174,9 +174,12 @@ describe('generateTrace', () => {
         expect(attr.value.intValue).toBe(10);
       }
     }
-    // 4% over 2000 ~ 80. Generous bounds.
-    expect(withWait).toBeGreaterThan(55);
-    expect(withWait).toBeLessThan(130);
+    // 4% over 2000 → mean 80, binomial σ ≈ 8.8. The old floor of 55 was only
+    // ~2.9σ — a ~0.2%-per-run flake that fired once CI started running this
+    // suite 3× per release (failed the v1.2.4 image publish on a draw of 53).
+    // ±4σ bounds: ~1-in-30k per run.
+    expect(withWait).toBeGreaterThan(44);
+    expect(withWait).toBeLessThan(116);
   });
 
   it('notification email-render slow fires on ~1.4% of traces (sample of 2000)', () => {
@@ -186,9 +189,11 @@ describe('generateTrace', () => {
       const notifySpans = spansForService(t, 'notification-svc');
       if (notifySpans.some(s => durationMs(s) > 60)) slow++;
     }
-    // 2% * 70% (notification present) over 2000 ~ 28. Generous bounds.
-    expect(slow).toBeGreaterThan(15);
-    expect(slow).toBeLessThan(60);
+    // 2% * 70% (notification present) over 2000 → mean 28, binomial σ ≈ 5.3.
+    // The old floor of 15 was only ~2.5σ (~0.6%-per-run flake — worse than the
+    // pool-wait bound that actually fired in CI). ±4σ: ~1-in-30k per run.
+    expect(slow).toBeGreaterThan(6);
+    expect(slow).toBeLessThan(50);
   });
 
   it('retry storm fires on ~2% of traces with 3 sequential stripe-mock spans (sample of 5000)', () => {
