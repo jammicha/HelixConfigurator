@@ -14,9 +14,22 @@ const Database = require('better-sqlite3');
 // Hard ceiling on retained traces — a storage safety net behind the time-based
 // retention window below. Time eviction is the primary control; this only bites
 // if a traffic spike packs more than this many traces into the retention
-// horizon, in which case we keep the most-recent maxTraces. Overridable per
-// store via the constructor's maxTraces.
-const TRACE_CAP = 100_000;
+// horizon, in which case we keep the most-recent maxTraces.
+//
+// Sized from measured data (2026-06-09): a full demo day produced ~4k traces at
+// ~17KB/trace on disk, so 25k is >6 demo-days of burst headroom inside one 24h
+// window while bounding worst-case disk to a few hundred MB (the previous 100k
+// allowed a ~1.7GB ceiling — too much for a local sidecar viewer). Override
+// with the TRACE_CAP env var, or per store via the constructor's maxTraces.
+const TRACE_CAP = (() => {
+  const n = Number(process.env.TRACE_CAP);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 25_000;
+})();
+// Max traces evicted per _evictIfNeeded call. Eviction runs inside the ingest
+// transaction; a bounded batch keeps a large age-out (idle gap, cap reduction)
+// from stalling a single ingest — the startup sweep and subsequent batches
+// converge on the target instead.
+const EVICT_BATCH = 500;
 // Time-based retention horizon: traces (and their spans/logs/errors) older than
 // this are evicted, so the window holds "the last N hours" rather than "the
 // last N traces". Default 24h; override with the TRACE_RETENTION_HOURS env var,
@@ -343,11 +356,12 @@ class OtelStore {
     }
     // Wall-clock of the last ingest, for the maintenance quiet-time gate.
     this._lastIngestAt = 0;
-    // One-shot startup eviction — covers the case where an existing DB has
-    // accumulated way past the new cap (we discovered 1M+ logs in an
-    // unevicted store). Without this, a fresh code drop would have to wait
-    // for the next ingest to trim.
-    try { this._evictIfNeeded(); }
+    // Startup eviction sweep — covers the case where an existing DB has
+    // accumulated way past the cap (we discovered 1M+ logs in an unevicted
+    // store), or everything aged out while the process was down (eviction is
+    // otherwise ingest-driven). Loops the batched evictor to convergence here,
+    // where no ingest can be blocked.
+    try { while (this._evictIfNeeded() >= EVICT_BATCH) { /* keep sweeping */ } }
     catch (e) { console.warn('[otelStore] startup trace eviction failed:', e.message); }
     try { this._evictLogsIfNeeded(); }
     catch (e) { console.warn('[otelStore] startup log eviction failed:', e.message); }
@@ -444,12 +458,35 @@ class OtelStore {
     // self-heal, whose stats would otherwise steer the planner into full scans.
     try { this.db.pragma('optimize'); }
     catch (e) { console.warn('[otelStore] PRAGMA optimize failed:', e.message); }
+    // Sweep interned resources whose spans have all evicted — tiny rows, but
+    // pointless to keep. Same ingest-quiet window; cache must be dropped so a
+    // swept id isn't handed to a future span (dangling reference).
+    try {
+      const swept = this.db.prepare(
+        `DELETE FROM resources WHERE id NOT IN
+           (SELECT DISTINCT resource_id FROM spans WHERE resource_id IS NOT NULL)`,
+      ).run();
+      if (swept.changes > 0) this._resourceIdCache.clear();
+    } catch (e) { console.warn('[otelStore] resource sweep failed:', e.message); }
     try {
       if (!this.db.pragma('freelist_count', { simple: true })) return;
       this.db.pragma(`incremental_vacuum(${INC_VACUUM_PAGES})`);
     } catch (e) {
       console.warn('[otelStore] incremental_vacuum failed:', e.message);
     }
+  }
+
+  // Return the resources.id for this exact JSON text, inserting on first
+  // sight. Memoized — distinct resources are few (one per service/host/process
+  // shape); the clamp guards pathological unique-resource churn.
+  _internResource(json) {
+    let id = this._resourceIdCache.get(json);
+    if (id != null) return id;
+    this.insertResource.run(json);
+    id = this.selectResourceId.get(json).id;
+    if (this._resourceIdCache.size >= 1000) this._resourceIdCache.clear();
+    this._resourceIdCache.set(json, id);
+    return id;
   }
 
   stopMaintenance() {
@@ -529,6 +566,15 @@ class OtelStore {
       );
       CREATE INDEX IF NOT EXISTS idx_logs_trace ON log_records(trace_id);
       CREATE INDEX IF NOT EXISTS idx_logs_received ON log_records(received_at);
+
+      -- Interned resource-attribute blobs: one row per distinct resource JSON,
+      -- referenced from spans.resource_id. The UNIQUE index doubles as the
+      -- insert-or-lookup key; cardinality is tiny (one row per distinct
+      -- service/host/process shape), so the wide key is cheap.
+      CREATE TABLE IF NOT EXISTS resources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        json TEXT NOT NULL UNIQUE
+      );
     `);
 
     // Backfill columns on databases created before service.namespace /
@@ -572,6 +618,26 @@ class OtelStore {
     // (start_time_ns, span_id), so the planner picks it regardless of stats — it
     // both narrows by trace_id and avoids the sort.
     try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_spans_trace_svc ON spans(trace_id, service_name, start_time_ns, span_id)'); } catch {}
+    // Interned resource attributes: identical resource JSON repeated on every
+    // span of a batch dominated span storage (measured ~17KB/trace on a real
+    // demo day, mostly duplicated resource blobs). New ingests store one
+    // resources row + an integer reference; the legacy per-span column is
+    // migrated below and kept readable via COALESCE on the read path.
+    addColumn('spans', 'resource_id', 'INTEGER');
+    // Idempotent migration for pre-interning rows: intern their blobs, point
+    // resource_id at them, NULL the duplicate column. Matches zero rows once
+    // migrated, so post-migration boots pay a single cheap scan.
+    try {
+      this.db.exec(`
+        INSERT OR IGNORE INTO resources(json)
+          SELECT DISTINCT resource_attributes_json FROM spans
+          WHERE resource_attributes_json IS NOT NULL;
+        UPDATE spans SET
+          resource_id = (SELECT id FROM resources r WHERE r.json = spans.resource_attributes_json),
+          resource_attributes_json = NULL
+        WHERE resource_attributes_json IS NOT NULL;
+      `);
+    } catch (e) { console.warn('[otelStore] resource-interning migration failed:', e.message); }
   }
 
   _prepStatements() {
@@ -579,11 +645,11 @@ class OtelStore {
       INSERT INTO spans (span_id, trace_id, parent_span_id, service_name,
                           service_namespace, container_name, name, kind,
                           start_time_ns, end_time_ns, duration_ms, status_code, status_message,
-                          attributes_json, resource_attributes_json, events_json)
+                          attributes_json, resource_attributes_json, resource_id, events_json)
       VALUES (@spanId, @traceId, @parentSpanId, @serviceName,
               @serviceNamespace, @containerName, @name, @kind,
               @startTimeNs, @endTimeNs, @durationMs, @statusCode, @statusMessage,
-              @attributesJson, @resourceAttributesJson, @eventsJson)
+              @attributesJson, @resourceAttributesJson, @resourceId, @eventsJson)
       ON CONFLICT(span_id, trace_id) DO UPDATE SET
         parent_span_id = excluded.parent_span_id,
         service_name = excluded.service_name,
@@ -598,8 +664,13 @@ class OtelStore {
         status_message = excluded.status_message,
         attributes_json = excluded.attributes_json,
         resource_attributes_json = excluded.resource_attributes_json,
+        resource_id = excluded.resource_id,
         events_json = excluded.events_json
     `);
+    this.insertResource = this.db.prepare(`INSERT OR IGNORE INTO resources (json) VALUES (?)`);
+    this.selectResourceId = this.db.prepare(`SELECT id FROM resources WHERE json = ?`);
+    // json → resources.id memo so steady-state ingest skips both statements.
+    this._resourceIdCache = new Map();
     this.recomputeTrace = this.db.prepare(`
       INSERT INTO traces (trace_id, service_name, service_namespace, root_operation, start_time_ns, end_time_ns,
                           duration_ms, span_count, has_error, db_call_count, received_at)
@@ -673,9 +744,23 @@ class OtelStore {
     );
     // Traces older than a cutoff received_at — drives time-based retention.
     // Uses idx_traces_received, so it's an indexed range scan (a no-op when
-    // nothing has aged out).
+    // nothing has aged out). LIMIT bounds one eviction round (see EVICT_BATCH).
     this.expiredTraceIds = this.db.prepare(
-      `SELECT trace_id FROM traces WHERE received_at < ?`
+      `SELECT trace_id FROM traces WHERE received_at < ? ORDER BY received_at ASC LIMIT ?`
+    );
+    // Participant lookups for the post-ingest SSE annotations — prepared once
+    // here; these used to be re-prepared on every ingestSpans call.
+    this.getParticipants = this.db.prepare(
+      `SELECT DISTINCT service_name FROM spans
+         WHERE trace_id = ? AND service_name IS NOT NULL`,
+    );
+    this.getParticipantNamespaces = this.db.prepare(
+      `SELECT DISTINCT service_namespace FROM spans
+         WHERE trace_id = ? AND service_namespace IS NOT NULL`,
+    );
+    this.getParticipantContainers = this.db.prepare(
+      `SELECT DISTINCT container_name FROM spans
+         WHERE trace_id = ? AND container_name IS NOT NULL`,
     );
     this.deleteSpansForTrace = this.db.prepare(`DELETE FROM spans WHERE trace_id = ?`);
     this.deleteErrorsForTrace = this.db.prepare(`DELETE FROM span_errors WHERE trace_id = ?`);
@@ -716,7 +801,11 @@ class OtelStore {
           statusCode: span.statusCode,
           statusMessage: span.statusMessage,
           attributesJson: JSON.stringify(span.attributes || {}),
-          resourceAttributesJson: JSON.stringify(span.resourceAttributes || {}),
+          // Interned: the (usually identical) resource JSON is stored once in
+          // resources and referenced by id; the legacy per-span column stays
+          // NULL on new rows — the read path COALESCEs through the join.
+          resourceAttributesJson: null,
+          resourceId: this._internResource(JSON.stringify(span.resourceAttributes || {})),
           eventsJson: JSON.stringify(span.events || []),
         });
         touchedTraces.add(span.traceId);
@@ -741,32 +830,16 @@ class OtelStore {
     // One participant-list query covers both jobs: (a) skip self-only
     // pipeline traces so synthetic verify/etc. don't appear in the live
     // list, and (b) annotate the emitted summary with its participating
-    // services so the frontend can honor an active service filter when
-    // merging SSE events (otherwise long-lived traces from other services
-    // bypass the filter and dominate the list).
-    const getParticipants = this.db.prepare(
-      `SELECT DISTINCT service_name FROM spans
-         WHERE trace_id = ? AND service_name IS NOT NULL`,
-    );
-    // Same idea for namespace + container so the frontend can client-side
-    // gate the SSE merge against an active namespace/container filter.
-    // Without these, turning on the namespace filter would freeze the live
-    // feed (or worse, leak in traces from the wrong namespace) until the
-    // 30s polling fallback caught up.
-    const getParticipantNamespaces = this.db.prepare(
-      `SELECT DISTINCT service_namespace FROM spans
-         WHERE trace_id = ? AND service_namespace IS NOT NULL`,
-    );
-    const getParticipantContainers = this.db.prepare(
-      `SELECT DISTINCT container_name FROM spans
-         WHERE trace_id = ? AND container_name IS NOT NULL`,
-    );
+    // services (and namespaces/containers) so the frontend can honor active
+    // filters when merging SSE events — otherwise long-lived traces from
+    // other services bypass the filter and dominate the list. Statements are
+    // prepared once in _prepStatements.
     for (const summary of summaries) {
       if (!summary) continue;
-      const participants = getParticipants.all(summary.trace_id).map(r => r.service_name);
+      const participants = this.getParticipants.all(summary.trace_id).map(r => r.service_name);
       if (!participants.some(s => !INTERNAL_SERVICES.includes(s))) continue;
-      const participating_namespaces = getParticipantNamespaces.all(summary.trace_id).map(r => r.service_namespace);
-      const participating_containers = getParticipantContainers.all(summary.trace_id).map(r => r.container_name);
+      const participating_namespaces = this.getParticipantNamespaces.all(summary.trace_id).map(r => r.service_namespace);
+      const participating_containers = this.getParticipantContainers.all(summary.trace_id).map(r => r.container_name);
       this.events.emit('trace', {
         ...summary,
         participating_services: participants,
@@ -1073,13 +1146,17 @@ class OtelStore {
       spans: count('spans'),
       errors: count('span_errors'),
       logs: count('log_records'),
+      resources: count('resources'),
     };
     // Children before parents — correct even if foreign_keys is ever enabled.
     this.db.transaction(() => {
       this.db.exec(
-        'DELETE FROM span_errors; DELETE FROM log_records; DELETE FROM spans; DELETE FROM traces;',
+        'DELETE FROM span_errors; DELETE FROM log_records; DELETE FROM spans; DELETE FROM traces; DELETE FROM resources;',
       );
     })();
+    // The memo now points at deleted resources rows — drop it so the next
+    // ingest re-interns instead of writing dangling resource_ids.
+    this._resourceIdCache.clear();
     // Reclaim immediately rather than waiting for the incremental-vacuum timer:
     // truncate the WAL, then hand the freed pages back to the OS. Best-effort —
     // a reclaim hiccup must not surface as a failed clear; the rows are gone.
@@ -1090,22 +1167,32 @@ class OtelStore {
     return cleared;
   }
 
+  // Evict expired/over-cap traces, at most EVICT_BATCH per concern per call
+  // (this runs inside the ingest transaction — an unbounded round once meant a
+  // post-idle age-out could cascade-delete the whole store in one ingest).
+  // Returns the number evicted so the startup sweep can loop to convergence;
+  // steady-state ingest catches any remainder on subsequent batches.
   _evictIfNeeded() {
+    let evicted = 0;
     // Primary retention is time-based: drop anything older than the horizon so
     // the window holds "the last N hours", not "the last N traces". Indexed
     // range scan — a no-op when nothing has aged out.
     if (this.retentionMs > 0) {
       const cutoff = Date.now() - this.retentionMs;
-      const expired = this.expiredTraceIds.all(cutoff).map(r => r.trace_id);
+      const expired = this.expiredTraceIds.all(cutoff, EVICT_BATCH).map(r => r.trace_id);
       for (const traceId of expired) this._deleteTraceCascade(traceId);
+      evicted += expired.length;
     }
     // Safety net: a hard count ceiling so a burst inside the horizon can't grow
     // the store unbounded. Normally a no-op — time eviction keeps the count low.
     const { n } = this.countTraces.get();
-    if (n <= this.maxTraces) return;
     const overflow = n - this.maxTraces;
-    const victims = this.oldestTraceIds.all(overflow).map(r => r.trace_id);
-    for (const traceId of victims) this._deleteTraceCascade(traceId);
+    if (overflow > 0) {
+      const victims = this.oldestTraceIds.all(Math.min(overflow, EVICT_BATCH)).map(r => r.trace_id);
+      for (const traceId of victims) this._deleteTraceCascade(traceId);
+      evicted += victims.length;
+    }
+    return evicted;
   }
 
   // Eviction for the standalone log records table. Trace eviction only drops
@@ -1322,7 +1409,9 @@ class OtelStore {
     const summary = this.selectTraceSummary.get(traceId);
     if (!summary) return null;
     const rawSpans = this.db.prepare(
-      `SELECT * FROM spans WHERE trace_id = ? ORDER BY start_time_ns ASC`
+      `SELECT s.*, r.json AS resource_json
+         FROM spans s LEFT JOIN resources r ON r.id = s.resource_id
+        WHERE s.trace_id = ? ORDER BY s.start_time_ns ASC`
     ).all(traceId);
     const spans = rawSpans.map(s => ({
       spanId: s.span_id,
@@ -1337,7 +1426,9 @@ class OtelStore {
       statusCode: s.status_code,
       statusMessage: s.status_message,
       attributes: safeJson(s.attributes_json, {}),
-      resourceAttributes: safeJson(s.resource_attributes_json, {}),
+      // New rows intern the blob (resource_json via the join); rows written
+      // before interning may still carry it inline.
+      resourceAttributes: safeJson(s.resource_attributes_json ?? s.resource_json, {}),
       events: safeJson(s.events_json, []),
     }));
     return { summary, spans };
@@ -1396,9 +1487,22 @@ class OtelStore {
     return this.db.prepare(sql).all(...params);
   }
 
-  listErrors({ sinceMs, untilMs, limit = 200 } = {}) {
+  listErrors({ service, namespace, container, sinceMs, untilMs, limit = 200 } = {}) {
     const params = [];
     const where = [];
+    if (service) { where.push('service_name = ?'); params.push(service); }
+    // namespace/container live on spans — an error matches when its trace has
+    // at least one span tagged with the filter value (the same membership rule
+    // /api/traces uses). Errors without a trace_id can never match, mirroring
+    // the "NULL never matches" semantics of the trace filters.
+    if (namespace) {
+      where.push('EXISTS (SELECT 1 FROM spans sp WHERE sp.trace_id = span_errors.trace_id AND sp.service_namespace = ?)');
+      params.push(namespace);
+    }
+    if (container) {
+      where.push('EXISTS (SELECT 1 FROM spans sp WHERE sp.trace_id = span_errors.trace_id AND sp.container_name = ?)');
+      params.push(container);
+    }
     if (sinceMs) { where.push('received_at >= ?'); params.push(sinceMs); }
     if (untilMs) { where.push('received_at <= ?'); params.push(untilMs); }
     const sql = `SELECT * FROM span_errors ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -1410,12 +1514,23 @@ class OtelStore {
   // Cross-trace logs feed for the Logs & Errors tab. Severity is filtered
   // case-insensitively to absorb the OTel demo's variety
   // (Info/INFO/SeverityNumber-derived). q does a substring match on body.
-  listLogs({ severity, q, sinceMs, untilMs, limit = 500 } = {}) {
+  listLogs({ severity, q, service, namespace, container, sinceMs, untilMs, limit = 500 } = {}) {
     const params = [];
     const where = [];
     if (severity) {
       where.push('LOWER(severity) = ?');
       params.push(String(severity).toLowerCase());
+    }
+    if (service) { where.push('service_name = ?'); params.push(service); }
+    // Same trace-membership rule as listErrors above: logs don't carry resource
+    // attrs, so namespace/container resolve through the trace's spans.
+    if (namespace) {
+      where.push('EXISTS (SELECT 1 FROM spans sp WHERE sp.trace_id = log_records.trace_id AND sp.service_namespace = ?)');
+      params.push(namespace);
+    }
+    if (container) {
+      where.push('EXISTS (SELECT 1 FROM spans sp WHERE sp.trace_id = log_records.trace_id AND sp.container_name = ?)');
+      params.push(container);
     }
     if (q && String(q).trim()) {
       where.push('LOWER(body) LIKE ?');
@@ -1687,8 +1802,10 @@ OtelStore.prototype.overview = function ({ sinceMs, untilMs, service, namespace,
   const sparkSummary = (arr) => {
     const positives = arr.filter(v => v > 0);
     if (positives.length === 0) return null;
-    const min = Math.min(...arr);
-    const max = Math.max(...arr);
+    // Loop, not Math.min(...arr) — spread blows the arg-count limit on large
+    // arrays, and this helper shouldn't care how big its input is.
+    let min = arr[0], max = arr[0];
+    for (const v of arr) { if (v < min) min = v; if (v > max) max = v; }
     const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
     return { min, max, avg };
   };
@@ -1839,8 +1956,10 @@ OtelStore.prototype.latencyHeatmap = function ({ sinceMs, untilMs, timeBuckets, 
     minMs = 1;
     maxMs = 10000;
   } else {
-    const obsMin = Math.min(...observed);
-    const obsMax = Math.max(...observed);
+    // Loop, not Math.min(...observed): `observed` can hold one duration per
+    // trace in the window — at cap scale the spread form throws RangeError.
+    let obsMin = observed[0], obsMax = observed[0];
+    for (const v of observed) { if (v < obsMin) obsMin = v; if (v > obsMax) obsMax = v; }
     // Floor at 0.1ms (sub-ms is rare but possible for trivial RPCs); span
     // at least one order of magnitude so the chart isn't a single hot row.
     minMs = Math.max(0.1, obsMin);

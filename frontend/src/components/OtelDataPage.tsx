@@ -611,6 +611,9 @@ export const OtelDataPage: React.FC = () => {
     const w = resolveWindow();
     if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
     if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+    if (serviceFilter) params.set('service', serviceFilter);
+    if (namespaceFilter) params.set('namespace', namespaceFilter);
+    if (containerFilter) params.set('container', containerFilter);
     const qs = params.toString();
     try {
       const res = await fetch(`/api/traces/errors${qs ? `?${qs}` : ''}`);
@@ -631,6 +634,9 @@ export const OtelDataPage: React.FC = () => {
     const w = resolveWindow();
     if (w.sinceMs != null) params.set('sinceMs', String(w.sinceMs));
     if (w.untilMs != null) params.set('untilMs', String(w.untilMs));
+    if (serviceFilter) params.set('service', serviceFilter);
+    if (namespaceFilter) params.set('namespace', namespaceFilter);
+    if (containerFilter) params.set('container', containerFilter);
     try {
       const res = await fetch(`/api/logs?${params}`);
       if (res.ok) {
@@ -736,14 +742,17 @@ export const OtelDataPage: React.FC = () => {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  // Reload logs whenever the active time window changes (including click-zoom).
+  // Reload logs whenever the active time window OR a shared filter changes
+  // (the service/namespace/container filters are server-side now, so the
+  // fetched rows must be re-queried — client-side narrowing alone would show
+  // stale supersets).
   useEffect(() => {
     refreshLogs();
-  }, [range, customRange]);
+  }, [range, customRange, serviceFilter, namespaceFilter, containerFilter]);
 
   useEffect(() => {
     refreshErrors();
-  }, [range, customRange]);
+  }, [range, customRange, serviceFilter, namespaceFilter, containerFilter]);
 
   // Periodic re-fetch so the rollup counts (logs/errors/db calls) on
   // SSE-pushed traces catch up — those arrive with counts at 0 because
@@ -932,6 +941,10 @@ export const OtelDataPage: React.FC = () => {
     es.addEventListener('error_record', (evt: MessageEvent) => {
       // Errors live in the Logs & Errors tab — share its pause toggle.
       if (logsPausedRef.current) return;
+      // Log/error SSE events don't carry resource attributes, so an active
+      // namespace/container filter can't be enforced client-side — drop them
+      // and let the filtered fetch (+30s fallback) own the list instead.
+      if (namespaceFilterRef.current || containerFilterRef.current) return;
       try {
         const err: any = JSON.parse(evt.data);
         // Server fires the camelCase shape from the in-memory event; the GET
@@ -965,6 +978,8 @@ export const OtelDataPage: React.FC = () => {
     });
     es.addEventListener('log', (evt: MessageEvent) => {
       if (logsPausedRef.current) return;
+      // Same client-side enforceability gap as error_record above.
+      if (namespaceFilterRef.current || containerFilterRef.current) return;
       try {
         const raw: any = JSON.parse(evt.data);
         const record: LogRecord = {

@@ -786,3 +786,115 @@ describe('auto_vacuum conversion', () => {
   });
 });
 
+
+describe('logs & errors shared filters (service / namespace / container)', () => {
+  let store;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    store = new OtelStore({ dbPath: ':memory:' });
+    store.ingestSpans([
+      makeSpan({ traceId: 'tA', spanId: 'sA', serviceName: 'svc-a', serviceNamespace: 'ns-a', containerName: 'c-a', statusCode: 2, statusMessage: 'boom' }),
+      makeSpan({ traceId: 'tB', spanId: 'sB', serviceName: 'svc-b', serviceNamespace: 'ns-b', containerName: 'c-b', statusCode: 2, statusMessage: 'bang' }),
+    ]);
+  });
+  afterEach(() => {
+    store.stopMaintenance();
+    store.db.close();
+    vi.useRealTimers();
+  });
+
+  it('listErrors honors service, namespace, and container', () => {
+    expect(store.listErrors({}).length).toBe(2);
+    expect(store.listErrors({ service: 'svc-a' }).map(e => e.trace_id)).toEqual(['tA']);
+    expect(store.listErrors({ namespace: 'ns-b' }).map(e => e.trace_id)).toEqual(['tB']);
+    expect(store.listErrors({ container: 'c-a' }).map(e => e.trace_id)).toEqual(['tA']);
+    expect(store.listErrors({ namespace: 'no-such' })).toEqual([]);
+  });
+
+  it('listLogs honors service and resolves namespace/container via the trace spans', () => {
+    store.ingestLogs([
+      { traceId: 'tA', serviceName: 'svc-a', severity: 'INFO', body: 'a-log', attributes: {}, timeUnixNano: 1 },
+      { traceId: 'tB', serviceName: 'svc-b', severity: 'INFO', body: 'b-log', attributes: {}, timeUnixNano: 2 },
+      { traceId: '', serviceName: 'svc-x', severity: 'INFO', body: 'orphan', attributes: {}, timeUnixNano: 3 },
+    ]);
+    expect(store.listLogs({}).length).toBe(3);
+    expect(store.listLogs({ service: 'svc-a' }).map(l => l.body)).toEqual(['a-log']);
+    expect(store.listLogs({ namespace: 'ns-b' }).map(l => l.body)).toEqual(['b-log']);
+    expect(store.listLogs({ container: 'c-a' }).map(l => l.body)).toEqual(['a-log']);
+    // Orphan logs (no trace) can never match a namespace filter — NULL-row rule.
+    expect(store.listLogs({ namespace: 'ns-a' }).map(l => l.body)).toEqual(['a-log']);
+    expect(store.listLogs({ namespace: 'ns-a', service: 'svc-b' })).toEqual([]);
+  });
+});
+
+describe('resource interning', () => {
+  let store;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    store = new OtelStore({ dbPath: ':memory:' });
+  });
+  afterEach(() => {
+    store.stopMaintenance();
+    store.db.close();
+    vi.useRealTimers();
+  });
+
+  it('stores one resources row per distinct resource JSON; spans reference it', () => {
+    const shared = { 'service.name': 'svc-a', 'host.name': 'h1', 'service.version': '1.0' };
+    store.ingestSpans([
+      makeSpan({ traceId: 'tR', spanId: 's1', resourceAttributes: shared }),
+      makeSpan({ traceId: 'tR', spanId: 's2', resourceAttributes: shared }),
+      makeSpan({ traceId: 'tR', spanId: 's3', resourceAttributes: { 'service.name': 'svc-b' } }),
+    ]);
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM resources').get().n).toBe(2);
+    // New rows never carry the inline blob.
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM spans WHERE resource_attributes_json IS NOT NULL').get().n).toBe(0);
+    const bySpan = Object.fromEntries(store.getTrace('tR').spans.map(s => [s.spanId, s.resourceAttributes]));
+    expect(bySpan.s1['host.name']).toBe('h1');
+    expect(bySpan.s2['service.version']).toBe('1.0');
+    expect(bySpan.s3['service.name']).toBe('svc-b');
+  });
+
+  it('migrates legacy inline resource blobs on open (idempotent backfill)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'otel-intern-'));
+    const dbPath = path.join(dir, 'store.db');
+    const legacy = new OtelStore({ dbPath });
+    legacy.ingestSpans([makeSpan({ traceId: 'tL', spanId: 's1' })]);
+    // Recreate the pre-interning shape: inline blob, no resource reference.
+    legacy.db.prepare(`UPDATE spans SET resource_attributes_json = ?, resource_id = NULL WHERE trace_id = 'tL'`)
+      .run(JSON.stringify({ 'host.name': 'legacy-host' }));
+    legacy.db.prepare('DELETE FROM resources').run();
+    legacy.stopMaintenance();
+    legacy.db.close();
+
+    const reopened = new OtelStore({ dbPath });
+    try {
+      expect(reopened.db.prepare('SELECT COUNT(*) AS n FROM spans WHERE resource_attributes_json IS NOT NULL').get().n).toBe(0);
+      expect(reopened.db.prepare('SELECT COUNT(*) AS n FROM resources').get().n).toBe(1);
+      expect(reopened.getTrace('tL').spans[0].resourceAttributes['host.name']).toBe('legacy-host');
+    } finally {
+      reopened.stopMaintenance();
+      reopened.db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('eviction batching', () => {
+  it('converges to the cap and reports evicted counts per call', () => {
+    vi.useFakeTimers();
+    const s = new OtelStore({ dbPath: ':memory:', maxTraces: 10, retentionMs: 0 });
+    try {
+      const spans = [];
+      for (let i = 0; i < 40; i++) spans.push(makeSpan({ traceId: `t${i}`, spanId: `s${i}`, startTimeNs: 1_000_000_000 + i }));
+      s.ingestSpans(spans);
+      expect(s.db.prepare('SELECT COUNT(*) AS n FROM traces').get().n).toBe(10);
+      // Nothing left to evict → 0.
+      expect(s._evictIfNeeded()).toBe(0);
+    } finally {
+      s.stopMaintenance();
+      s.db.close();
+      vi.useRealTimers();
+    }
+  });
+});

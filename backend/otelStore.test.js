@@ -65,8 +65,8 @@ describe('OtelStore clearAll', () => {
 
     const cleared = store.clearAll();
 
-    // Reports exactly what it removed.
-    expect(cleared).toEqual({ traces: 1, spans: 1, errors: 1, logs: 1 });
+    // Reports exactly what it removed (the span's interned resource included).
+    expect(cleared).toEqual({ traces: 1, spans: 1, errors: 1, logs: 1, resources: 1 });
 
     // Store is genuinely empty but still answers queries (not torn down).
     expect(store.listTraces({})).toEqual([]);
@@ -77,7 +77,7 @@ describe('OtelStore clearAll', () => {
     }
 
     // Idempotent: clearing an empty store reports all zeros.
-    expect(store.clearAll()).toEqual({ traces: 0, spans: 0, errors: 0, logs: 0 });
+    expect(store.clearAll()).toEqual({ traces: 0, spans: 0, errors: 0, logs: 0, resources: 0 });
   });
 });
 

@@ -55,8 +55,9 @@ function register(app, { otelStore, docker }) {
   });
 
   app.get('/api/traces/errors', (req, res) => {
-    const { limit, sinceMs, untilMs } = req.query;
+    const { limit, sinceMs, untilMs, service, namespace, container } = req.query;
     res.json({ errors: otelStore.listErrors({
+      service, namespace, container,
       sinceMs: sinceMs ? Number(sinceMs) : undefined,
       untilMs: untilMs ? Number(untilMs) : undefined,
       limit: limit ? Number(limit) : 200,
@@ -351,11 +352,12 @@ function register(app, { otelStore, docker }) {
   });
 
   app.get('/api/logs', (req, res) => {
-    const { severity, q, sinceMs, untilMs, limit } = req.query;
+    const { severity, q, sinceMs, untilMs, limit, service, namespace, container } = req.query;
     res.json({
       logs: otelStore.listLogs({
         severity,
         q,
+        service, namespace, container,
         sinceMs: sinceMs ? Number(sinceMs) : undefined,
         untilMs: untilMs ? Number(untilMs) : undefined,
         limit: limit ? Number(limit) : undefined,
