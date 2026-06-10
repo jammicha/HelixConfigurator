@@ -3,8 +3,8 @@ name: Native release
 on:
   push:
     tags: ['v*']
-  # Manual runs build + zip for smoke-testing; the Upload step only succeeds
-  # on a tag push (action-gh-release needs a tag to attach assets to).
+  # Manual runs build + zip for smoke-testing; the release job below only
+  # runs on a tag push (a release needs a tag to attach assets to).
   workflow_dispatch:
 
 permissions:
@@ -13,6 +13,9 @@ permissions:
 jobs:
   build:
     strategy:
+      # One platform's flake must not cancel the other zips mid-build —
+      # the release job below needs all three.
+      fail-fast: false
       matrix:
         include:
           - { os: macos-latest,   platform: darwin-arm64, nodearch: arm64 }
@@ -81,9 +84,33 @@ jobs:
           if [ "${{ runner.os }}" = "Windows" ]; then 7z a "$ZIP" helix-configurator > /dev/null;
           else zip -ry "$ZIP" helix-configurator > /dev/null; fi
 
+      # Hand the zip to the single release job below. Each matrix leg used to
+      # call action-gh-release itself, and near-simultaneous legs raced on
+      # creating the release ("already_exists" → retries exhausted → red run).
+      - name: Stash zip as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helix-configurator-${{ matrix.platform }}
+          path: helix-configurator-${{ matrix.platform }}.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    # One job creates the release exactly once, with every platform zip — no
+    # create race. Tag pushes only; manual smoke runs stop at the artifacts.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect platform zips
+        uses: actions/download-artifact@v4
+        with:
+          pattern: helix-configurator-*
+          merge-multiple: true
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: helix-configurator-${{ matrix.platform }}.zip
+          files: helix-configurator-*.zip
           fail_on_unmatched_files: true
           prerelease: false   # latest/download/ must resolve to this release
