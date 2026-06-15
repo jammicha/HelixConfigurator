@@ -1,0 +1,8 @@
+node_modules
+dist
+frontend-dist
+frontend/dist
+backend/data
+data
+*.min.js
+package-lock.json

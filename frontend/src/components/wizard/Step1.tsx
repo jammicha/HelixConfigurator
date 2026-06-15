@@ -45,6 +45,7 @@ const validateXSource = (value: string): string | null => {
   if (value !== value.trim()) return 'No leading or trailing whitespace';
   // OTel resource attribute values are arbitrary UTF-8 strings; only reject
   // control chars (which would also break the HTTP header these flow into).
+  // eslint-disable-next-line no-control-regex -- matching control chars is the intent here
   if (/[\x00-\x1f\x7f]/.test(value)) return 'Cannot contain control characters';
   return null;
 };

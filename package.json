@@ -7,6 +7,9 @@
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "npm --prefix backend test",
     "test:frontend": "npm --prefix frontend test",
+    "lint": "npm run lint:backend && npm run lint:frontend",
+    "lint:backend": "npm --prefix backend run lint",
+    "lint:frontend": "npm --prefix frontend run lint",
     "build": "npm --prefix frontend run build",
     "dev:backend": "npm --prefix backend start",
     "dev:frontend": "npm --prefix frontend run dev"
