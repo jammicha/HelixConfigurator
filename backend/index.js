@@ -13,6 +13,7 @@ const docker = new Docker(); // uses /var/run/docker.sock by default
 const containerLogs = makeContainerLogs(docker);
 
 const { requireAuth, registerAuthRoutes } = require('./auth');
+const { errorHandler } = require('./errorHandler');
 
 const { resolvePort } = require('./portConfig');
 const port = resolvePort(process.env);
@@ -101,6 +102,11 @@ require('./routes/config').register(app, {
   templatesDir: TEMPLATES_DIR,
 });
 
+// Terminal error handler — MUST be registered after every route. Catches any
+// synchronous throw, and (under Express 5) any rejected async handler, that a
+// route didn't catch itself, so it returns a JSON 500 instead of leaking a
+// stack-trace page or crashing the process on an unhandledRejection.
+app.use(errorHandler);
 
 const server = app.listen(port, () => {
   console.log(`Backend listening at http://localhost:${port}`);
