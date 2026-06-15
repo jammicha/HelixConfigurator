@@ -30,8 +30,8 @@ type Props = {
   onSetLogFilter: (filter: 'helix' | 'all') => void;
   logs: string[];
   visibleLogs: string[];
-  logContainerRef: RefObject<HTMLDivElement | null>;
-  logEndRef: RefObject<HTMLDivElement | null>;
+  logContainerRef: RefObject<HTMLDivElement>;
+  logEndRef: RefObject<HTMLDivElement>;
   onLogScroll: () => void;
 };
 

@@ -41,7 +41,7 @@ const KUBERNETES_OPERATOR_STEPS: WizardStep[] = [
   { n: 5, label: 'Link Service' },
 ];
 
-export function isK8sTarget(target: WizardTarget): boolean {
+export function isK8sTarget(target: WizardTarget | null): boolean {
   return target === 'kubernetes' || target === 'kubernetes-operator';
 }
 

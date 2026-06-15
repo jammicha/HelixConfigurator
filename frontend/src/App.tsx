@@ -206,8 +206,8 @@ const App = () => {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const metricsIntervalRef = useRef<any>(null);
-  const logEndRef = useRef<HTMLDivElement | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const editorRef = useRef<any>(null);
   const isTogglingDiagRef = useRef(false);
