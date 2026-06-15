@@ -1,0 +1,51 @@
+name: CI
+
+# publish.yml / native-release.yml only run on push to main and tags, so the
+# repo's safety-net checks (lint, typecheck, tests) never gated a pull request —
+# a broken change wasn't caught until it had already landed on main. This runs
+# those same checks on every PR, before merge. Two parallel jobs so backend and
+# frontend give independent pass/fail signals.
+on:
+  pull_request:
+
+# A new push to a PR cancels the superseded run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
