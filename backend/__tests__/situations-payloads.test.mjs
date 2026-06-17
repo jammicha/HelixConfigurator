@@ -4,6 +4,7 @@ const require = createRequire(import.meta.url);
 const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
+  buildEventCiHostname,
   deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace, buildHotPath,
   buildHelixTraceUrlFromSummary,
   buildSpanDashboardUrl,
@@ -35,7 +36,7 @@ function excEvent(type, message) {
 const summary = {
   trace_id: '471e26391536a66fa17429e69bffd45f',
   service_name: 'traffic-generator',
-  service_namespace: 'jaeger-hotrod',
+  service_namespace: 'hotrod',
   root_operation: 'scenario.iteration',
   duration_ms: 1864.4,
   span_count: 42,
@@ -61,6 +62,28 @@ describe('buildClassDefinition', () => {
     const slotNames = buildClassDefinition().attributes.map(a => a.name);
     for (const s of ADDED_SLOTS) expect(slotNames).toContain(s);
   });
+  it('does NOT redeclare built-in EVENT slots (priority) on the create payload', () => {
+    // `priority` is an inherited PRIORITY_1..5 enum slot on the EVENT parent.
+    // Redeclaring it as a custom STRING fails the create with
+    // ATTR_EXIST_WITH_DIFF_TYPE (500) and aborts the whole class creation.
+    // Regression: the create path used to include it (the update path already
+    // stripped it), so first-time provisioning silently failed.
+    const createNames = buildClassDefinition().attributes.map(a => a.name);
+    expect(createNames).not.toContain('priority');
+    // create and update attribute sets must agree — no built-in leaks into create.
+    const updateNames = buildClassUpdateBody().attributes.map(a => a.name);
+    expect(createNames).toEqual(updateNames);
+  });
+});
+
+describe('buildEventCiHostname', () => {
+  it('namespace-qualifies so same-named services across BSes do not collide', () => {
+    expect(buildEventCiHostname('frontend', 'hotrod')).toBe('frontend.hotrod');
+  });
+  it('falls back to the bare name when no namespace is present', () => {
+    expect(buildEventCiHostname('frontend', '')).toBe('frontend');
+    expect(buildEventCiHostname('frontend', undefined)).toBe('frontend');
+  });
 });
 
 describe('buildAnomalyEventPayload', () => {
@@ -68,9 +91,11 @@ describe('buildAnomalyEventPayload', () => {
     const [evt] = buildAnomalyEventPayload({ summary, p95Ms: 200, businessServiceKey: 'BSKEY', xSource: 'JM_OTEL' });
     expect(evt.class).toBe(OTEL_TRACE_ANOMALY_CLASS);
     expect(evt.class_slots.service_name).toBe('traffic-generator');
-    expect(evt.class_slots.service_namespace).toBe('jaeger-hotrod');
+    expect(evt.class_slots.service_namespace).toBe('hotrod');
     expect(evt.class_slots.helix_trace_id).toBe(summary.trace_id);
-    expect(evt.source_attributes.source_hostname).toBe('traffic-generator');
+    // source_hostname is namespace-qualified so same-named services across business
+    // services don't collide in Helix's event→CI reconciliation (default format).
+    expect(evt.source_attributes.source_hostname).toBe('traffic-generator.hotrod');
     expect(evt.class_slots).not.toHaveProperty('trace_url');
   });
   it('maps severity: error->CRITICAL, outlier->MAJOR, else MINOR', () => {
@@ -268,7 +293,7 @@ describe('buildHelixTraceUrlFromSummary', () => {
   const summary = {
     trace_id: '86c9cd9ee99aa88fa04ba19ef5ee4f78',
     service_name: 'frontend',
-    service_namespace: 'jaeger-hotrod',
+    service_namespace: 'hotrod',
     start_time_ns: 1748466199645000000,
   };
 
@@ -286,7 +311,7 @@ describe('buildHelixTraceUrlFromSummary', () => {
 
   it('uses the trace namespace, falling back to source', () => {
     const withNs = new URL(buildHelixTraceUrlFromSummary({ ...base, summary }));
-    expect(withNs.searchParams.get('var-OTelNamespace')).toBe('jaeger-hotrod');
+    expect(withNs.searchParams.get('var-OTelNamespace')).toBe('hotrod');
     const noNs = new URL(buildHelixTraceUrlFromSummary({ ...base, summary: { ...summary, service_namespace: '' } }));
     expect(noNs.searchParams.get('var-OTelNamespace')).toBe('JM_OTEL');
   });
@@ -392,9 +417,11 @@ describe('buildClassDefinition (enriched slots)', () => {
   it('declares the RCA-enrichment slots as STRING attributes', () => {
     const names = buildClassDefinition().attributes.map(a => a.name);
     for (const s of ['probable_cause_service','probable_cause_operation','error_type','error_message',
-      'code_location','anomaly_factor','affected_services','component_count','trace_url','priority']) {
+      'code_location','anomaly_factor','affected_services','component_count','trace_url']) {
       expect(names).toContain(s);
     }
+    // priority is intentionally NOT declared here — it's a built-in EVENT slot
+    // (see the create-payload regression test above).
   });
 });
 

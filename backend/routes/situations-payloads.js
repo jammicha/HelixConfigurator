@@ -36,7 +36,11 @@ function buildClassDefinition() {
       { name: 'probable_cause_span_id', dataType: 'STRING', enum: false },
       { name: 'hot_path', dataType: 'STRING', enum: false },
       { name: 'span_dashboard_url', dataType: 'STRING', enum: false },
-      { name: 'priority', dataType: 'STRING', enum: false },
+      // NOTE: do NOT declare `priority` here. It's a built-in PRIORITY_1..5 enum
+      // slot inherited from the EVENT parent class; re-declaring it as a custom
+      // STRING fails the create with ATTR_EXIST_WITH_DIFF_TYPE (500), which aborts
+      // the whole class creation. Events/policies can still SET priority (it's
+      // inherited). See BUILTIN_CLASS_ATTRS below — kept as defense-in-depth.
     ],
   };
 }
@@ -64,6 +68,26 @@ function splitApiKey(apiKey) {
   const parts = String(apiKey || '').split('::');
   if (parts.length !== 3 || parts.some(p => !p.trim())) return null;
   return { tenantId: parts[0].trim(), accessKey: parts[1].trim(), accessSecretKey: parts[2].trim() };
+}
+
+// CI identity for the event's source_hostname (the field Helix reconciles an event
+// to a CI on). The bare service.name ("frontend") collides across business services
+// on a shared tenant — Helix then binds to whichever "frontend" CI it finds first
+// (e.g. another app's), and the disambiguators we carry (service_namespace, the BS
+// key) are only custom slots, which reconciliation ignores. Qualifying with the OTel
+// namespace makes the identity unique to THIS app's service CI (frontend@hotrod).
+//
+// BEST-EFFORT: the exact format BMC reconciles OTel Service CIs on is unvalidated
+// here. Validate by converting one real trace and checking the Situation's Impacted
+// Service; if it doesn't bind to the right BS (or creates a stray CI), tune via
+// HELIX_EVENT_CI_FORMAT — tokens {service}/{namespace}, e.g. "{namespace}/{service}",
+// or set it to "{service}" to fall back to the old bare behavior.
+function buildEventCiHostname(serviceName, serviceNamespace) {
+  const name = (serviceName || '').trim();
+  const ns = (serviceNamespace || '').trim();
+  if (!ns) return name;
+  const fmt = process.env.HELIX_EVENT_CI_FORMAT || '{service}.{namespace}';
+  return fmt.replace('{service}', name).replace('{namespace}', ns);
 }
 
 function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource, spans, baseUrl, tenantId, spanDashboardUid }) {
@@ -149,7 +173,7 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     category: 'APPLICATION',
     msg,
     source_identifier: `helix-otel-trace:${summary.trace_id}`,
-    source_attributes: { source_hostname: summary.service_name },
+    source_attributes: { source_hostname: buildEventCiHostname(summary.service_name, summary.service_namespace) },
     details,
     class_slots: {
       helix_trace_id: summary.trace_id,
@@ -391,7 +415,7 @@ function buildClassByIdUrl(base, id) {
 
 module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
-  buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
+  buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey, buildEventCiHostname,
   deriveProbableCause, blastRadius, buildHotPath, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary, buildSpanDashboardUrl,
   buildClassByNameUrl, buildClassByIdUrl,

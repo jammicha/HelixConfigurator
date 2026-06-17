@@ -158,7 +158,13 @@ function register(app, { otelStore }) {
       // when the class already exists. Surface that as a soft success — the
       // class is in the desired state from the caller's perspective.
       const body = JSON.stringify(response.data || '').toLowerCase();
-      if (response.status === 409 || body.includes('already exist') || body.includes('duplicate')) {
+      // Guard against masking a failed create as "already exists". An attribute
+      // collision (e.g. a built-in slot re-declared with a different type:
+      // statusCode ATTR_EXIST_WITH_DIFF_TYPE, message "...already exist with
+      // different data type") is a HARD failure, not a duplicate class — treating
+      // it as a soft success hid a class that never got created.
+      const attrCollision = body.includes('attr_exist') || body.includes('different data type');
+      if (!attrCollision && (response.status === 409 || body.includes('already exist') || body.includes('duplicate'))) {
         // Class already exists — add any newly-introduced slots so it picks up the
         // RCA-enrichment attributes. The update endpoint is addressed by the class
         // UUID, NOT the name: PUT .../classes/OTEL_TRACE_ANOMALY 500s "Invalid UUID
