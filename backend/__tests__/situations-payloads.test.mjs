@@ -12,6 +12,7 @@ const {
   buildEventSearchQuery, buildEventSearchBody, buildEventSearchUrl, buildEventByIdUrl,
   extractSearchEventIds, extractCreatedEventIds,
   summarizeOpenEvents,
+  buildTriageNote, buildTriageNoteForTrace, buildResolutionNote, buildEventUpdateBody,
 } = require('../routes/situations-payloads');
 
 // A span shaped exactly like otelStore.getTrace().spans[]: .attributes and
@@ -767,5 +768,38 @@ describe('summarizeOpenEvents', () => {
   it('drops hits with no id and tolerates empty input', () => {
     expect(summarizeOpenEvents({ hits: { hits: [{ _source: {} }] } })).toEqual([]);
     expect(summarizeOpenEvents(null)).toEqual([]);
+  });
+});
+
+describe('note + update builders', () => {
+  const summary = { service_name: 'redis-manual', root_operation: 'Fetch Driver Profile', trace_id: 'abc', service_namespace: 'hotrod', start_time_ns: 0 };
+  const cause = { probable_cause_service: 'redis-manual', probable_cause_operation: 'GET driver', error_type: 'redis.TimeoutError', error_message: 'timed out', code_location: 'a.py:get:1' };
+
+  it('buildTriageNote leads with cause + location + recommendation + trace link', () => {
+    const n = buildTriageNote(summary, cause, 'https://t/trace');
+    expect(n).toContain('probable cause redis-manual/GET driver (redis.TimeoutError — timed out)');
+    expect(n).toContain('Location: a.py:get:1');
+    expect(n).toContain('Recommended:');
+    expect(n).toContain('Trace: https://t/trace');
+  });
+
+  it('buildTriageNote falls back to the root op when no cause', () => {
+    expect(buildTriageNote(summary, null, '')).toContain('probable cause redis-manual/Fetch Driver Profile (latency/availability anomaly)');
+  });
+
+  it('buildTriageNoteForTrace returns "" with no spans', () => {
+    expect(buildTriageNoteForTrace({ summary, spans: [], baseUrl: 'https://t', tenantId: 'T1', source: 'hotrod' })).toBe('');
+  });
+
+  it('buildResolutionNote names the service/op, tolerates null', () => {
+    expect(buildResolutionNote(summary)).toBe('Resolved via Helix Configurator: redis-manual/Fetch Driver Profile anomaly cleared; closing event.');
+    expect(buildResolutionNote(null)).toBe('Resolved via Helix Configurator: service anomaly cleared; closing event.');
+  });
+
+  it('buildEventUpdateBody sets status and/or a notes list', () => {
+    expect(buildEventUpdateBody({ status: 'CLOSED' })).toEqual({ status: 'CLOSED' });
+    expect(buildEventUpdateBody({ note: 'hi' })).toEqual({ notes: ['hi'] });
+    expect(buildEventUpdateBody({ status: 'CLOSED', note: 'hi' })).toEqual({ status: 'CLOSED', notes: ['hi'] });
+    expect(buildEventUpdateBody({})).toEqual({});
   });
 });

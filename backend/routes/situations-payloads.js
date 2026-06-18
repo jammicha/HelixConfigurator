@@ -630,6 +630,51 @@ function summarizeOpenEvents(resp) {
   }).filter((e) => e.id);
 }
 
+// ---- Note builders (audit trail for Logs & Notes tab) ----
+
+// Analyst-style note for the event's Logs & Notes audit trail at send time —
+// distinct from the event `details` body; leads with the recommended next step.
+function buildTriageNote(summary, cause, traceUrl) {
+  if (!summary) return '';
+  const where = cause && cause.probable_cause_service
+    ? `${cause.probable_cause_service}/${cause.probable_cause_operation || '?'}`
+    : `${summary.service_name}/${summary.root_operation}`;
+  const what = cause && (cause.error_type || cause.error_message)
+    ? `${cause.error_type || 'error'}${cause.error_message ? ` — ${cause.error_message}` : ''}`
+    : 'latency/availability anomaly';
+  return [
+    `Triaged by Helix Configurator: probable cause ${where} (${what}).`,
+    cause && cause.code_location ? `Location: ${cause.code_location}.` : '',
+    'Recommended: inspect the failing span and the correlated trace.',
+    traceUrl ? `Trace: ${traceUrl}` : '',
+  ].filter(Boolean).join(' ');
+}
+
+// Convenience wrapper: derive cause + trace deep-link from the trace and build the
+// triage note in one call (keeps the route tidy). '' when the trace has no spans.
+function buildTriageNoteForTrace({ summary, spans, baseUrl, tenantId, source }) {
+  if (!Array.isArray(spans) || spans.length === 0) return '';
+  const cause = deriveProbableCause(spans);
+  const traceUrl = buildHelixTraceUrlFromSummary({ baseUrl, tenantId, source: (source || '').trim(), summary });
+  return buildTriageNote(summary, cause, traceUrl);
+}
+
+// Note recorded when the operator resolves the anomaly.
+function buildResolutionNote(summary) {
+  const svc = (summary && summary.service_name) || 'service';
+  const op = summary && summary.root_operation ? `/${summary.root_operation}` : '';
+  return `Resolved via Helix Configurator: ${svc}${op} anomaly cleared; closing event.`;
+}
+
+// PATCH body for the events update op. status drives the close; note (when given)
+// goes to the Logs & Notes tab (caller must omit ?skipAddNotes so it is recorded).
+function buildEventUpdateBody({ status, note } = {}) {
+  const body = {};
+  if (status) body.status = status;
+  if (note) body.notes = [note];
+  return body;
+}
+
 // ---- Event search + update (auto-close / notes) ----
 
 const eventsBase = (base) => `${String(base).replace(/\/+$/, '')}/events-service/api/v1.0/events`;
@@ -695,4 +740,5 @@ module.exports = {
   buildEventSearchQuery, buildEventSearchBody, buildEventSearchUrl, buildEventByIdUrl,
   extractSearchEventIds, extractCreatedEventIds,
   summarizeOpenEvents,
+  buildTriageNote, buildTriageNoteForTrace, buildResolutionNote, buildEventUpdateBody,
 };
