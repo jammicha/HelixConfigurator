@@ -627,6 +627,7 @@ function buildEventSearchQuery({ traceId, all } = {}) {
   const parts = [`class:${OTEL_TRACE_ANOMALY_CLASS}`, 'status:OPEN'];
   if (!all && traceId) {
     const esc = String(traceId).replace(/[\\:]/g, '\\$&');
+    // `\\:` in this template literal yields the two-char string `\:` — the BMC msearch DSL colon escape.
     parts.push(`source_identifier.keyword:helix-otel-trace\\:${esc}*`);
   }
   return parts.join(' AND ');
@@ -634,12 +635,36 @@ function buildEventSearchQuery({ traceId, all } = {}) {
 
 // BMC events msearch request body (Elasticsearch DSL). size caps results; newest first.
 function buildEventSearchBody({ traceId, all, size = 500 } = {}) {
+  const queryString = { query_string: { analyze_wildcard: true, query: buildEventSearchQuery({ traceId, all }) } };
   return {
     size,
-    query: { bool: { filter: [{ query_string: { analyze_wildcard: true, query: buildEventSearchQuery({ traceId, all }) } }] } },
+    query: { bool: { filter: [queryString] } },
     sort: { creation_time: { order: 'desc', unmapped_type: 'boolean' } },
     script_fields: {},
   };
+}
+
+// IDs of the open events returned by an msearch (Elasticsearch hits shape). Defensive
+// across the common id locations; confirm the exact field live (Task 10, risk #1).
+function extractSearchEventIds(resp) {
+  const hits = resp && resp.hits && Array.isArray(resp.hits.hits) ? resp.hits.hits : [];
+  const ids = [];
+  for (const h of hits) {
+    const id = (h && (h._id || (h._source && (h._source._id || h._source.id)))) || '';
+    if (id && !ids.includes(String(id))) ids.push(String(id));
+  }
+  return ids;
+}
+
+// IDs of events created by a POST /events ingest call. BMC wraps created ids in
+// successfullEventIds (sic on the double-l); tolerate a few shapes (Task 10, risk #2).
+function extractCreatedEventIds(resp) {
+  if (!resp) return [];
+  if (Array.isArray(resp)) {
+    return resp.map((x) => (typeof x === 'string' ? x : x && (x.id || x._id))).filter(Boolean).map(String);
+  }
+  const arr = resp.successfullEventIds || resp.successfulEventIds || resp.eventIds || [];
+  return Array.isArray(arr) ? arr.filter(Boolean).map(String) : [];
 }
 
 module.exports = {
@@ -651,4 +676,5 @@ module.exports = {
   buildHelixTraceUrlFromSummary, buildSpanDashboardUrl,
   buildClassByNameUrl, buildClassByIdUrl,
   buildEventSearchQuery, buildEventSearchBody, buildEventSearchUrl, buildEventByIdUrl,
+  extractSearchEventIds, extractCreatedEventIds,
 };

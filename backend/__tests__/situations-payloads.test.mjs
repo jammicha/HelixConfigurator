@@ -10,6 +10,7 @@ const {
   buildHelixTraceUrlFromSummary,
   buildSpanDashboardUrl,
   buildEventSearchQuery, buildEventSearchBody, buildEventSearchUrl, buildEventByIdUrl,
+  extractSearchEventIds, extractCreatedEventIds,
 } = require('../routes/situations-payloads');
 
 // A span shaped exactly like otelStore.getTrace().spans[]: .attributes and
@@ -703,6 +704,11 @@ describe('event search builders', () => {
     expect(buildEventSearchQuery({ all: true })).toBe('class:OTEL_TRACE_ANOMALY AND status:OPEN');
   });
 
+  it('buildEventSearchQuery with neither traceId nor all returns the two-clause base', () => {
+    expect(buildEventSearchQuery({})).toBe('class:OTEL_TRACE_ANOMALY AND status:OPEN');
+    expect(buildEventSearchQuery()).toBe('class:OTEL_TRACE_ANOMALY AND status:OPEN');
+  });
+
   it('buildEventSearchBody wraps the query in an msearch DSL body', () => {
     const body = buildEventSearchBody({ all: true });
     expect(body.size).toBe(500);
@@ -714,5 +720,31 @@ describe('event search builders', () => {
   it('buildEventSearchUrl and buildEventByIdUrl target the events-service paths', () => {
     expect(buildEventSearchUrl('https://t.onbmc.com/')).toBe('https://t.onbmc.com/events-service/api/v1.0/events/msearch');
     expect(buildEventByIdUrl('https://t.onbmc.com', 'eps.1:2')).toBe('https://t.onbmc.com/events-service/api/v1.0/events/eps.1%3A2');
+  });
+});
+
+describe('event-id extractors', () => {
+  it('extractSearchEventIds reads ids from msearch hits (_id, then _source fallbacks)', () => {
+    const resp = { hits: { hits: [
+      { _id: 'eps.1', _source: { id: 'ignored' } },
+      { _source: { _id: 'eps.2' } },
+      { _source: { id: 'eps.3' } },
+      { _id: 'eps.1' }, // dup
+    ] } };
+    expect(extractSearchEventIds(resp)).toEqual(['eps.1', 'eps.2', 'eps.3']);
+  });
+
+  it('extractSearchEventIds returns [] for empty/malformed responses', () => {
+    expect(extractSearchEventIds(null)).toEqual([]);
+    expect(extractSearchEventIds({})).toEqual([]);
+    expect(extractSearchEventIds({ hits: {} })).toEqual([]);
+  });
+
+  it('extractCreatedEventIds reads successfullEventIds (sic) and tolerant fallbacks', () => {
+    expect(extractCreatedEventIds({ successfullEventIds: ['eps.9'] })).toEqual(['eps.9']);
+    expect(extractCreatedEventIds({ eventIds: ['eps.8'] })).toEqual(['eps.8']);
+    expect(extractCreatedEventIds(['eps.7'])).toEqual(['eps.7']);
+    expect(extractCreatedEventIds([{ id: 'eps.6' }])).toEqual(['eps.6']);
+    expect(extractCreatedEventIds(null)).toEqual([]);
   });
 });
