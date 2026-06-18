@@ -57,6 +57,8 @@ export const TraceDetailDrawer: React.FC<{
     setSendMsg('');
     setPriorSend(readSentMap()[traceId] || null);
     setAttempts(readAttemptsMap()[traceId] || []);
+    setResolveState('idle');
+    setResolveMsg('');
   }, [traceId]);
 
   const p95Ms = detail
@@ -87,6 +89,21 @@ export const TraceDetailDrawer: React.FC<{
       localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(map));
       setAttempts(list);
     } catch { /* localStorage may be unavailable — silent */ }
+  };
+
+  const [resolveState, setResolveState] = useState<'idle' | 'resolving' | 'done' | 'error'>('idle');
+  const [resolveMsg, setResolveMsg] = useState('');
+
+  const resolveTrace = async () => {
+    setResolveState('resolving'); setResolveMsg('');
+    try {
+      const res = await fetch('/api/situations/close-events', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ traceId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { setResolveState('done'); setResolveMsg(`Closed ${data.closed ?? 0} event(s); Situation will resolve shortly.`); }
+      else { setResolveState('error'); setResolveMsg(data.error || `Failed (${res.status})`); }
+    } catch (e: any) { setResolveState('error'); setResolveMsg(e.message || 'Network error'); }
   };
 
   const sendToAiops = async () => {
@@ -206,6 +223,24 @@ export const TraceDetailDrawer: React.FC<{
                         </ul>
                       </details>
                     )}
+                  </div>
+                )}
+              </div>
+            )}
+            {priorSend && (
+              <div className="relative flex flex-col items-end">
+                <button
+                  onClick={resolveTrace}
+                  disabled={resolveState === 'resolving'}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-gray-700 text-tiny font-semibold text-gray-200 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Close this trace's Helix event(s) so the Situation auto-resolves"
+                >
+                  {resolveState === 'resolving' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {resolveState === 'resolving' ? 'Resolving…' : 'Resolve'}
+                </button>
+                {resolveMsg && (
+                  <div className="absolute top-full right-0 mt-1 max-w-xs text-right z-30">
+                    <div className={`text-tiny ${resolveState === 'error' ? 'text-danger-text' : 'text-gray-400'}`}>{resolveMsg}</div>
                   </div>
                 )}
               </div>
