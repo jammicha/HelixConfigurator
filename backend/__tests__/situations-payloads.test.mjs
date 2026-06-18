@@ -11,6 +11,7 @@ const {
   buildSpanDashboardUrl,
   buildEventSearchQuery, buildEventSearchBody, buildEventSearchUrl, buildEventByIdUrl,
   extractSearchEventIds, extractCreatedEventIds,
+  summarizeOpenEvents,
 } = require('../routes/situations-payloads');
 
 // A span shaped exactly like otelStore.getTrace().spans[]: .attributes and
@@ -746,5 +747,25 @@ describe('event-id extractors', () => {
     expect(extractCreatedEventIds(['eps.7'])).toEqual(['eps.7']);
     expect(extractCreatedEventIds([{ id: 'eps.6' }])).toEqual(['eps.6']);
     expect(extractCreatedEventIds(null)).toEqual([]);
+    expect(extractCreatedEventIds([{ _id: 'eps.5' }])).toEqual(['eps.5']);
+    expect(extractCreatedEventIds({ successfulEventIds: ['eps.x'] })).toEqual(['eps.x']);
+  });
+});
+
+describe('summarizeOpenEvents', () => {
+  it('trims msearch hits to the panel fields', () => {
+    const resp = { hits: { hits: [
+      { _id: 'eps.1', _source: { service_name: 'redis-manual', msg: 'OTel anomaly: x', severity: 'CRITICAL', source_identifier: 'helix-otel-trace:abc', creation_time: 111 } },
+      { _id: 'eps.2', _source: { service_name: 'hotrod' } },
+    ] } };
+    expect(summarizeOpenEvents(resp)).toEqual([
+      { id: 'eps.1', service: 'redis-manual', msg: 'OTel anomaly: x', severity: 'CRITICAL', sourceIdentifier: 'helix-otel-trace:abc', creationTime: 111 },
+      { id: 'eps.2', service: 'hotrod', msg: '', severity: '', sourceIdentifier: '', creationTime: null },
+    ]);
+  });
+
+  it('drops hits with no id and tolerates empty input', () => {
+    expect(summarizeOpenEvents({ hits: { hits: [{ _source: {} }] } })).toEqual([]);
+    expect(summarizeOpenEvents(null)).toEqual([]);
   });
 });

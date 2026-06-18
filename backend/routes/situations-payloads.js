@@ -613,6 +613,23 @@ function buildClassByIdUrl(base, id) {
   return `${classesBase(base)}/${encodeURIComponent(id)}`;
 }
 
+// Trim msearch hits to the fields the "Sent events" panel renders. _source slot
+// names mirror our event class_slots; confirm live (Task 10, risk #1).
+function summarizeOpenEvents(resp) {
+  const hits = resp && resp.hits && Array.isArray(resp.hits.hits) ? resp.hits.hits : [];
+  return hits.map((h) => {
+    const s = (h && h._source) || {};
+    return {
+      id: String((h && h._id) || s._id || s.id || ''),
+      service: s.service_name || '',
+      msg: s.msg || '',
+      severity: s.severity || '',
+      sourceIdentifier: s.source_identifier || '',
+      creationTime: s.creation_time != null ? s.creation_time : (s.creationTime != null ? s.creationTime : null),
+    };
+  }).filter((e) => e.id);
+}
+
 // ---- Event search + update (auto-close / notes) ----
 
 const eventsBase = (base) => `${String(base).replace(/\/+$/, '')}/events-service/api/v1.0/events`;
@@ -677,4 +694,5 @@ module.exports = {
   buildClassByNameUrl, buildClassByIdUrl,
   buildEventSearchQuery, buildEventSearchBody, buildEventSearchUrl, buildEventByIdUrl,
   extractSearchEventIds, extractCreatedEventIds,
+  summarizeOpenEvents,
 };
