@@ -260,15 +260,16 @@ function register(app, { otelStore }) {
       return res.status(502).json({ error: 'Failed to reach Helix event-policies API', details: e.message });
     }
   });
+
   // Close the configurator's OWN open OTEL_TRACE_ANOMALY events so the correlated
-  // Situation auto-closes. Stateless: re-discovers events from Helix by
-  // source_identifier (no remembered ids). Non-destructive — only ever touches
-  // events whose class is OTEL_TRACE_ANOMALY (the search is scoped to it).
+  // Situation auto-closes. Stateless and CLASS-SCOPED: every path (traceId,
+  // sourceIdentifier, all) resolves ids through an OTEL_TRACE_ANOMALY + status:OPEN
+  // search, so the route can only ever close events the configurator created — never
+  // arbitrary tenant events. Re-discovers from Helix; remembers no ids locally.
   app.post('/api/situations/close-events', async (req, res) => {
-    const { traceId, all, eventIds } = req.body || {};
-    const explicitIds = Array.isArray(eventIds) ? eventIds.filter((x) => typeof x === 'string' && x.trim()) : null;
-    if (!traceId && !all && (!explicitIds || explicitIds.length === 0)) {
-      return res.status(400).json({ error: 'Provide one of: traceId, all:true, or eventIds[]' });
+    const { traceId, all, sourceIdentifier } = req.body || {};
+    if (!traceId && !all && !sourceIdentifier) {
+      return res.status(400).json({ error: 'Provide one of: traceId, sourceIdentifier, or all:true' });
     }
     const apiKey = (process.env.HELIX_API_KEY || '').trim();
     if (!apiKey) return res.status(412).json({ error: 'HELIX_API_KEY not configured — set it on the Settings page first.' });
@@ -279,19 +280,17 @@ function register(app, { otelStore }) {
     try { bearer = await getHelixBearerToken(baseUrl, apiKey); }
     catch (e) { return res.status(502).json({ error: 'Helix authentication failed', details: e.message, upstream: e.upstream }); }
 
-    let ids = explicitIds;
-    if (!ids || ids.length === 0) {
-      try {
-        const sr = await axios.post(buildEventSearchUrl(baseUrl), buildEventSearchBody({ traceId, all: !!all }), {
-          headers: bmcHeaders(bearer), timeout: 15_000, validateStatus: () => true,
-        });
-        if (sr.status < 200 || sr.status >= 300) {
-          return res.status(502).json({ error: `Helix event search returned ${sr.status}`, upstream: sr.data });
-        }
-        ids = extractSearchEventIds(sr.data);
-      } catch (e) {
-        return res.status(502).json({ error: 'Failed to reach Helix event search API', details: e.message });
+    let ids;
+    try {
+      const sr = await axios.post(buildEventSearchUrl(baseUrl), buildEventSearchBody({ traceId, sourceIdentifier, all: !!all }), {
+        headers: bmcHeaders(bearer), timeout: 15_000, validateStatus: () => true,
+      });
+      if (sr.status < 200 || sr.status >= 300) {
+        return res.status(502).json({ error: `Helix event search returned ${sr.status}`, upstream: sr.data });
       }
+      ids = extractSearchEventIds(sr.data);
+    } catch (e) {
+      return res.status(502).json({ error: 'Failed to reach Helix event search API', details: e.message });
     }
     if (ids.length === 0) return res.json({ ok: true, closed: 0, results: [] });
 
@@ -306,7 +305,9 @@ function register(app, { otelStore }) {
         });
         status = r.status;
         const body = JSON.stringify(r.data || '').toLowerCase();
-        ok = (r.status >= 200 && r.status < 300) || body.includes('already') || body.includes('closed');
+        // Soft-success when the event was already closed (idempotent re-close). Narrow
+        // match so "already assigned"/other 4xx aren't swallowed. Task 10 confirms exact wording.
+        ok = (r.status >= 200 && r.status < 300) || (body.includes('already') && body.includes('clos'));
         // 2) Best-effort custom resolution note (separate; never affects close result).
         try {
           await axios.patch(buildEventByIdUrl(baseUrl, id), buildEventUpdateBody({ note }), {

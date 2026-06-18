@@ -682,22 +682,29 @@ function buildEventSearchUrl(base) { return `${eventsBase(base)}/msearch`; }
 function buildEventByIdUrl(base, id) { return `${eventsBase(base)}/${encodeURIComponent(id)}`; }
 
 // Elasticsearch query_string to find the configurator's OWN open OTEL_TRACE_ANOMALY
-// events. Colons in source_identifier are escaped (\:) per BMC's msearch DSL, and a
-// trailing * (with analyze_wildcard) catches the optional :<service> suffix that
-// multi-event mode appends.
-function buildEventSearchQuery({ traceId, all } = {}) {
+// events. Colons in source_identifier are escaped (\:) per BMC's msearch DSL.
+// Three selection modes:
+//   sourceIdentifier — exact match on one event (no trailing * wildcard).
+//   traceId          — prefix match: trailing * catches the optional :<service>
+//                      suffix that multi-event mode appends.
+//   all              — returns every open OTEL_TRACE_ANOMALY event (no filter).
+function buildEventSearchQuery({ traceId, sourceIdentifier, all } = {}) {
   const parts = [`class:${OTEL_TRACE_ANOMALY_CLASS}`, 'status:OPEN'];
-  if (!all && traceId) {
-    const esc = String(traceId).replace(/[\\:]/g, '\\$&');
-    // `\\:` in this template literal yields the two-char string `\:` — the BMC msearch DSL colon escape.
-    parts.push(`source_identifier.keyword:helix-otel-trace\\:${esc}*`);
+  // `\\:` in these template literals yields the two-char `\:` — the BMC msearch DSL colon escape.
+  const escape = (v) => String(v).replace(/[\\:]/g, '\\$&');
+  if (!all && sourceIdentifier) {
+    // Exact match on one event (no trailing * wildcard).
+    parts.push(`source_identifier.keyword:${escape(sourceIdentifier)}`);
+  } else if (!all && traceId) {
+    // Prefix match: trailing * catches the optional :<service> suffix of multi-event mode.
+    parts.push(`source_identifier.keyword:helix-otel-trace\\:${escape(traceId)}*`);
   }
   return parts.join(' AND ');
 }
 
 // BMC events msearch request body (Elasticsearch DSL). size caps results; newest first.
-function buildEventSearchBody({ traceId, all, size = 500 } = {}) {
-  const queryString = { query_string: { analyze_wildcard: true, query: buildEventSearchQuery({ traceId, all }) } };
+function buildEventSearchBody({ traceId, sourceIdentifier, all, size = 500 } = {}) {
+  const queryString = { query_string: { analyze_wildcard: true, query: buildEventSearchQuery({ traceId, sourceIdentifier, all }) } };
   return {
     size,
     query: { bool: { filter: [queryString] } },

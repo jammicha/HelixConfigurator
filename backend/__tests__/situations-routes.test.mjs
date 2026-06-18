@@ -34,18 +34,23 @@ function mockAxios({ hits = [] } = {}) {
 beforeEach(setEnv);
 afterEach(() => vi.restoreAllMocks());
 
-describe('POST /api/situations/convert-trace (eventIds capture)', () => {
-  it('returns the created event ids from the ingest response', async () => {
-    const fakeTrace = { summary: { service_name: 'redis-manual', service_namespace: 'hotrod', root_operation: 'op', duration_ms: 100, span_count: 1, trace_id: 'abc123', start_time_ns: 0, has_error: false }, spans: [] };
+describe('POST /api/situations/convert-trace (eventIds + triage note)', () => {
+  it('returns created event ids and writes a best-effort triage note', async () => {
+    const fakeTrace = {
+      summary: { service_name: 'redis-manual', service_namespace: 'hotrod', root_operation: 'op', duration_ms: 100, span_count: 1, trace_id: 'abc123', start_time_ns: 0, has_error: false },
+      spans: [{ spanId: 's1', serviceName: 'redis-manual', name: 'op', statusCode: 0, startTimeNs: 0, durationMs: 100, parentSpanId: null, events: [], attributes: {}, resourceAttributes: {} }],
+    };
     vi.spyOn(axios, 'post').mockImplementation(async (url) => {
       if (url.endsWith('/ims/api/v1/access_keys/login')) return { status: 200, data: { json_web_token: 'jwt' } };
       if (url.endsWith('/events-service/api/v1.0/events')) return { status: 200, data: { successfullEventIds: ['eps.1'] } };
       return { status: 404, data: {} };
     });
+    const patchSpy = vi.spyOn(axios, 'patch').mockResolvedValue({ status: 200, data: {} });
     const res = await request(makeApp({ getTrace: () => fakeTrace })).post('/api/situations/convert-trace').send({ traceId: 'abc123' });
     expect(res.status).toBe(200);
     expect(res.body.eventIds).toEqual(['eps.1']);
-    expect(res.body).toHaveProperty('noteWritten');
+    expect(res.body.noteWritten).toBe(true);
+    expect(patchSpy.mock.calls[0][0]).toContain('/events-service/api/v1.0/events/eps.1');
   });
 });
 
@@ -66,13 +71,19 @@ describe('POST /api/situations/close-events', () => {
     expect(closeCalls[0][0]).toContain('/events-service/api/v1.0/events/eps.1');
   });
 
-  it('closes by explicit eventIds without searching', async () => {
-    const postSpy = vi.spyOn(axios, 'post').mockResolvedValue({ status: 200, data: { json_web_token: 'jwt' } });
-    vi.spyOn(axios, 'patch').mockResolvedValue({ status: 200, data: {} });
-    const res = await request(makeApp()).post('/api/situations/close-events').send({ eventIds: ['eps.9'] });
+  it('closes by sourceIdentifier via a class-scoped search', async () => {
+    let searchedQuery = '';
+    vi.spyOn(axios, 'post').mockImplementation(async (url, body) => {
+      if (url.endsWith('/ims/api/v1/access_keys/login')) return { status: 200, data: { json_web_token: 'jwt' } };
+      if (url.endsWith('/events/msearch')) { searchedQuery = body.query.bool.filter[0].query_string.query; return { status: 200, data: { hits: { hits: [{ _id: 'eps.7' }] } } }; }
+      return { status: 404, data: {} };
+    });
+    const patchSpy = vi.spyOn(axios, 'patch').mockResolvedValue({ status: 200, data: {} });
+    const res = await request(makeApp()).post('/api/situations/close-events').send({ sourceIdentifier: 'helix-otel-trace:abc:redis' });
     expect(res.status).toBe(200);
     expect(res.body.closed).toBe(1);
-    expect(postSpy.mock.calls.some(([u]) => u.endsWith('/events/msearch'))).toBe(false);
+    expect(searchedQuery).toContain('source_identifier.keyword:helix-otel-trace\\:abc\\:redis');
+    expect(patchSpy.mock.calls[0][0]).toContain('/events-service/api/v1.0/events/eps.7');
   });
 
   it('soft-succeeds with closed:0 when nothing matches', async () => {
@@ -82,7 +93,7 @@ describe('POST /api/situations/close-events', () => {
     expect(res.body).toMatchObject({ ok: true, closed: 0 });
   });
 
-  it('400s when neither traceId, all, nor eventIds is given', async () => {
+  it('400s when neither traceId, sourceIdentifier, nor all is given', async () => {
     const res = await request(makeApp()).post('/api/situations/close-events').send({});
     expect(res.status).toBe(400);
   });

@@ -711,6 +711,11 @@ describe('event search builders', () => {
     expect(buildEventSearchQuery()).toBe('class:OTEL_TRACE_ANOMALY AND status:OPEN');
   });
 
+  it('buildEventSearchQuery with sourceIdentifier does an exact (no-wildcard) escaped match', () => {
+    expect(buildEventSearchQuery({ sourceIdentifier: 'helix-otel-trace:abc:redis' }))
+      .toBe('class:OTEL_TRACE_ANOMALY AND status:OPEN AND source_identifier.keyword:helix-otel-trace\\:abc\\:redis');
+  });
+
   it('buildEventSearchBody wraps the query in an msearch DSL body', () => {
     const body = buildEventSearchBody({ all: true });
     expect(body.size).toBe(500);
