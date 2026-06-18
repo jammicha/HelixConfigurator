@@ -6,6 +6,7 @@ const {
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   buildEventCiHostname,
   deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace, buildHotPath, hotPathServices,
+  describeCauseCall, extractStackTrace, buildSlowestHop, buildResourceContext, countErrorSpans,
   buildHelixTraceUrlFromSummary,
   buildSpanDashboardUrl,
 } = require('../routes/situations-payloads');
@@ -58,7 +59,7 @@ describe('buildClassDefinition', () => {
   it('ADDED_SLOTS lists only the slots this feature adds (helix_trace_id pre-existed)', () => {
     // Task 5 patches an already-registered class with exactly these. helix_trace_id
     // is intentionally excluded — it shipped with the original class definition.
-    expect(ADDED_SLOTS).toEqual(['service_name', 'service_namespace']);
+    expect(ADDED_SLOTS).toContain('cause_detail');
     const slotNames = buildClassDefinition().attributes.map(a => a.name);
     for (const s of ADDED_SLOTS) expect(slotNames).toContain(s);
   });
@@ -93,6 +94,69 @@ describe('hotPathServices', () => {
     ];
     expect(hotPathServices(spans, 'c')).toEqual(['frontend', 'driver', 'redis-manual']);
     expect(hotPathServices(spans, undefined)).toEqual([]);
+  });
+});
+
+describe('Tier 1/2 trace-context enrichment', () => {
+  const richCauseSpan = {
+    spanId: 'c', parentSpanId: 'b', serviceName: 'redis-manual', name: 'Fetch Driver Profile',
+    startTimeNs: 3, durationMs: 117, statusCode: 2, statusMessage: 'redis timeout',
+    attributes: { 'db.system': 'redis', 'db.statement': 'GET driver:profile:42', 'net.peer.name': 'redis', 'net.peer.port': 6379 },
+    resourceAttributes: { 'deployment.environment': 'production', 'service.version': '1.4.2', 'k8s.pod.name': 'redis-7d9', 'k8s.namespace.name': 'hotrod', 'host.name': 'ip-10-0-1-5', 'telemetry.sdk.language': 'go' },
+    events: [{ name: 'exception', attributes: { 'exception.type': 'TimeoutError', 'exception.message': 'redis timeout', 'exception.stacktrace': 'TimeoutError: redis timeout\n  at fetch (redis.go:42)\n  at handler (driver.go:88)' } }],
+  };
+
+  it('describeCauseCall summarizes DB / HTTP calls with the peer', () => {
+    expect(describeCauseCall(richCauseSpan)).toBe('redis GET driver:profile:42 (peer redis:6379)');
+    expect(describeCauseCall({ attributes: { 'http.method': 'GET', 'http.target': '/dispatch', 'http.status_code': 500 } }))
+      .toBe('HTTP GET /dispatch → 500');
+    expect(describeCauseCall({ attributes: {} })).toBe('');
+  });
+
+  it('extractStackTrace pulls the truncated exception stack', () => {
+    expect(extractStackTrace(richCauseSpan)).toContain('TimeoutError: redis timeout');
+    expect(extractStackTrace({ events: [] })).toBe('');
+  });
+
+  it('buildSlowestHop finds the span with the most self-time', () => {
+    const spans = [
+      { spanId: 'a', parentSpanId: null, serviceName: 'frontend', name: 'GET', durationMs: 139 },
+      { spanId: 'b', parentSpanId: 'a', serviceName: 'driver', name: 'FindNearest', durationMs: 120 },
+      { spanId: 'c', parentSpanId: 'b', serviceName: 'redis-manual', name: 'Fetch', durationMs: 117 },
+    ];
+    expect(buildSlowestHop(spans, 139)).toBe('redis-manual/Fetch: 117ms (84% of 139ms)');
+  });
+
+  it('buildResourceContext maps deployment/runtime attrs', () => {
+    expect(buildResourceContext(richCauseSpan)).toEqual({
+      environment: 'production', service_version: '1.4.2', k8s_pod: 'redis-7d9',
+      k8s_namespace: 'hotrod', host: 'ip-10-0-1-5', sdk_language: 'go',
+    });
+  });
+
+  it('countErrorSpans counts ERROR-status and exception spans', () => {
+    expect(countErrorSpans([richCauseSpan, { statusCode: 0 }, { statusCode: 2 }])).toBe(2);
+  });
+
+  it('buildAnomalyEventPayload surfaces the Tier 1/2 slots', () => {
+    const spans = [
+      { spanId: 'a', parentSpanId: null, serviceName: 'frontend', name: 'GET /dispatch', startTimeNs: 1, durationMs: 139, statusCode: 0, attributes: {}, resourceAttributes: {}, events: [] },
+      { spanId: 'b', parentSpanId: 'a', serviceName: 'driver', name: 'FindNearest', startTimeNs: 2, durationMs: 120, statusCode: 0, attributes: {}, resourceAttributes: {}, events: [] },
+      richCauseSpan,
+    ];
+    const [evt] = buildAnomalyEventPayload({
+      summary: { trace_id: 'T9', service_name: 'frontend', service_namespace: 'hotrod', root_operation: 'GET /dispatch', duration_ms: 139, span_count: 3, has_error: true },
+      spans,
+    });
+    const cs = evt.class_slots;
+    expect(cs.cause_detail).toBe('redis GET driver:profile:42 (peer redis:6379)');
+    expect(cs.slowest_hop).toContain('redis-manual/Fetch Driver Profile: 117ms');
+    expect(cs.stack_trace).toContain('TimeoutError');
+    expect(cs.environment).toBe('production');
+    expect(cs.service_version).toBe('1.4.2');
+    expect(cs.k8s_pod).toBe('redis-7d9');
+    expect(cs.host).toBe('ip-10-0-1-5');
+    expect(cs.error_span_count).toBe('1 of 3');
   });
 });
 

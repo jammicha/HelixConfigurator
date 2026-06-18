@@ -36,6 +36,17 @@ function buildClassDefinition() {
       { name: 'probable_cause_span_id', dataType: 'STRING', enum: false },
       { name: 'hot_path', dataType: 'STRING', enum: false },
       { name: 'span_dashboard_url', dataType: 'STRING', enum: false },
+      // Tier 1/2 trace context.
+      { name: 'cause_detail', dataType: 'STRING', enum: false },
+      { name: 'slowest_hop', dataType: 'STRING', enum: false },
+      { name: 'stack_trace', dataType: 'STRING', enum: false },
+      { name: 'environment', dataType: 'STRING', enum: false },
+      { name: 'service_version', dataType: 'STRING', enum: false },
+      { name: 'k8s_pod', dataType: 'STRING', enum: false },
+      { name: 'k8s_namespace', dataType: 'STRING', enum: false },
+      { name: 'host', dataType: 'STRING', enum: false },
+      { name: 'sdk_language', dataType: 'STRING', enum: false },
+      { name: 'error_span_count', dataType: 'STRING', enum: false },
       // NOTE: do NOT declare `priority` here. It's a built-in PRIORITY_1..5 enum
       // slot inherited from the EVENT parent class; re-declaring it as a custom
       // STRING fails the create with ATTR_EXIST_WITH_DIFF_TYPE (500), which aborts
@@ -59,7 +70,13 @@ function buildClassUpdateBody() {
   return { ...rest, attributes: attributes.filter((a) => !BUILTIN_CLASS_ATTRS.has(a.name)) };
 }
 
-const ADDED_SLOTS = ['service_name', 'service_namespace'];
+// Slots the latest provision-class update registers on an already-existing class
+// (beyond the RCA slots, which a prior provisioning already added). Reported in the
+// provision response; the PUT body itself sends the full attribute set regardless.
+const ADDED_SLOTS = [
+  'cause_detail', 'slowest_hop', 'stack_trace', 'environment', 'service_version',
+  'k8s_pod', 'k8s_namespace', 'host', 'sdk_language', 'error_span_count',
+];
 
 // HELIX_API_KEY is `TenantID::AccessKey::SecretKey`. The events-service REST API
 // rejects this key directly; its access/secret halves are exchanged for a JWT at
@@ -116,6 +133,17 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     ? buildSpanDashboardUrl({ baseUrl, tenantId, summary, spanId: cause.probable_cause_span_id, dashboardUid: (spanDashboardUid || '').trim() })
     : '';
 
+  // Tier-1/2 enrichment, all from the trace's own span + resource attributes:
+  // what exactly failed (cause_detail), where the time went (slowest_hop), the
+  // exception stack, where it ran (deployment context), and the error-span count.
+  const causeSpan = (hasSpans && cause && cause.probable_cause_span_id)
+    ? spans.find((s) => s.spanId === cause.probable_cause_span_id) : null;
+  const causeDetail = causeSpan ? describeCauseCall(causeSpan) : '';
+  const stackTrace = causeSpan ? extractStackTrace(causeSpan) : '';
+  const slowestHop = hasSpans ? buildSlowestHop(spans, summary.duration_ms) : '';
+  const errorSpanCount = hasSpans ? countErrorSpans(spans) : 0;
+  const rctx = buildResourceContext(causeSpan || (hasSpans ? spans[0] : null));
+
   // Name the cause whenever an originating error span was found — including a
   // status-only error with no exception type (the common OTel-demo case: span
   // sets ERROR status but emits no `exception` event). Lead with error_type,
@@ -144,6 +172,11 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
       + `${cause.error_message ? ` — ${cause.error_message}` : ''}.`);
     if (cause.code_location) detailLines.push(`Code: ${cause.code_location}.`);
   }
+  if (hasSpans && causeDetail) detailLines.push(`Failing call: ${causeDetail}.`);
+  if (hasSpans && slowestHop) detailLines.push(`Slowest hop: ${slowestHop}.`);
+  const runtimeBits = [rctx.environment, rctx.service_version && `v${rctx.service_version}`, rctx.k8s_pod, rctx.host].filter(Boolean);
+  if (hasSpans && runtimeBits.length) detailLines.push(`Runtime: ${runtimeBits.join(' · ')}.`);
+  if (hasSpans && errorSpanCount) detailLines.push(`Error spans: ${errorSpanCount} of ${summary.span_count}.`);
   if (hasSpans && blast && blast.affected_services) detailLines.push(`Affected services: ${blast.affected_services}.`);
   if (hasSpans && traceUrl) detailLines.push(`Open trace: ${traceUrl}`);
   if (hasSpans && hotPath) detailLines.push(`Path to failure: ${hotPath}.`);
@@ -165,6 +198,17 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     if (cause.probable_cause_span_id) enrichedSlots.probable_cause_span_id = cause.probable_cause_span_id;
     if (hotPath) enrichedSlots.hot_path = hotPath;
     if (spanDashboardUrl) enrichedSlots.span_dashboard_url = spanDashboardUrl;
+    // Tier 1/2
+    if (causeDetail) enrichedSlots.cause_detail = causeDetail;
+    if (slowestHop) enrichedSlots.slowest_hop = slowestHop;
+    if (stackTrace) enrichedSlots.stack_trace = stackTrace;
+    if (rctx.environment) enrichedSlots.environment = rctx.environment;
+    if (rctx.service_version) enrichedSlots.service_version = rctx.service_version;
+    if (rctx.k8s_pod) enrichedSlots.k8s_pod = rctx.k8s_pod;
+    if (rctx.k8s_namespace) enrichedSlots.k8s_namespace = rctx.k8s_namespace;
+    if (rctx.host) enrichedSlots.host = rctx.host;
+    if (rctx.sdk_language) enrichedSlots.sdk_language = rctx.sdk_language;
+    if (errorSpanCount) enrichedSlots.error_span_count = `${errorSpanCount} of ${summary.span_count}`;
   }
 
   // Slots common to every event for this trace (independent of which service the
@@ -303,6 +347,86 @@ function blastRadius(spans) {
     ? `${shown.join(',')} +${distinct.length - CAP} more`
     : shown.join(',');
   return { affected_services: affected, component_count: distinct.length };
+}
+
+// Concise description of the originating call from the cause span's attributes
+// (DB / HTTP / messaging / RPC + peer), for the cause_detail slot. '' if nothing
+// recognizable. Statement is truncated so the slot/message stays readable.
+function describeCauseCall(span) {
+  if (!span || typeof span.attributes !== 'object' || !span.attributes) return '';
+  const a = span.attributes;
+  const peerName = a['net.peer.name'] || a['server.address'] || a['net.sock.peer.addr'] || '';
+  const peer = peerName ? ` (peer ${peerName}${a['net.peer.port'] ? ':' + a['net.peer.port'] : ''})` : '';
+  if (a['db.system']) {
+    const stmt = String(a['db.statement'] || a['db.operation'] || '').slice(0, 200);
+    return `${a['db.system']}${stmt ? ' ' + stmt : ''}${peer}`.trim();
+  }
+  const httpMethod = a['http.method'] || a['http.request.method'];
+  if (httpMethod) {
+    const url = a['http.url'] || a['url.full'] || a['http.target'] || a['http.route'] || a['url.path'] || '';
+    const code = a['http.status_code'] || a['http.response.status_code'] || '';
+    return `HTTP ${httpMethod}${url ? ' ' + url : ''}${code ? ' → ' + code : ''}${peer}`.trim();
+  }
+  if (a['messaging.system']) {
+    const dest = a['messaging.destination.name'] || a['messaging.destination'] || '';
+    const op = a['messaging.operation'] || '';
+    return `${a['messaging.system']}${op ? ' ' + op : ''}${dest ? ' ' + dest : ''}${peer}`.trim();
+  }
+  if (a['rpc.system'] || a['rpc.service']) {
+    const svc = a['rpc.service'] || a['rpc.system'];
+    const method = a['rpc.method'] || '';
+    return `RPC ${svc}${method ? '/' + method : ''}${peer}`.trim();
+  }
+  return peerName ? `call to ${peerName}` : '';
+}
+
+// Truncated exception stack trace from the cause span's `exception` event
+// (first lines, capped) for the stack_trace slot.
+function extractStackTrace(span) {
+  if (!span || !Array.isArray(span.events)) return '';
+  const exc = span.events.find((e) => e && e.name === 'exception');
+  const st = exc && exc.attributes && exc.attributes['exception.stacktrace'];
+  if (!st) return '';
+  return String(st).split('\n').slice(0, 6).join('\n').slice(0, 600);
+}
+
+// The span that consumed the most self-time (its own duration minus its direct
+// children's) — i.e. where the trace actually spent time — as
+// "service/operation: Xms (Y% of total)". '' when not computable.
+function buildSlowestHop(spans, totalMs) {
+  if (!Array.isArray(spans) || spans.length === 0) return '';
+  const childSum = new Map();
+  for (const s of spans) {
+    if (s.parentSpanId) childSum.set(s.parentSpanId, (childSum.get(s.parentSpanId) || 0) + (s.durationMs || 0));
+  }
+  let best = null; let bestSelf = -1;
+  for (const s of spans) {
+    const self = Math.max(0, (s.durationMs || 0) - (childSum.get(s.spanId) || 0));
+    if (self > bestSelf) { bestSelf = self; best = s; }
+  }
+  if (!best) return '';
+  const pct = totalMs > 0 ? Math.round((bestSelf / totalMs) * 100) : 0;
+  return `${best.serviceName || '?'}/${best.name || '?'}: ${Math.round(bestSelf)}ms${pct ? ` (${pct}% of ${Math.round(totalMs)}ms)` : ''}`;
+}
+
+// Deployment context from a span's resource attributes (where the service ran).
+function buildResourceContext(span) {
+  const r = (span && span.resourceAttributes) || {};
+  return {
+    environment: r['deployment.environment'] || r['deployment.environment.name'] || '',
+    service_version: r['service.version'] || '',
+    k8s_pod: r['k8s.pod.name'] || '',
+    k8s_namespace: r['k8s.namespace.name'] || '',
+    host: r['host.name'] || r['k8s.node.name'] || '',
+    sdk_language: r['telemetry.sdk.language'] || '',
+  };
+}
+
+// Count of error spans (ERROR status or carrying an exception event).
+function countErrorSpans(spans) {
+  if (!Array.isArray(spans)) return 0;
+  return spans.filter((s) => s && (s.statusCode === 2
+    || (Array.isArray(s.events) && s.events.some((e) => e && e.name === 'exception')))).length;
 }
 
 // Ancestor chain from the originating error span up to the root, in call order
@@ -496,6 +620,7 @@ module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey, buildEventCiHostname,
   hotPathServices,
+  describeCauseCall, extractStackTrace, buildSlowestHop, buildResourceContext, countErrorSpans,
   deriveProbableCause, blastRadius, buildHotPath, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary, buildSpanDashboardUrl,
   buildClassByNameUrl, buildClassByIdUrl,
