@@ -9,6 +9,7 @@ const {
   describeCauseCall, extractStackTrace, buildSlowestSpan, buildResourceContext, countErrorSpans,
   buildHelixTraceUrlFromSummary,
   buildSpanDashboardUrl,
+  buildEventSearchQuery, buildEventSearchBody, buildEventSearchUrl, buildEventByIdUrl,
 } = require('../routes/situations-payloads');
 
 // A span shaped exactly like otelStore.getTrace().spans[]: .attributes and
@@ -689,5 +690,29 @@ describe('class URL builders (non-destructive slot update)', () => {
   it('strips a trailing slash from the base', () => {
     expect(buildClassByIdUrl('https://t.onbmc.com/', 'abc'))
       .toBe('https://t.onbmc.com/events-service/api/v1.0/events/classes/abc');
+  });
+});
+
+describe('event search builders', () => {
+  it('buildEventSearchQuery scopes to our class + OPEN, with an escaped source_identifier prefix', () => {
+    const q = buildEventSearchQuery({ traceId: 'abc123' });
+    expect(q).toBe("class:OTEL_TRACE_ANOMALY AND status:OPEN AND source_identifier.keyword:helix-otel-trace\\:abc123*");
+  });
+
+  it('buildEventSearchQuery with all:true drops the source_identifier clause', () => {
+    expect(buildEventSearchQuery({ all: true })).toBe('class:OTEL_TRACE_ANOMALY AND status:OPEN');
+  });
+
+  it('buildEventSearchBody wraps the query in an msearch DSL body', () => {
+    const body = buildEventSearchBody({ all: true });
+    expect(body.size).toBe(500);
+    expect(body.query.bool.filter[0].query_string.analyze_wildcard).toBe(true);
+    expect(body.query.bool.filter[0].query_string.query).toBe('class:OTEL_TRACE_ANOMALY AND status:OPEN');
+    expect(body.sort.creation_time.order).toBe('desc');
+  });
+
+  it('buildEventSearchUrl and buildEventByIdUrl target the events-service paths', () => {
+    expect(buildEventSearchUrl('https://t.onbmc.com/')).toBe('https://t.onbmc.com/events-service/api/v1.0/events/msearch');
+    expect(buildEventByIdUrl('https://t.onbmc.com', 'eps.1:2')).toBe('https://t.onbmc.com/events-service/api/v1.0/events/eps.1%3A2');
   });
 });

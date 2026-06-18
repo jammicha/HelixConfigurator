@@ -613,6 +613,35 @@ function buildClassByIdUrl(base, id) {
   return `${classesBase(base)}/${encodeURIComponent(id)}`;
 }
 
+// ---- Event search + update (auto-close / notes) ----
+
+const eventsBase = (base) => `${String(base).replace(/\/+$/, '')}/events-service/api/v1.0/events`;
+function buildEventSearchUrl(base) { return `${eventsBase(base)}/msearch`; }
+function buildEventByIdUrl(base, id) { return `${eventsBase(base)}/${encodeURIComponent(id)}`; }
+
+// Elasticsearch query_string to find the configurator's OWN open OTEL_TRACE_ANOMALY
+// events. Colons in source_identifier are escaped (\:) per BMC's msearch DSL, and a
+// trailing * (with analyze_wildcard) catches the optional :<service> suffix that
+// multi-event mode appends.
+function buildEventSearchQuery({ traceId, all } = {}) {
+  const parts = [`class:${OTEL_TRACE_ANOMALY_CLASS}`, 'status:OPEN'];
+  if (!all && traceId) {
+    const esc = String(traceId).replace(/[\\:]/g, '\\$&');
+    parts.push(`source_identifier.keyword:helix-otel-trace\\:${esc}*`);
+  }
+  return parts.join(' AND ');
+}
+
+// BMC events msearch request body (Elasticsearch DSL). size caps results; newest first.
+function buildEventSearchBody({ traceId, all, size = 500 } = {}) {
+  return {
+    size,
+    query: { bool: { filter: [{ query_string: { analyze_wildcard: true, query: buildEventSearchQuery({ traceId, all }) } }] } },
+    sort: { creation_time: { order: 'desc', unmapped_type: 'boolean' } },
+    script_fields: {},
+  };
+}
+
 module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey, buildEventCiHostname,
@@ -621,4 +650,5 @@ module.exports = {
   deriveProbableCause, blastRadius, buildHotPath, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary, buildSpanDashboardUrl,
   buildClassByNameUrl, buildClassByIdUrl,
+  buildEventSearchQuery, buildEventSearchBody, buildEventSearchUrl, buildEventByIdUrl,
 };
