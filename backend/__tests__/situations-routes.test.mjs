@@ -98,3 +98,26 @@ describe('POST /api/situations/close-events', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('GET /api/situations/open-events', () => {
+  it('returns the summarized open OTEL_TRACE_ANOMALY events', async () => {
+    vi.spyOn(axios, 'post').mockImplementation(async (url) => {
+      if (url.endsWith('/ims/api/v1/access_keys/login')) return { status: 200, data: { json_web_token: 'jwt' } };
+      if (url.endsWith('/events/msearch')) return { status: 200, data: { hits: { hits: [
+        { _id: 'eps.1', _source: { service_name: 'redis-manual', msg: 'm', severity: 'CRITICAL', source_identifier: 'helix-otel-trace:abc', creation_time: 1 } },
+      ] } } };
+      return { status: 404, data: {} };
+    });
+    const res = await request(makeApp()).get('/api/situations/open-events');
+    expect(res.status).toBe(200);
+    expect(res.body.events).toEqual([
+      { id: 'eps.1', service: 'redis-manual', msg: 'm', severity: 'CRITICAL', sourceIdentifier: 'helix-otel-trace:abc', creationTime: 1 },
+    ]);
+  });
+
+  it('412s with no API key', async () => {
+    delete process.env.HELIX_API_KEY;
+    const res = await request(makeApp()).get('/api/situations/open-events');
+    expect(res.status).toBe(412);
+  });
+});

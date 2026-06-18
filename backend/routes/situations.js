@@ -319,6 +319,31 @@ function register(app, { otelStore }) {
     }
     return res.json({ ok: true, closed: results.filter((r) => r.ok).length, results });
   });
+
+  // List the configurator's open OTEL_TRACE_ANOMALY events for the "Sent events"
+  // panel. Read-only; viewer-independent (queries Helix, not the local store).
+  app.get('/api/situations/open-events', async (req, res) => {
+    const apiKey = (process.env.HELIX_API_KEY || '').trim();
+    if (!apiKey) return res.status(412).json({ error: 'HELIX_API_KEY not configured — set it on the Settings page first.' });
+    const baseUrl = resolveEventsBaseUrl();
+    if (!baseUrl) return res.status(412).json({ error: 'No events endpoint configured — set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
+
+    let bearer;
+    try { bearer = await getHelixBearerToken(baseUrl, apiKey); }
+    catch (e) { return res.status(502).json({ error: 'Helix authentication failed', details: e.message, upstream: e.upstream }); }
+
+    try {
+      const sr = await axios.post(buildEventSearchUrl(baseUrl), buildEventSearchBody({ all: true }), {
+        headers: bmcHeaders(bearer), timeout: 15_000, validateStatus: () => true,
+      });
+      if (sr.status < 200 || sr.status >= 300) {
+        return res.status(502).json({ error: `Helix event search returned ${sr.status}`, upstream: sr.data });
+      }
+      return res.json({ ok: true, events: summarizeOpenEvents(sr.data) });
+    } catch (e) {
+      return res.status(502).json({ error: 'Failed to reach Helix event search API', details: e.message });
+    }
+  });
 }
 
 module.exports = { register };
