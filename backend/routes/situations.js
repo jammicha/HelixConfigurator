@@ -9,6 +9,8 @@ const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   buildClassByNameUrl, buildClassByIdUrl,
+  buildTriageNoteForTrace, buildEventUpdateBody, buildEventByIdUrl, extractCreatedEventIds,
+  buildEventSearchUrl, buildEventSearchBody, extractSearchEventIds, buildResolutionNote, summarizeOpenEvents,
 } = require('./situations-payloads');
 
 // Derive the events-service base URL. Prefer an explicit HELIX_EVENTS_ENDPOINT
@@ -61,6 +63,22 @@ async function getHelixBearerToken(baseUrl, apiKey) {
   }
   _bearerCache = { key: apiKey, token: jwt, exp: Date.now() + 14 * 60_000 };
   return jwt;
+}
+
+// Best-effort: PATCH a note onto each just-created event's Logs & Notes tab.
+// Never throws — a note failure must not fail the send. Returns true if any wrote.
+async function attachNoteToEvents(baseUrl, bearer, eventIds, note) {
+  if (!note || !Array.isArray(eventIds) || eventIds.length === 0) return false;
+  let any = false;
+  for (const id of eventIds) {
+    try {
+      const r = await axios.patch(buildEventByIdUrl(baseUrl, id), buildEventUpdateBody({ note }), {
+        headers: bmcHeaders(bearer), timeout: 10_000, validateStatus: () => true,
+      });
+      if (r.status >= 200 && r.status < 300) any = true;
+    } catch { /* best-effort */ }
+  }
+  return any;
 }
 
 function register(app, { otelStore }) {
@@ -116,7 +134,13 @@ function register(app, { otelStore }) {
         validateStatus: () => true,
       });
       if (response.status >= 200 && response.status < 300) {
-        return res.json({ ok: true, severity, upstream: response.data });
+        const createdIds = extractCreatedEventIds(response.data);
+        const triageNote = buildTriageNoteForTrace({
+          summary, spans: trace.spans, baseUrl: portalBaseUrl, tenantId, source: process.env.X_SOURCE,
+        });
+        let noteWritten = false;
+        try { noteWritten = await attachNoteToEvents(baseUrl, bearer, createdIds, triageNote); } catch { /* best-effort */ }
+        return res.json({ ok: true, severity, eventIds: createdIds, noteWritten, upstream: response.data });
       }
       return res.status(502).json({
         error: `Helix events API returned ${response.status}`,
