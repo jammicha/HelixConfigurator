@@ -260,6 +260,64 @@ function register(app, { otelStore }) {
       return res.status(502).json({ error: 'Failed to reach Helix event-policies API', details: e.message });
     }
   });
+  // Close the configurator's OWN open OTEL_TRACE_ANOMALY events so the correlated
+  // Situation auto-closes. Stateless: re-discovers events from Helix by
+  // source_identifier (no remembered ids). Non-destructive — only ever touches
+  // events whose class is OTEL_TRACE_ANOMALY (the search is scoped to it).
+  app.post('/api/situations/close-events', async (req, res) => {
+    const { traceId, all, eventIds } = req.body || {};
+    const explicitIds = Array.isArray(eventIds) ? eventIds.filter((x) => typeof x === 'string' && x.trim()) : null;
+    if (!traceId && !all && (!explicitIds || explicitIds.length === 0)) {
+      return res.status(400).json({ error: 'Provide one of: traceId, all:true, or eventIds[]' });
+    }
+    const apiKey = (process.env.HELIX_API_KEY || '').trim();
+    if (!apiKey) return res.status(412).json({ error: 'HELIX_API_KEY not configured — set it on the Settings page first.' });
+    const baseUrl = resolveEventsBaseUrl();
+    if (!baseUrl) return res.status(412).json({ error: 'No events endpoint configured — set HELIX_EVENTS_ENDPOINT (or HELIX_ENDPOINT) on the Settings page.' });
+
+    let bearer;
+    try { bearer = await getHelixBearerToken(baseUrl, apiKey); }
+    catch (e) { return res.status(502).json({ error: 'Helix authentication failed', details: e.message, upstream: e.upstream }); }
+
+    let ids = explicitIds;
+    if (!ids || ids.length === 0) {
+      try {
+        const sr = await axios.post(buildEventSearchUrl(baseUrl), buildEventSearchBody({ traceId, all: !!all }), {
+          headers: bmcHeaders(bearer), timeout: 15_000, validateStatus: () => true,
+        });
+        if (sr.status < 200 || sr.status >= 300) {
+          return res.status(502).json({ error: `Helix event search returned ${sr.status}`, upstream: sr.data });
+        }
+        ids = extractSearchEventIds(sr.data);
+      } catch (e) {
+        return res.status(502).json({ error: 'Failed to reach Helix event search API', details: e.message });
+      }
+    }
+    if (ids.length === 0) return res.json({ ok: true, closed: 0, results: [] });
+
+    const note = buildResolutionNote(null);
+    const results = [];
+    for (const id of ids) {
+      let ok = false; let status = 0;
+      try {
+        // 1) Guaranteed close (status only). Omitting ?skipAddNotes records an auto note.
+        const r = await axios.patch(buildEventByIdUrl(baseUrl, id), buildEventUpdateBody({ status: 'CLOSED' }), {
+          headers: bmcHeaders(bearer), timeout: 10_000, validateStatus: () => true,
+        });
+        status = r.status;
+        const body = JSON.stringify(r.data || '').toLowerCase();
+        ok = (r.status >= 200 && r.status < 300) || body.includes('already') || body.includes('closed');
+        // 2) Best-effort custom resolution note (separate; never affects close result).
+        try {
+          await axios.patch(buildEventByIdUrl(baseUrl, id), buildEventUpdateBody({ note }), {
+            headers: bmcHeaders(bearer), timeout: 10_000, validateStatus: () => true,
+          });
+        } catch { /* best-effort */ }
+      } catch (e) { status = -1; ok = false; }
+      results.push({ id, ok, status });
+    }
+    return res.json({ ok: true, closed: results.filter((r) => r.ok).length, results });
+  });
 }
 
 module.exports = { register };
