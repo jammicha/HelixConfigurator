@@ -239,7 +239,7 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
               {(openEvents || []).map((e) => (
                 <li key={e.id} className="flex items-center justify-between gap-2 text-tiny bg-gray-900 rounded px-2 py-1">
                   <span className="truncate"><span className="text-gray-400">{e.severity}</span> {e.service} — {e.msg}</span>
-                  <button className="text-red-400 hover:underline shrink-0" onClick={() => closeEvents({ sourceIdentifier: e.sourceIdentifier })} disabled={closing}>Close</button>
+                  <button className="text-red-400 hover:underline shrink-0" onClick={() => closeEvents({ sourceIdentifier: e.sourceIdentifier })} disabled={closing || !e.sourceIdentifier}>Close</button>
                 </li>
               ))}
             </ul>
