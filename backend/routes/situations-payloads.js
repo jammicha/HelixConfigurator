@@ -92,7 +92,7 @@ function buildEventCiHostname(serviceName, serviceNamespace) {
   return fmt.replace('{service}', name).replace('{namespace}', ns).toLowerCase();
 }
 
-function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource, spans, baseUrl, tenantId, spanDashboardUid }) {
+function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource, spans, baseUrl, tenantId, spanDashboardUid, multiEvent }) {
   const hasError = !!summary.has_error;
   const isOutlier = typeof p95Ms === 'number' && p95Ms > 0 && summary.duration_ms > p95Ms * 2;
   const severity = hasError ? 'CRITICAL' : isOutlier ? 'MAJOR' : 'MINOR';
@@ -167,7 +167,21 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     if (spanDashboardUrl) enrichedSlots.span_dashboard_url = spanDashboardUrl;
   }
 
-  return [{
+  // Slots common to every event for this trace (independent of which service the
+  // event is pinned to). service_name/namespace + helix_trace_id are layered on per
+  // event below.
+  const baseSlots = {
+    root_operation: summary.root_operation,
+    duration_ms: String(Math.round(summary.duration_ms)),
+    span_count: String(summary.span_count),
+    has_error: hasError ? '1' : '0',
+    ...(isOutlier ? { p95_ms: String(Math.round(p95Ms)) } : {}),
+    ...(businessServiceKey ? { service_id: businessServiceKey, business_service_key: businessServiceKey } : {}),
+    x_source: (xSource || '').trim(),
+    ...enrichedSlots,
+  };
+
+  const primaryEvent = {
     class: OTEL_TRACE_ANOMALY_CLASS,
     severity,
     ...(priority ? { priority } : {}),
@@ -181,16 +195,49 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
       helix_trace_id: summary.trace_id,
       service_name: summary.service_name || '',
       service_namespace: summary.service_namespace || '',
-      root_operation: summary.root_operation,
-      duration_ms: String(Math.round(summary.duration_ms)),
-      span_count: String(summary.span_count),
-      has_error: hasError ? '1' : '0',
-      ...(isOutlier ? { p95_ms: String(Math.round(p95Ms)) } : {}),
-      ...(businessServiceKey ? { service_id: businessServiceKey, business_service_key: businessServiceKey } : {}),
-      x_source: (xSource || '').trim(),
-      ...enrichedSlots,
+      ...baseSlots,
     },
-  }];
+  };
+
+  // Default: ONE event per trace (correlated by our policy on service_name +
+  // service_namespace). Opt-in multi-event mode emits one event per service on the
+  // failure path — each pinned to its own service — so BMC's ML correlation has
+  // >=2 topologically-related events and can build an ML Situation with a causal /
+  // root-cause view (a single event never forms an ML Situation; it needs >=2).
+  // NOTE: these events span multiple service_names, so our single-service
+  // correlation policy will NOT group them — the point is to let BMC's ML correlate.
+  // It also only helps where the per-service hosts bind to CIs (see memory:
+  // situations-event-service-binding). Errored traces only (need a failure path).
+  const pathServices = hasSpans && cause ? hotPathServices(spans, cause.probable_cause_span_id) : [];
+  if (!multiEvent || pathServices.length < 2) return [primaryEvent];
+
+  // Cause event first so callers that read payload[0] (e.g. the route's response
+  // severity) get the primary event; consequence events follow in path order.
+  const causeSvc = cause.probable_cause_service;
+  const ordered = [causeSvc, ...pathServices.filter((s) => s !== causeSvc)];
+  return ordered.map((svc) => {
+    const isCause = svc === causeSvc;
+    return {
+      class: OTEL_TRACE_ANOMALY_CLASS,
+      severity: isCause ? severity : downgradeSeverity(severity),
+      ...(priority ? { priority } : {}),
+      status: 'OPEN',
+      category: 'APPLICATION',
+      msg: isCause
+        ? msg
+        : `OTel trace ${summary.trace_id}: ${svc} on the failure path to ${causeName || causeSvc}${causeLabel ? ` — ${causeLabel}` : ''}`,
+      // Distinct per (trace, service) so the events don't dedup into one.
+      source_identifier: `helix-otel-trace:${summary.trace_id}:${svc}`,
+      source_attributes: { source_hostname: buildEventCiHostname(svc, summary.service_namespace) },
+      details,
+      class_slots: {
+        helix_trace_id: `${summary.trace_id}::${svc}`,
+        service_name: svc,
+        service_namespace: summary.service_namespace || '',
+        ...baseSlots,
+      },
+    };
+  });
 }
 
 // Identify the originating error span in a trace and extract a human-readable
@@ -277,6 +324,36 @@ function buildHotPath(spans, originSpanId) {
   return chain
     .map((s, i) => `${s.serviceName || '?'}/${s.name || '?'}` + (i === chain.length - 1 ? ' ✗' : ''))
     .join(' → ');
+}
+
+// Ordered, distinct services along the failure path (root → … → originating error
+// span) — same ancestor walk as buildHotPath, but returning the services. Used by
+// multi-event mode to emit one event per service on the path. [] when not found.
+function hotPathServices(spans, originSpanId) {
+  if (!Array.isArray(spans) || !originSpanId) return [];
+  const byId = new Map(spans.map((s) => [s.spanId, s]));
+  const chain = [];
+  const seen = new Set();
+  let cur = byId.get(originSpanId);
+  while (cur && !seen.has(cur.spanId)) {
+    seen.add(cur.spanId);
+    chain.push(cur);
+    cur = cur.parentSpanId ? byId.get(cur.parentSpanId) : null;
+  }
+  chain.reverse();
+  const out = [];
+  for (const s of chain) {
+    if (s.serviceName && !out.includes(s.serviceName)) out.push(s.serviceName);
+  }
+  return out;
+}
+
+// Drop one BMC severity tier so consequence events rank below the cause event in
+// multi-event mode. Unknown values pass through unchanged.
+const SEVERITY_LADDER = ['CRITICAL', 'MAJOR', 'MINOR', 'INFO', 'OK'];
+function downgradeSeverity(sev) {
+  const i = SEVERITY_LADDER.indexOf(sev);
+  return i >= 0 && i < SEVERITY_LADDER.length - 1 ? SEVERITY_LADDER[i + 1] : sev;
 }
 
 // Duration as a multiple of the operation's p95 baseline (1 decimal); null when
@@ -418,6 +495,7 @@ function buildClassByIdUrl(base, id) {
 module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey, buildEventCiHostname,
+  hotPathServices,
   deriveProbableCause, blastRadius, buildHotPath, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary, buildSpanDashboardUrl,
   buildClassByNameUrl, buildClassByIdUrl,

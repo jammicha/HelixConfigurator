@@ -96,6 +96,9 @@ function register(app, { otelStore }) {
       baseUrl: portalBaseUrl,
       tenantId,
       spanDashboardUid: (process.env.HELIX_SPAN_DASHBOARD_UID || '').trim(),
+      // Opt-in: emit one event per service on the failure path so BMC's ML can
+      // correlate them into an ML Situation (needs >=2 events). Off by default.
+      multiEvent: process.env.HELIX_MULTI_EVENT === '1',
     });
     // severity for the response body comes from the built event
     const severity = payload[0].severity;

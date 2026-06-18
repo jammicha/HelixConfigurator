@@ -5,7 +5,7 @@ const {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   buildEventCiHostname,
-  deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace, buildHotPath,
+  deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace, buildHotPath, hotPathServices,
   buildHelixTraceUrlFromSummary,
   buildSpanDashboardUrl,
 } = require('../routes/situations-payloads');
@@ -81,6 +81,53 @@ describe('buildEventCiHostname', () => {
     expect(buildEventCiHostname('frontend', 'hotrod')).toBe('frontend');
     expect(buildEventCiHostname('frontend', '')).toBe('frontend');
     expect(buildEventCiHostname('frontend', undefined)).toBe('frontend');
+  });
+});
+
+describe('hotPathServices', () => {
+  it('returns ordered distinct services root→cause', () => {
+    const spans = [
+      { spanId: 'a', parentSpanId: null, serviceName: 'frontend' },
+      { spanId: 'b', parentSpanId: 'a', serviceName: 'driver' },
+      { spanId: 'c', parentSpanId: 'b', serviceName: 'redis-manual' },
+    ];
+    expect(hotPathServices(spans, 'c')).toEqual(['frontend', 'driver', 'redis-manual']);
+    expect(hotPathServices(spans, undefined)).toEqual([]);
+  });
+});
+
+describe('buildAnomalyEventPayload — multi-event mode', () => {
+  const chainSpans = [
+    { spanId: 'a', parentSpanId: null, serviceName: 'frontend', name: 'GET /dispatch', startTimeNs: 1, statusCode: 0 },
+    { spanId: 'b', parentSpanId: 'a', serviceName: 'driver', name: 'FindNearest', startTimeNs: 2, statusCode: 0 },
+    { spanId: 'c', parentSpanId: 'b', serviceName: 'redis-manual', name: 'Fetch Driver Profile', startTimeNs: 3, statusCode: 2, statusMessage: 'redis timeout' },
+  ];
+  const sum = { trace_id: 'T1', service_name: 'frontend', service_namespace: 'hotrod', root_operation: 'GET /dispatch', duration_ms: 100, span_count: 3, has_error: true };
+
+  it('is OFF by default: one event for the trace', () => {
+    const evts = buildAnomalyEventPayload({ summary: sum, spans: chainSpans });
+    expect(evts).toHaveLength(1);
+    expect(evts[0].class_slots.service_name).toBe('frontend');
+  });
+
+  it('ON: emits one event per failure-path service, cause first, distinct dedup keys', () => {
+    const evts = buildAnomalyEventPayload({ summary: sum, spans: chainSpans, multiEvent: true });
+    expect(evts.map((e) => e.class_slots.service_name)).toEqual(['redis-manual', 'frontend', 'driver']);
+    expect(new Set(evts.map((e) => e.class_slots.helix_trace_id)).size).toBe(3);
+    expect(evts.map((e) => e.class_slots.helix_trace_id)).toContain('T1::redis-manual');
+    expect(evts.map((e) => e.source_attributes.source_hostname)).toEqual(['redis-manual', 'frontend', 'driver']);
+    expect(evts.every((e) => e.class_slots.service_namespace === 'hotrod')).toBe(true);
+    const cause = evts.find((e) => e.class_slots.service_name === 'redis-manual');
+    const conseq = evts.find((e) => e.class_slots.service_name === 'frontend');
+    expect(cause.severity).toBe('CRITICAL');
+    expect(conseq.severity).toBe('MAJOR');
+    expect(cause.class_slots.probable_cause_service).toBe('redis-manual');
+  });
+
+  it('ON but single-service path: falls back to one event', () => {
+    const oneSvc = [{ spanId: 'x', parentSpanId: null, serviceName: 'frontend', name: 'op', startTimeNs: 1, statusCode: 2, statusMessage: 'boom' }];
+    const evts = buildAnomalyEventPayload({ summary: { ...sum, span_count: 1 }, spans: oneSvc, multiEvent: true });
+    expect(evts).toHaveLength(1);
   });
 });
 
