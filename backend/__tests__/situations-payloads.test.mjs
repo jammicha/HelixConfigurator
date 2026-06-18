@@ -78,7 +78,7 @@ describe('buildClassDefinition', () => {
 
 describe('buildEventCiHostname', () => {
   it('namespace-qualifies so same-named services across BSes do not collide', () => {
-    expect(buildEventCiHostname('frontend', 'hotrod')).toBe('frontend.hotrod');
+    expect(buildEventCiHostname('frontend', 'hotrod')).toBe('hotrod.frontend');
   });
   it('falls back to the bare name when no namespace is present', () => {
     expect(buildEventCiHostname('frontend', '')).toBe('frontend');
@@ -95,7 +95,7 @@ describe('buildAnomalyEventPayload', () => {
     expect(evt.class_slots.helix_trace_id).toBe(summary.trace_id);
     // source_hostname is namespace-qualified so same-named services across business
     // services don't collide in Helix's event→CI reconciliation (default format).
-    expect(evt.source_attributes.source_hostname).toBe('traffic-generator.hotrod');
+    expect(evt.source_attributes.source_hostname).toBe('hotrod.traffic-generator');
     expect(evt.class_slots).not.toHaveProperty('trace_url');
   });
   it('maps severity: error->CRITICAL, outlier->MAJOR, else MINOR', () => {

@@ -70,24 +70,26 @@ function splitApiKey(apiKey) {
   return { tenantId: parts[0].trim(), accessKey: parts[1].trim(), accessSecretKey: parts[2].trim() };
 }
 
-// CI identity for the event's source_hostname (the field Helix reconciles an event
-// to a CI on). The bare service.name ("frontend") collides across business services
-// on a shared tenant — Helix then binds to whichever "frontend" CI it finds first
-// (e.g. another app's), and the disambiguators we carry (service_namespace, the BS
-// key) are only custom slots, which reconciliation ignores. Qualifying with the OTel
-// namespace makes the identity unique to THIS app's service CI (frontend@hotrod).
+// CI identity for the event's source_hostname. OTel ingestion names the BHOM device
+// `<service.namespace>.<service.name>` (e.g. "hotrod.frontend" — confirmed in Device
+// Details on a live tenant), so we match that order, lowercased (BMC requires
+// source_hostname to be lowercase to associate). The bare service.name collides
+// across business services on a shared tenant; the namespace prefix disambiguates.
+// Tunable via HELIX_EVENT_CI_FORMAT (tokens {service}/{namespace}; set to "{service}"
+// for the old bare behavior).
 //
-// BEST-EFFORT: the exact format BMC reconciles OTel Service CIs on is unvalidated
-// here. Validate by converting one real trace and checking the Situation's Impacted
-// Service; if it doesn't bind to the right BS (or creates a stray CI), tune via
-// HELIX_EVENT_CI_FORMAT — tokens {service}/{namespace}, e.g. "{namespace}/{service}",
-// or set it to "{service}" to fall back to the old bare behavior.
+// IMPORTANT: a correct hostname is necessary but NOT sufficient for the Situation's
+// Impacted Service to populate. BMC's topology enrichment looks the host up in the
+// Discovery dataset; OTel-ingested service devices are not necessarily in it, so the
+// event can show the right Host yet still bind to NO service (Impacted Services =
+// N/A). Closing that is tenant-side CMDB/service-model modeling, not this payload.
+// See memory: situations-event-service-binding.
 function buildEventCiHostname(serviceName, serviceNamespace) {
   const name = (serviceName || '').trim();
   const ns = (serviceNamespace || '').trim();
   if (!ns) return name;
-  const fmt = process.env.HELIX_EVENT_CI_FORMAT || '{service}.{namespace}';
-  return fmt.replace('{service}', name).replace('{namespace}', ns);
+  const fmt = process.env.HELIX_EVENT_CI_FORMAT || '{namespace}.{service}';
+  return fmt.replace('{service}', name).replace('{namespace}', ns).toLowerCase();
 }
 
 function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource, spans, baseUrl, tenantId, spanDashboardUid }) {
