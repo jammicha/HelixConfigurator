@@ -51,6 +51,38 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
   const [policyState, setPolicyState] = React.useState<ProvState>('idle');
   const [policyMsg, setPolicyMsg] = React.useState('');
 
+  type OpenEvent = { id: string; service: string; msg: string; severity: string; sourceIdentifier: string; creationTime: number | null };
+  const [openEvents, setOpenEvents] = React.useState<OpenEvent[] | null>(null);
+  const [openEventsMsg, setOpenEventsMsg] = React.useState('');
+  const [closing, setClosing] = React.useState(false);
+
+  const loadOpenEvents = async () => {
+    setOpenEventsMsg('Loading…');
+    try {
+      const res = await fetch('/api/situations/open-events');
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { setOpenEvents(data.events || []); setOpenEventsMsg(''); }
+      else { setOpenEvents([]); setOpenEventsMsg(data.error || `Failed (${res.status})`); }
+    } catch (e: any) { setOpenEvents([]); setOpenEventsMsg(e.message || 'Network error'); }
+  };
+
+  const closeEvents = async (body: { traceId?: string; sourceIdentifier?: string; all?: boolean }) => {
+    setClosing(true);
+    try {
+      const res = await fetch('/api/situations/close-events', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      setOpenEventsMsg(res.ok ? `Closed ${data.closed ?? 0} event(s).` : (data.error || `Failed (${res.status})`));
+    } catch (e: any) { setOpenEventsMsg(e.message || 'Network error'); }
+    finally { setClosing(false); await loadOpenEvents(); }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    loadOpenEvents();
+  }, [open]);
+
   const provision = async (
     path: string,
     setState: (s: ProvState) => void,
@@ -187,6 +219,28 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
               </button>
               {policyMsg && <span className={`text-tiny ${policyState === 'error' ? 'text-danger-text' : 'text-gray-400'}`}>{policyMsg}</span>}
             </div>
+          </div>
+
+          <div className="space-y-2 pt-2 border-t border-gray-800">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Sent events (open in Helix)</div>
+              <div className="flex gap-2">
+                <button className="text-xs text-blue-400 hover:underline" onClick={loadOpenEvents} disabled={closing}>Refresh</button>
+                {openEvents && openEvents.length > 0 && (
+                  <button className="text-xs text-red-400 hover:underline" onClick={() => closeEvents({ all: true })} disabled={closing}>Close all</button>
+                )}
+              </div>
+            </div>
+            {openEventsMsg && <p className={`text-tiny ${openEventsMsg.startsWith('Closed') ? 'text-gray-400' : 'text-gray-400'} mt-1`}>{openEventsMsg}</p>}
+            {openEvents && openEvents.length === 0 && !openEventsMsg && <p className="text-tiny text-gray-500 mt-1">No open configurator events.</p>}
+            <ul className="mt-2 space-y-1">
+              {(openEvents || []).map((e) => (
+                <li key={e.id} className="flex items-center justify-between gap-2 text-tiny bg-gray-900 rounded px-2 py-1">
+                  <span className="truncate"><span className="text-gray-400">{e.severity}</span> {e.service} — {e.msg}</span>
+                  <button className="text-red-400 hover:underline shrink-0" onClick={() => closeEvents({ sourceIdentifier: e.sourceIdentifier })} disabled={closing}>Close</button>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
 
