@@ -38,7 +38,7 @@ function buildClassDefinition() {
       { name: 'span_dashboard_url', dataType: 'STRING', enum: false },
       // Tier 1/2 trace context.
       { name: 'cause_detail', dataType: 'STRING', enum: false },
-      { name: 'slowest_hop', dataType: 'STRING', enum: false },
+      { name: 'slowest_span', dataType: 'STRING', enum: false },
       { name: 'stack_trace', dataType: 'STRING', enum: false },
       { name: 'environment', dataType: 'STRING', enum: false },
       { name: 'service_version', dataType: 'STRING', enum: false },
@@ -74,7 +74,7 @@ function buildClassUpdateBody() {
 // (beyond the RCA slots, which a prior provisioning already added). Reported in the
 // provision response; the PUT body itself sends the full attribute set regardless.
 const ADDED_SLOTS = [
-  'cause_detail', 'slowest_hop', 'stack_trace', 'environment', 'service_version',
+  'cause_detail', 'slowest_span', 'stack_trace', 'environment', 'service_version',
   'k8s_pod', 'k8s_namespace', 'host', 'sdk_language', 'error_span_count',
 ];
 
@@ -134,13 +134,13 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     : '';
 
   // Tier-1/2 enrichment, all from the trace's own span + resource attributes:
-  // what exactly failed (cause_detail), where the time went (slowest_hop), the
+  // what exactly failed (cause_detail), where the time went (slowest_span), the
   // exception stack, where it ran (deployment context), and the error-span count.
   const causeSpan = (hasSpans && cause && cause.probable_cause_span_id)
     ? spans.find((s) => s.spanId === cause.probable_cause_span_id) : null;
   const causeDetail = causeSpan ? describeCauseCall(causeSpan) : '';
   const stackTrace = causeSpan ? extractStackTrace(causeSpan) : '';
-  const slowestHop = hasSpans ? buildSlowestHop(spans, summary.duration_ms) : '';
+  const slowestSpan = hasSpans ? buildSlowestSpan(spans, summary.duration_ms) : '';
   const errorSpanCount = hasSpans ? countErrorSpans(spans) : 0;
   const rctx = buildResourceContext(causeSpan || (hasSpans ? spans[0] : null));
 
@@ -160,27 +160,24 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
       + (blast.component_count > 1 ? `, ${blast.component_count} services affected` : '')
     : `OTel trace ${flavor}: ${summary.service_name}/${summary.root_operation} took ${Math.round(summary.duration_ms)}ms`;
 
-  const detailLines = [
+  // Detailed Message = a CURATED headline, not a dump: the cause, the failing call,
+  // the slowest span, the path, and the trace link. The full per-field breakdown
+  // (runtime, code location, error-span count, affected services, etc.) lives in the
+  // event slots (the "Others" tab), so we don't repeat it here as a wall of text.
+  const detailLines = hasSpans ? [
+    (cause && (cause.error_type || cause.error_message))
+      ? `Probable cause: ${cause.error_type || 'error'} in ${cause.probable_cause_service}/${cause.probable_cause_operation}${cause.error_message ? ` — ${cause.error_message}` : ''}.`
+      : `OTel trace anomaly: ${summary.service_name}/${summary.root_operation} (${Math.round(summary.duration_ms)}ms, ${summary.span_count} spans).`,
+    causeDetail ? `Failing call: ${causeDetail}.` : '',
+    slowestSpan ? `Slowest Span: ${slowestSpan}.` : '',
+    hotPath ? `Path to failure: ${hotPath}.` : '',
+    traceUrl ? `Open trace: ${traceUrl}` : '',
+  ] : [
     `Trace ${summary.trace_id} on service ${summary.service_name}.`,
     `Root operation: ${summary.root_operation}. Duration: ${Math.round(summary.duration_ms)}ms across ${summary.span_count} span(s).`,
     hasError ? 'Trace contains at least one error span.' : '',
     isOutlier ? `Operation p95 in window: ${Math.round(p95Ms)}ms.` : '',
   ];
-  if (hasSpans && cause && (cause.error_type || cause.error_message)) {
-    detailLines.push(
-      `Probable cause: ${cause.error_type || 'error'} in ${cause.probable_cause_service}/${cause.probable_cause_operation}`
-      + `${cause.error_message ? ` — ${cause.error_message}` : ''}.`);
-    if (cause.code_location) detailLines.push(`Code: ${cause.code_location}.`);
-  }
-  if (hasSpans && causeDetail) detailLines.push(`Failing call: ${causeDetail}.`);
-  if (hasSpans && slowestHop) detailLines.push(`Slowest hop: ${slowestHop}.`);
-  const runtimeBits = [rctx.environment, rctx.service_version && `v${rctx.service_version}`, rctx.k8s_pod, rctx.host].filter(Boolean);
-  if (hasSpans && runtimeBits.length) detailLines.push(`Runtime: ${runtimeBits.join(' · ')}.`);
-  if (hasSpans && errorSpanCount) detailLines.push(`Error spans: ${errorSpanCount} of ${summary.span_count}.`);
-  if (hasSpans && blast && blast.affected_services) detailLines.push(`Affected services: ${blast.affected_services}.`);
-  if (hasSpans && traceUrl) detailLines.push(`Open trace: ${traceUrl}`);
-  if (hasSpans && hotPath) detailLines.push(`Path to failure: ${hotPath}.`);
-  if (hasSpans && spanDashboardUrl) detailLines.push(`Open the failing span: ${spanDashboardUrl}`);
   const details = detailLines.filter(Boolean).join('\n');
 
   const enrichedSlots = {};
@@ -200,7 +197,7 @@ function buildAnomalyEventPayload({ summary, p95Ms, businessServiceKey, xSource,
     if (spanDashboardUrl) enrichedSlots.span_dashboard_url = spanDashboardUrl;
     // Tier 1/2
     if (causeDetail) enrichedSlots.cause_detail = causeDetail;
-    if (slowestHop) enrichedSlots.slowest_hop = slowestHop;
+    if (slowestSpan) enrichedSlots.slowest_span = slowestSpan;
     if (stackTrace) enrichedSlots.stack_trace = stackTrace;
     if (rctx.environment) enrichedSlots.environment = rctx.environment;
     if (rctx.service_version) enrichedSlots.service_version = rctx.service_version;
@@ -393,7 +390,7 @@ function extractStackTrace(span) {
 // The span that consumed the most self-time (its own duration minus its direct
 // children's) — i.e. where the trace actually spent time — as
 // "service/operation: Xms (Y% of total)". '' when not computable.
-function buildSlowestHop(spans, totalMs) {
+function buildSlowestSpan(spans, totalMs) {
   if (!Array.isArray(spans) || spans.length === 0) return '';
   const childSum = new Map();
   for (const s of spans) {
@@ -620,7 +617,7 @@ module.exports = {
   OTEL_TRACE_ANOMALY_CLASS, CORRELATION_POLICY_NAME, ADDED_SLOTS,
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey, buildEventCiHostname,
   hotPathServices,
-  describeCauseCall, extractStackTrace, buildSlowestHop, buildResourceContext, countErrorSpans,
+  describeCauseCall, extractStackTrace, buildSlowestSpan, buildResourceContext, countErrorSpans,
   deriveProbableCause, blastRadius, buildHotPath, anomalyFactor, priorityForTrace,
   buildHelixTraceUrlFromSummary, buildSpanDashboardUrl,
   buildClassByNameUrl, buildClassByIdUrl,

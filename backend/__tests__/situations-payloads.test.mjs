@@ -6,7 +6,7 @@ const {
   buildClassDefinition, buildClassUpdateBody, buildAnomalyEventPayload, buildCorrelationPolicy, splitApiKey,
   buildEventCiHostname,
   deriveProbableCause, blastRadius, anomalyFactor, priorityForTrace, buildHotPath, hotPathServices,
-  describeCauseCall, extractStackTrace, buildSlowestHop, buildResourceContext, countErrorSpans,
+  describeCauseCall, extractStackTrace, buildSlowestSpan, buildResourceContext, countErrorSpans,
   buildHelixTraceUrlFromSummary,
   buildSpanDashboardUrl,
 } = require('../routes/situations-payloads');
@@ -118,13 +118,13 @@ describe('Tier 1/2 trace-context enrichment', () => {
     expect(extractStackTrace({ events: [] })).toBe('');
   });
 
-  it('buildSlowestHop finds the span with the most self-time', () => {
+  it('buildSlowestSpan finds the span with the most self-time', () => {
     const spans = [
       { spanId: 'a', parentSpanId: null, serviceName: 'frontend', name: 'GET', durationMs: 139 },
       { spanId: 'b', parentSpanId: 'a', serviceName: 'driver', name: 'FindNearest', durationMs: 120 },
       { spanId: 'c', parentSpanId: 'b', serviceName: 'redis-manual', name: 'Fetch', durationMs: 117 },
     ];
-    expect(buildSlowestHop(spans, 139)).toBe('redis-manual/Fetch: 117ms (84% of 139ms)');
+    expect(buildSlowestSpan(spans, 139)).toBe('redis-manual/Fetch: 117ms (84% of 139ms)');
   });
 
   it('buildResourceContext maps deployment/runtime attrs', () => {
@@ -150,13 +150,22 @@ describe('Tier 1/2 trace-context enrichment', () => {
     });
     const cs = evt.class_slots;
     expect(cs.cause_detail).toBe('redis GET driver:profile:42 (peer redis:6379)');
-    expect(cs.slowest_hop).toContain('redis-manual/Fetch Driver Profile: 117ms');
+    expect(cs.slowest_span).toContain('redis-manual/Fetch Driver Profile: 117ms');
     expect(cs.stack_trace).toContain('TimeoutError');
     expect(cs.environment).toBe('production');
     expect(cs.service_version).toBe('1.4.2');
     expect(cs.k8s_pod).toBe('redis-7d9');
     expect(cs.host).toBe('ip-10-0-1-5');
     expect(cs.error_span_count).toBe('1 of 3');
+    // Detailed Message is CURATED, not a dump: keeps the cause/failing call/Slowest
+    // Span/path/trace link; the rest lives in slots only (no duplicated wall of text).
+    expect(evt.details).toContain('Slowest Span:');
+    expect(evt.details).toContain('Failing call:');
+    expect(evt.details).toContain('Path to failure:');
+    expect(evt.details).not.toContain('Slowest hop');     // renamed
+    expect(evt.details).not.toContain('Runtime:');         // slot-only now
+    expect(evt.details).not.toContain('Error spans:');     // slot-only now
+    expect(evt.details).not.toContain('Affected services:'); // slot-only now
   });
 });
 
