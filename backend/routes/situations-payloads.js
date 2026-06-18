@@ -70,25 +70,25 @@ function splitApiKey(apiKey) {
   return { tenantId: parts[0].trim(), accessKey: parts[1].trim(), accessSecretKey: parts[2].trim() };
 }
 
-// CI identity for the event's source_hostname. OTel ingestion names the BHOM device
-// `<service.namespace>.<service.name>` (e.g. "hotrod.frontend" — confirmed in Device
-// Details on a live tenant), so we match that order, lowercased (BMC requires
-// source_hostname to be lowercase to associate). The bare service.name collides
-// across business services on a shared tenant; the namespace prefix disambiguates.
-// Tunable via HELIX_EVENT_CI_FORMAT (tokens {service}/{namespace}; set to "{service}"
-// for the old bare behavior).
+// source_hostname is how BMC reconciles an event to a CI (topology enrichment looks
+// it up in BMC Discovery, matching the CI's Name). DEFAULT = the bare service.name —
+// the ONLY form that actually binds: on a single-app tenant it matches the OTel
+// Service CI by Name and the Situation gets its Impacted Service.
 //
-// IMPORTANT: a correct hostname is necessary but NOT sufficient for the Situation's
-// Impacted Service to populate. BMC's topology enrichment looks the host up in the
-// Discovery dataset; OTel-ingested service devices are not necessarily in it, so the
-// event can show the right Host yet still bind to NO service (Impacted Services =
-// N/A). Closing that is tenant-side CMDB/service-model modeling, not this payload.
-// See memory: situations-event-service-binding.
+// Namespace-qualifying via HELIX_EVENT_CI_FORMAT ({namespace}.{service}) is available
+// for SHARED tenants where the bare name collides across apps (e.g. two "frontend"
+// OTel Services) and would bind to the wrong one. CAVEAT (validated live, 2026-06-17):
+// a qualified hostname does NOT bind to the right CI either — Discovery matches only
+// the bare Name, so qualified forms and even the External Identifier
+// (OTel_Service_<ns>.<svc>) reconcile to nothing (Impacted Service = N/A). So the
+// override only trades "wrong service" for "no service". Genuinely tying OTel-trace
+// events to OTel service CIs is BMC ML/topology + tenant CMDB modeling, not this
+// payload. See memory: situations-event-service-binding.
 function buildEventCiHostname(serviceName, serviceNamespace) {
   const name = (serviceName || '').trim();
   const ns = (serviceNamespace || '').trim();
   if (!ns) return name;
-  const fmt = process.env.HELIX_EVENT_CI_FORMAT || '{namespace}.{service}';
+  const fmt = process.env.HELIX_EVENT_CI_FORMAT || '{service}';
   return fmt.replace('{service}', name).replace('{namespace}', ns).toLowerCase();
 }
 
