@@ -54,6 +54,7 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
   type OpenEvent = { id: string; service: string; msg: string; severity: string; sourceIdentifier: string; creationTime: number | null };
   const [openEvents, setOpenEvents] = React.useState<OpenEvent[] | null>(null);
   const [openEventsMsg, setOpenEventsMsg] = React.useState('');
+  const [openEventsErr, setOpenEventsErr] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
 
   const loadOpenEvents = async () => {
@@ -61,9 +62,9 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
     try {
       const res = await fetch('/api/situations/open-events');
       const data = await res.json().catch(() => ({}));
-      if (res.ok) { setOpenEvents(data.events || []); setOpenEventsMsg(''); }
-      else { setOpenEvents([]); setOpenEventsMsg(data.error || `Failed (${res.status})`); }
-    } catch (e: any) { setOpenEvents([]); setOpenEventsMsg(e.message || 'Network error'); }
+      if (res.ok) { setOpenEvents(data.events || []); setOpenEventsMsg(''); setOpenEventsErr(false); }
+      else { setOpenEvents([]); setOpenEventsMsg(data.error || `Failed (${res.status})`); setOpenEventsErr(true); }
+    } catch (e: any) { setOpenEvents([]); setOpenEventsMsg(e.message || 'Network error'); setOpenEventsErr(true); }
   };
 
   const closeEvents = async (body: { traceId?: string; sourceIdentifier?: string; all?: boolean }) => {
@@ -74,7 +75,8 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
       });
       const data = await res.json().catch(() => ({}));
       setOpenEventsMsg(res.ok ? `Closed ${data.closed ?? 0} event(s).` : (data.error || `Failed (${res.status})`));
-    } catch (e: any) { setOpenEventsMsg(e.message || 'Network error'); }
+      setOpenEventsErr(!res.ok);
+    } catch (e: any) { setOpenEventsMsg(e.message || 'Network error'); setOpenEventsErr(true); }
     finally { setClosing(false); await loadOpenEvents(); }
   };
 
@@ -231,7 +233,7 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
                 )}
               </div>
             </div>
-            {openEventsMsg && <p className={`text-tiny ${openEventsMsg.startsWith('Closed') ? 'text-gray-400' : 'text-gray-400'} mt-1`}>{openEventsMsg}</p>}
+            {openEventsMsg && <p className={`text-tiny ${openEventsErr ? 'text-danger-text' : 'text-gray-400'} mt-1`}>{openEventsMsg}</p>}
             {openEvents && openEvents.length === 0 && !openEventsMsg && <p className="text-tiny text-gray-500 mt-1">No open configurator events.</p>}
             <ul className="mt-2 space-y-1">
               {(openEvents || []).map((e) => (
