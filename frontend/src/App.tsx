@@ -36,6 +36,7 @@ import { getWizardSteps, isWizardTargetOrNull, isK8sTarget, type WizardTarget } 
 import { GatewayConfigModal, SmartAddPreviewModal } from './components/wizard/WizardModals';
 import { parseHelixKeyBundle, extractServiceKey } from './utils/helixKey';
 import { isHelixRelevant } from './utils/logFilter';
+import { mergePausedLogs, LOG_CAP } from './utils/pausedLogs';
 import { waitForGatewayRunning } from './utils/gateway';
 import { buildSupportBundle } from './utils/supportBundle';
 import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
@@ -84,6 +85,15 @@ const App = () => {
   const { toasts, showToast: showToastMsg } = useToasts();
   const [logs, setLogs] = useState<string[]>([]);
   const [logFilter, setLogFilter] = useState<'helix' | 'all'>('helix');
+  // Pause "freezes" the log view: the SSE stream stays open, but incoming
+  // lines are held in pausedBufferRef (not appended to `logs`) so the pane
+  // doesn't scroll or evict what the user is reading. Resume flushes the
+  // buffer back in. logsPausedRef mirrors the state so the SSE onMsg closure
+  // (created once per stream) reads the current value, not a stale capture.
+  const [logsPaused, setLogsPaused] = useState(false);
+  const [pausedCount, setPausedCount] = useState(0);
+  const logsPausedRef = useRef(false);
+  const pausedBufferRef = useRef<string[]>([]);
   const {
     isOpen: isRawMetricsOpen,
     text: rawMetricsText,
@@ -251,6 +261,7 @@ const App = () => {
       setShowDiagnostics(false);
       setTraceInjectionStatus('');
       setLogs([]);
+      resetPausedLogs();
       setLiveMetrics({ received: 0, sent: 0, failed: 0 });
       setDiagAlert(false);
       setIsSetupComplete(false);
@@ -285,6 +296,33 @@ const App = () => {
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     shouldAutoScrollRef.current = distanceFromBottom < 40;
+  };
+
+  // Keep the ref in step with the state so the long-lived SSE onMsg closure
+  // sees the live pause flag rather than the value at stream-open time.
+  useEffect(() => { logsPausedRef.current = logsPaused; }, [logsPaused]);
+
+  // Drop any buffered-while-paused lines and un-pause. Used when a session
+  // starts/stops so a stale pause never carries across sessions.
+  const resetPausedLogs = () => {
+    pausedBufferRef.current = [];
+    setPausedCount(0);
+    setLogsPaused(false);
+  };
+
+  const handleTogglePauseLogs = () => {
+    if (logsPausedRef.current) {
+      // Resume: flush buffered lines into the visible log (same last-N cap the
+      // live stream uses), then re-pin to the bottom on the next render.
+      const buffered = pausedBufferRef.current;
+      pausedBufferRef.current = [];
+      setPausedCount(0);
+      setLogsPaused(false);
+      if (buffered.length) setLogs(prev => mergePausedLogs(prev, buffered));
+      shouldAutoScrollRef.current = true;
+    } else {
+      setLogsPaused(true);
+    }
   };
 
   // Final cleanup on unmount: close any open SSE streams, intervals, timers
@@ -524,7 +562,14 @@ const App = () => {
 
     const onMsg = (event: any) => {
       setSseConnected(true);
-      setLogs(prev => [...prev.slice(-100), event.data]);
+      if (logsPausedRef.current) {
+        // Frozen view: hold the line in the side buffer (capped like the live
+        // log) and bump the "N new lines" indicator instead of rendering it.
+        pausedBufferRef.current = [...pausedBufferRef.current, event.data].slice(-LOG_CAP);
+        setPausedCount(c => c + 1);
+        return;
+      }
+      setLogs(prev => [...prev.slice(-LOG_CAP), event.data]);
     };
 
     const onDiagAlert = () => {
@@ -1036,6 +1081,7 @@ const App = () => {
     setTraceInjectionStatus('');
     setDiagAlert(false);
     setDiagAlertCount(0);
+    resetPausedLogs();
     try {
       await fetch('/api/diagnostics/toggle-debug', {
         method: 'POST',
@@ -1073,6 +1119,7 @@ const App = () => {
         setShowDiagnostics(true);
         setDiagAlert(false);
         setDiagAlertCount(0);
+        resetPausedLogs();
         clearTimeline();
         pushTimelineEvent('verify', `Diagnostic session started${connectedApp ? ` (${connectedApp})` : ''}`);
         setLogs([`Initializing diagnostic session${connectedApp ? ` for ${connectedApp}` : ''} (5-min session)...`]);
@@ -1525,6 +1572,9 @@ const App = () => {
                     timeline={timeline}
                     logFilter={logFilter}
                     onSetLogFilter={setLogFilter}
+                    paused={logsPaused}
+                    pausedCount={pausedCount}
+                    onTogglePause={handleTogglePauseLogs}
                     logs={logs}
                     visibleLogs={visibleLogs}
                     logContainerRef={logContainerRef}

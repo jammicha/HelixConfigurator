@@ -28,6 +28,9 @@ type Props = {
   timeline: TimelineEntry[];
   logFilter: 'helix' | 'all';
   onSetLogFilter: (filter: 'helix' | 'all') => void;
+  paused: boolean;
+  pausedCount: number;
+  onTogglePause: () => void;
   logs: string[];
   visibleLogs: string[];
   logContainerRef: RefObject<HTMLDivElement>;
@@ -50,6 +53,9 @@ export const DiagnosticLogPanel = ({
   timeline,
   logFilter,
   onSetLogFilter,
+  paused,
+  pausedCount,
+  onTogglePause,
   logs,
   visibleLogs,
   logContainerRef,
@@ -131,6 +137,19 @@ export const DiagnosticLogPanel = ({
       >
         All Logs
       </button>
+      <button
+        onClick={onTogglePause}
+        className={`flex items-center gap-1.5 px-2 py-0.5 text-tiny rounded font-semibold uppercase tracking-wider transition-colors ${paused ? 'bg-warning/20 border border-warning/40 text-warning hover:bg-warning/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+        title={paused ? 'Resume the live log stream' : 'Pause the view — lines keep arriving in the background'}
+      >
+        {paused ? '▶ Resume' : '‖ Pause'}
+      </button>
+      {paused && pausedCount > 0 && (
+        <span className="flex items-center gap-1 text-tiny text-warning" title="New lines buffered while paused. Resume to show them.">
+          <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse"></span>
+          {pausedCount} new line{pausedCount === 1 ? '' : 's'}
+        </span>
+      )}
       <span className="text-tiny text-gray-500 ml-auto">
         {logFilter === 'helix' ? `${visibleLogs.length} of ${logs.length}` : `${logs.length}`} lines
       </span>
@@ -145,7 +164,7 @@ export const DiagnosticLogPanel = ({
         <p key={idx} className="whitespace-pre-wrap mb-1">{log}</p>
       ))}
       <div ref={logEndRef} />
-      <p className="animate-pulse">_</p>
+      {!paused && <p className="animate-pulse">_</p>}
     </div>
   </div>
 );
