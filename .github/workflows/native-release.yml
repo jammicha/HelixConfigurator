@@ -64,6 +64,9 @@ jobs:
           # here, so engine=operator chart downloads were hollow in native zips.
           cp -R helix-otel-operator "$STAGE/helix-otel-operator"
           cp helix-otel-collector.yaml "$STAGE/helix-otel-collector.yaml"
+          # Empty .env so Step 1 Save works on first launch (POST /api/env reads
+          # before write; missing file used to 500 on fresh native installs).
+          touch "$STAGE/.env"
           # Tests don't belong in the shipped package.
           rm -rf "$STAGE/backend/__tests__"
           # Bundle the matching Node runtime

@@ -4,7 +4,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 
-const ENV_PATH = path.join(__dirname, '..', '..', '.env');
+const DEFAULT_ENV_PATH = path.join(__dirname, '..', '..', '.env');
 
 // Serializes POST handlers so concurrent saves can't interleave their
 // read-modify-write and lose updates. Sync I/O previously gave this for
@@ -16,25 +16,39 @@ const withEnvWriteLock = (fn) => {
   return next;
 };
 
-function register(app) {
+async function readEnvContent(envPath) {
+  try {
+    return await fs.readFile(envPath, 'utf8');
+  } catch (e) {
+    // Fresh native installs ship without a .env — treat as empty and create on
+    // first POST (matches auth.js / envFile.js ENOENT handling).
+    if (e.code === 'ENOENT') return '';
+    throw e;
+  }
+}
+
+function parseManagedEnv(envContent) {
+  const vars = {};
+  envContent.split('\n').forEach((line) => {
+    const [key, ...value] = line.split('=');
+    if (key && value.length) {
+      vars[key.trim()] = value.join('=').trim();
+    }
+  });
+  return {
+    HELIX_ENDPOINT: vars.HELIX_ENDPOINT || '',
+    HELIX_API_KEY: vars.HELIX_API_KEY || '',
+    X_SOURCE: vars.X_SOURCE || '',
+    BUSINESS_SERVICE_KEY: vars.BUSINESS_SERVICE_KEY || '',
+    HELIX_EVENTS_ENDPOINT: vars.HELIX_EVENTS_ENDPOINT || '',
+  };
+}
+
+function register(app, { envPath = DEFAULT_ENV_PATH } = {}) {
   app.get('/api/env', async (req, res) => {
     try {
-      const envContent = await fs.readFile(ENV_PATH, 'utf8');
-      const vars = {};
-      envContent.split('\n').forEach(line => {
-        const [key, ...value] = line.split('=');
-        if (key && value) {
-          vars[key.trim()] = value.join('=').trim();
-        }
-      });
-
-      res.json({
-        HELIX_ENDPOINT: vars.HELIX_ENDPOINT || '',
-        HELIX_API_KEY: vars.HELIX_API_KEY || '',
-        X_SOURCE: vars.X_SOURCE || '',
-        BUSINESS_SERVICE_KEY: vars.BUSINESS_SERVICE_KEY || '',
-        HELIX_EVENTS_ENDPOINT: vars.HELIX_EVENTS_ENDPOINT || ''
-      });
+      const envContent = await readEnvContent(envPath);
+      res.json(parseManagedEnv(envContent));
     } catch (e) {
       res.status(500).json({ error: 'Failed to read .env file' });
     }
@@ -42,24 +56,22 @@ function register(app) {
 
   app.post('/api/env', async (req, res) => {
     const { HELIX_ENDPOINT, HELIX_API_KEY, X_SOURCE, BUSINESS_SERVICE_KEY, HELIX_EVENTS_ENDPOINT } = req.body;
+    const trim = (v) => (typeof v === 'string' ? v.trim() : '');
+    const updates = {
+      HELIX_ENDPOINT: trim(HELIX_ENDPOINT),
+      HELIX_API_KEY: trim(HELIX_API_KEY),
+      X_SOURCE: trim(X_SOURCE),
+      BUSINESS_SERVICE_KEY: trim(BUSINESS_SERVICE_KEY),
+      HELIX_EVENTS_ENDPOINT: trim(HELIX_EVENTS_ENDPOINT),
+    };
     try {
       await withEnvWriteLock(async () => {
-        const envContent = await fs.readFile(ENV_PATH, 'utf8');
-
-        // Trim values so trailing whitespace from copy/paste doesn't propagate.
-        const trim = (v) => (typeof v === 'string' ? v.trim() : '');
-        const updates = {
-          HELIX_ENDPOINT: trim(HELIX_ENDPOINT),
-          HELIX_API_KEY: trim(HELIX_API_KEY),
-          X_SOURCE: trim(X_SOURCE),
-          BUSINESS_SERVICE_KEY: trim(BUSINESS_SERVICE_KEY),
-          HELIX_EVENTS_ENDPOINT: trim(HELIX_EVENTS_ENDPOINT),
-        };
+        const envContent = await readEnvContent(envPath);
 
         let lines = envContent.split('\n');
-        Object.keys(updates).forEach(key => {
+        Object.keys(updates).forEach((key) => {
           let found = false;
-          lines = lines.map(line => {
+          lines = lines.map((line) => {
             if (line.startsWith(`${key}=`)) {
               found = true;
               return `${key}=${updates[key]}`;
@@ -75,22 +87,15 @@ function register(app) {
         });
 
         const newContent = lines.join('\n');
-        await fs.writeFile(ENV_PATH, newContent, 'utf8');
+        await fs.writeFile(envPath, newContent, 'utf8');
       });
 
-      // Reload into process.env so subsequent same-process reads see fresh
-      // values. The collector container WON'T pick up the new values from a
-      // plain `docker restart` — docker-compose evaluates env_file only at
-      // container CREATE time, so a restarted container keeps the
-      // baked-in env from `docker compose up`. The caller follows this POST
-      // with /api/lifecycle/restart, which recreates the gateway container
-      // (stop + remove + create with fresh Env), so the new values take
-      // effect.
-      process.env.HELIX_ENDPOINT = HELIX_ENDPOINT;
-      process.env.HELIX_API_KEY = HELIX_API_KEY;
-      process.env.X_SOURCE = X_SOURCE;
-      process.env.BUSINESS_SERVICE_KEY = BUSINESS_SERVICE_KEY || '';
-      process.env.HELIX_EVENTS_ENDPOINT = HELIX_EVENTS_ENDPOINT || '';
+      // Reload trimmed values into process.env so in-process reads match disk.
+      process.env.HELIX_ENDPOINT = updates.HELIX_ENDPOINT;
+      process.env.HELIX_API_KEY = updates.HELIX_API_KEY;
+      process.env.X_SOURCE = updates.X_SOURCE;
+      process.env.BUSINESS_SERVICE_KEY = updates.BUSINESS_SERVICE_KEY;
+      process.env.HELIX_EVENTS_ENDPOINT = updates.HELIX_EVENTS_ENDPOINT;
 
       // Intentionally NOT rewriting helix-otel-collector.yaml here. The shipped
       // YAML references ${env:HELIX_ENDPOINT} / ${env:HELIX_API_KEY} /
@@ -106,4 +111,4 @@ function register(app) {
   });
 }
 
-module.exports = { register };
+module.exports = { register, readEnvContent, parseManagedEnv, DEFAULT_ENV_PATH };

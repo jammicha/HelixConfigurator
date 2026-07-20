@@ -89,9 +89,9 @@ and set `image: ghcr.io/jammicha/helixconfigurator:latest` on the
 ### 1. Configure environment variables
 
 Create a `.env` file in the repo root (or the extracted package directory) with
-the following. The native zip ships `helix-otel-collector.yaml` but **not** a
-pre-filled `.env` — create one before launching, or complete Step 1 of the
-onboarding wizard on first run:
+the following. Clone/dev installs: `cp .env.example .env` and edit. The native
+zip ships an empty `.env` (or creates one on first save); either way Step 1
+**Save & initialize** works without a manual file.
 
 ```env
 # Required
