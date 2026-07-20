@@ -1,12 +1,12 @@
 # Helix Configurator
 
-The Helix Configurator is a local diagnostic and management tool that simplifies onboarding OpenTelemetry data to BMC Helix. It runs as a sidecar pair (a configurator UI + an OpenTelemetry Collector "gateway") and provides a web UI to:
+The Helix Configurator is a local diagnostic and management tool that simplifies onboarding OpenTelemetry data to BMC Helix. It provides a web UI plus an OpenTelemetry Collector **gateway** (created on demand when you use the Docker onboarding target) to:
 
 - Configure and edit the collector's YAML pipeline.
 - Validate configuration syntax, API key format, and tenant connectivity.
 - Bridge local application containers onto the same Docker network as the gateway so their telemetry can flow through.
 - Stream collector and per-service logs in real time.
-- Inject synthetic traces and verify telemetry is reaching Helix.
+- Inject synthetic traces and run diagnostic health checks to validate the pipeline end-to-end.
 - Deep-link into BMC Helix dashboards and AIOps for the configured business service.
 - Explore traces, logs, errors, and per-operation health locally via the **View OTel Data** page — a built-in APM-style viewer fed by a parallel fan-out from the gateway.
 
@@ -21,14 +21,48 @@ Docker Compose required to run the configurator itself.
    (`helix-configurator-darwin-arm64.zip`, `linux-amd64`, or `windows-amd64`).
    Intel Macs: use the Docker image path below — GitHub retired its Intel-Mac
    runners, so no `darwin-amd64` zip is built.
-2. Extract the zip.
+
+   **macOS tip — download from Terminal to skip Gatekeeper:** browser downloads
+   are stamped with Apple's quarantine flag and macOS may block `start.command`
+   on first launch (often with only "Move to Trash" / "Done" — no override).
+   Downloads via `curl` or `gh` are not quarantined, so you can double-click the
+   launcher immediately after extracting:
+
+   ```bash
+   cd ~/Downloads
+   curl -L -o helix-configurator.zip \
+     https://github.com/jammicha/HelixConfigurator/releases/latest/download/helix-configurator-darwin-arm64.zip
+   unzip helix-configurator.zip
+   cd helix-configurator
+   ./start.command
+   ```
+
+   Or with [GitHub CLI](https://cli.github.com/):
+
+   ```bash
+   gh release download --repo jammicha/HelixConfigurator \
+     --pattern 'helix-configurator-darwin-arm64.zip'
+   unzip helix-configurator-darwin-arm64.zip
+   cd helix-configurator
+   ./start.command
+   ```
+
+2. Extract the zip (if you downloaded via the browser or Releases page).
 3. Run the launcher: `./start.command` (macOS), `./start.sh` (Linux), or
    `start.bat` (Windows). The launcher runs `./node backend/index.js` and opens
    the browser to `http://localhost:8765`.
-   **macOS:** the package isn't code-signed yet, so Gatekeeper may block the
-   first launch — right-click `start.command` → **Open** once, or clear the
-   quarantine flag after extracting:
+
+   **macOS (browser download only):** the package isn't code-signed yet, so
+   Gatekeeper may block the first launch. If Terminal download isn't an option,
+   clear the quarantine flag after extracting:
    `xattr -dr com.apple.quarantine helix-configurator/`.
+   Right-click → **Open** sometimes works on older macOS releases but often
+   does not on current ones.
+
+   **After the first install:** use the in-app **Update available** banner to
+   upgrade — the configurator downloads updates itself (no browser quarantine).
+   For a manual reinstall, prefer the `curl` / `gh` commands above over a
+   browser download.
 
 No Docker is needed to run the configurator. Docker Engine (not necessarily
 Docker Desktop) is needed only when you choose the **Docker** onboarding target
@@ -37,9 +71,14 @@ collector container.
 
 **Secondary path — Docker image (GHCR)**
 
-The container image (`ghcr.io/jammicha/helixconfigurator`) remains published and
-works as before with `docker compose up -d`. The image sets `PORT=3001`
-internally; `docker-compose.yml` maps `8765:3001`.
+The container image (`ghcr.io/jammicha/helixconfigurator`) is published on
+every merge to `main` and on version tags. **Cloning this repo** and running
+`docker compose up -d` **builds the image locally** from the `Dockerfile` (same
+layout, slower first start). To use the pre-built GHCR image instead, pull it
+and set `image: ghcr.io/jammicha/helixconfigurator:latest` on the
+`helix-configurator` service (replacing the `build:` block) before
+`docker compose up -d`. The container sets `PORT=3001` internally;
+`docker-compose.yml` maps `8765:3001`.
 
 **Local development** (no install needed): see [Development](#development).
 
@@ -50,7 +89,9 @@ internally; `docker-compose.yml` maps `8765:3001`.
 ### 1. Configure environment variables
 
 Create a `.env` file in the repo root (or the extracted package directory) with
-the following:
+the following. The native zip ships `helix-otel-collector.yaml` but **not** a
+pre-filled `.env` — create one before launching, or complete Step 1 of the
+onboarding wizard on first run:
 
 ```env
 # Required
@@ -133,7 +174,7 @@ On first run, the UI walks you through a five-step onboarding wizard:
 1. **Configure** — capture credentials (endpoint, API key, X-Source) and save + restart the gateway. The wizard validates each field as you type and auto-rebuilds the canonical `tenant::seg1::seg2` key from a pasted Helix-portal bundle. A **Test connection** button probes the typed endpoint and API key against Helix before you commit them.
 2. **Exporter** — paste-ready snippets for adding `helix-gateway` as an `otlphttp` exporter to your existing collector's pipelines. When a single OTel collector is detected on the host, **Smart-add** offers to read its config, compute the merge, preview the diff, and apply it for you (with a `.helix-bak` and an automatic container restart). See [Smart-add](#smart-add) below.
 3. **Connect** — ensures `helix-gateway` shares a Docker network with your collector. Surfaces the result of the auto-bridge attempt from Step 1 and offers one-click attach to any detected collector network, with a manual fallback. Detects Kubernetes-based collectors and offers a one-click apply of the K8s Attribute Enrichment template.
-4. **Verify** — live span/metric/log counters since the step opened, app-side OTel export error detection, and a launch button for the dashboard. This step is read-only observation (the *Next* button is always enabled); validating your key and endpoint now happens up front via Step 1's **Test connection** rather than a synthetic round-trip.
+4. **Verify** — live span/metric/log counters since the step opened (gateway **ingress**), app-side OTel export error detection, and a launch button for the dashboard. This step is read-only observation (the *Next* button is always enabled); validating your key and endpoint against Helix happens up front via Step 1's **Test connection**. Post-launch, use dashboard **Re-verify telemetry** (checks `bmchelix` exporter `sent` counters) to confirm Helix **egress**.
 5. **Link Service** — a guided flow that links the app's OTel namespace to a BMC Helix AIOps Business Service and captures its `BUSINESS_SERVICE_KEY`, so trace deep-links and *Send to AIOps* pin to a single service instead of fanning across everything that shares a `service.name`. The same flow is available later as a dashboard card. See [Bind the namespaces to a Business Service (in AIOps)](#bind-the-namespaces-to-a-business-service-in-aiops).
 
 The stepper at the top is clickable for any step you've completed, so you can jump back to fix something without losing state.
@@ -255,7 +296,7 @@ After onboarding, the dashboard provides:
 - **Operation Shortcuts**
   - **Run Diagnostic Health Check** — toggles a 5-minute deep-diagnostic session: 4 status cards (Collector Configuration, X-API Key Format, X-Source Format, Tenant URL Endpoint), live `received` / `sent` / `dropped` counters with rolling 3-minute trend sparklines, log streaming, and synthetic trace injection.
   - **Discovered Services** — slide-out panel listing local Docker containers; click *Attach to Bridge* to wire an app's telemetry through the gateway.
-  - **Re-verify Telemetry Flow** — one-click check that data is reaching Helix, with a count snapshot in the toast.
+  - **Re-verify Telemetry Flow** — one-click check of gateway `sent` counters on the `bmchelix` exporter (Helix egress), with a count snapshot in the toast.
   - **Copy Support Bundle** — copies a sanitized snapshot (env with API key redacted, container status, diagnostic check results, live metrics, last 5 log lines) to the clipboard for support tickets.
   - **Helix OTel Dashboard** — deep-link to the namespace overview dashboard.
   - **AIOps Business Service** — deep-link to the configured business service in AIOps (requires `BUSINESS_SERVICE_KEY`).
@@ -270,7 +311,7 @@ After onboarding, the dashboard provides:
 
 ## View OTel Data
 
-Open the **View OTel Data** nav item or visit `/otel-data` to explore traces, logs, and errors locally — no Jaeger or external trace store required. The gateway fan-outs traces and logs to the configurator over the local network and the page renders them via SSE.
+Open the **View OTel Data** nav item or visit `/otel-data` to explore traces, logs, metrics, and errors locally — no Jaeger or external trace store required. The gateway fan-outs traces, logs, and metrics to the configurator over the local network and the page renders them via SSE.
 
 Page-level controls (top-right of the header) apply to every tab:
 
@@ -309,7 +350,9 @@ In the native path the configurator is a **host process** (port `PORT`, default 
 
 Application containers can be attached to the same `helix-bridge` network at runtime via the *Discovered Services* panel — once attached, point your app's OTel exporter at `helix-gateway:4317` or `:4318`.
 
-The gateway fan-outs traces and logs to the configurator backend (`POST /api/otlp/traces`, `POST /api/otlp/logs`) so the local **View OTel Data** page can render them. The trace store is SQLite at `./data/otel-store.db` (time-based retention, 24h default, with a 25,000-trace safety cap — tune via `TRACE_RETENTION_HOURS` / `TRACE_CAP`) and persists across restarts.
+The gateway fan-outs traces, logs, and metrics to the configurator backend
+(`POST /api/otlp/traces`, `POST /api/otlp/logs`, `POST /api/otlp/metrics`) so
+the local **View OTel Data** page can render them. The trace store is SQLite at `./data/otel-store.db` (time-based retention, 24h default, with a 25,000-trace safety cap — tune via `TRACE_RETENTION_HOURS` / `TRACE_CAP`) and persists across restarts.
 
 The configurator exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes and an `GET /api/version` endpoint that compares the embedded version to the latest GitHub release — the UI shows an "update available" banner when they differ.
 
@@ -344,6 +387,8 @@ deployments strip it.
 ## Troubleshooting & Management
 
 - **Native:** the configurator logs to stdout in the terminal where you ran the launcher.
+- **macOS Gatekeeper blocked `start.command`?** See [Distribution](#distribution) — download via `curl`/`gh`, use the in-app updater, or run `xattr -dr com.apple.quarantine helix-configurator/`.
+- **Gateway can't reach Helix (`no route to host` / `Host is unreachable`) while your Mac can?** If Step 3 attached `helix-gateway` to an app compose network on **`172.20.0.0/16`**, it can collide with internal Helix tenant IPs (`172.20.x.x`) — the container routes to the Docker bridge instead of your VPN. Fix: pin the app's compose network to a non-overlapping subnet (e.g. `172.29.0.0/16`), recreate the stack, re-attach the gateway, and restart it.
 - View gateway (OTel Collector) logs:
   ```bash
   docker logs helix-gateway
@@ -358,11 +403,15 @@ deployments strip it.
   ```
 - Reset the gateway to a fresh state without losing settings:
   Use the **Restart** button in the UI's *Helix Gateway Status* card.
-- **Update the configurator:** re-run the install command from `helix-aiops-mock`
-  or download the latest zip from GitHub Releases and extract over the existing
-  directory (your `.env`, `helix-otel-collector.yaml`, and `data/` are
-  preserved). The configurator UI shows an "update available" banner at the top
-  of the page when a newer release is detected.
+- **Update the configurator:**
+  - **Native (recommended):** click **Update available** in the UI banner — downloads
+    from GitHub Releases in-process (no browser quarantine).
+  - **Manual:** download the latest zip via `curl` or `gh release download` (see
+    [Distribution](#distribution)), extract over the existing directory (your
+    `.env`, `helix-otel-collector.yaml`, and `data/` are preserved).
+  - **Demo install path:** re-run the install command from `helix-aiops-mock`.
+  - The UI shows an "update available" banner when `/api/version` detects a newer
+    release on GitHub.
 
 ## Development
 
@@ -388,5 +437,5 @@ configuration.
 
 ## Known Issues
 
-- **macOS Gatekeeper on first launch (native zips).** The bundled `node` binary and launcher aren't code-signed/notarized yet, so macOS blocks the first run of a browser-downloaded zip. Workaround: right-click `start.command` → **Open** once, or `xattr -dr com.apple.quarantine helix-configurator/`. Signing/notarization is on the productization backlog.
+- **macOS Gatekeeper on first launch (native zips).** See [Distribution → macOS tip](#distribution). Signing/notarization is on the productization backlog.
 - _Resolved 2026-06:_ the previously documented `dompurify`/`monaco-editor` and `esbuild`/Vite advisories are gone — the editor moved to `@monaco-editor/react` and the build runs Vite 8. `npm audit` is clean in both packages.
