@@ -336,6 +336,8 @@ Three top-level tabs:
 
 Trace detail (click a row in Traces):
 
+![Trace detail drawer — service breakdown, SQL and HTTP rollups, and the span waterfall](assets/screenshots/trace-detail.png)
+
 - **Send to AIOps.** Top-right of the drawer: posts the trace into BMC Helix as an Event via the Events API. Severity is derived from the trace itself — `CRITICAL` when there's an error span, `MAJOR` when duration > 2× the operation's p95, `MINOR` otherwise. The button label changes accordingly (*Send anomaly to AIOps* vs *Send to AIOps as event*), and the icon is colored to match. Re-clicks for the same trace are warned about in the UI (the button reads *Sent — send again?* with a relative timestamp); a localStorage send-history disclosure logs every attempt. Pinning to one Business Service requires `BUSINESS_SERVICE_KEY` to be set.
 - **View in Helix.** Deep-link to the `OTelTraceDetails` dashboard for this trace.
 - **Service breakdown.** Stacked bar showing wall-clock time per service in the trace, with intervals merged so parallel spans don't double-count.
