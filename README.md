@@ -171,6 +171,9 @@ port 8765) and the gateway. No local build required.
 
 On first run, the UI walks you through a five-step onboarding wizard:
 
+![Onboarding wizard — Step 1: Configure helix-gateway](assets/screenshots/onboarding-wizard.png)
+
+
 1. **Configure** — capture credentials (endpoint, API key, X-Source) and save + restart the gateway. The wizard validates each field as you type and auto-rebuilds the canonical `tenant::seg1::seg2` key from a pasted Helix-portal bundle. A **Test connection** button probes the typed endpoint and API key against Helix before you commit them.
 2. **Exporter** — paste-ready snippets for adding `helix-gateway` as an `otlphttp` exporter to your existing collector's pipelines. When a single OTel collector is detected on the host, **Smart-add** offers to read its config, compute the merge, preview the diff, and apply it for you (with a `.helix-bak` and an automatic container restart). See [Smart-add](#smart-add) below.
 3. **Connect** — ensures `helix-gateway` shares a Docker network with your collector. Surfaces the result of the auto-bridge attempt from Step 1 and offers one-click attach to any detected collector network, with a manual fallback. Detects Kubernetes-based collectors and offers a one-click apply of the K8s Attribute Enrichment template.
@@ -292,6 +295,9 @@ kubectl get pods                                 # wait for helix-gateway = Runn
 
 After onboarding, the dashboard provides:
 
+![Gateway Dashboard — system health, quick actions, and the gateway YAML editor](assets/screenshots/gateway-dashboard.png)
+
+
 - **Helix Gateway Status** — start/stop/restart controls with live container state.
 - **Operation Shortcuts**
   - **Run Diagnostic Health Check** — toggles a 5-minute deep-diagnostic session: 4 status cards (Collector Configuration, X-API Key Format, X-Source Format, Tenant URL Endpoint), live `received` / `sent` / `dropped` counters with rolling 3-minute trend sparklines, log streaming, and synthetic trace injection.
@@ -312,6 +318,9 @@ After onboarding, the dashboard provides:
 ## View OTel Data
 
 Open the **View OTel Data** nav item or visit `/otel-data` to explore traces, logs, metrics, and errors locally — no Jaeger or external trace store required. The gateway fan-outs traces, logs, and metrics to the configurator over the local network and the page renders them via SSE.
+
+![View OTel Data — overview tab with golden-signal tiles, latency chart, and the service map](assets/screenshots/otel-viewer.png)
+
 
 Page-level controls (top-right of the header) apply to every tab:
 
