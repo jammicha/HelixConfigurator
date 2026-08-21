@@ -8,7 +8,11 @@
 const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
-const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers, IS_CONTAINERIZED } = require('../util');
+const axios = require('axios');
+const {
+  withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers, IS_CONTAINERIZED,
+  resolveGatewayOtlpBase,
+} = require('../util');
 const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
 
@@ -16,6 +20,7 @@ const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
 const { rewriteLocalViewerEndpoint } = require('../collectorFanout');
 const { preferredViewerEndpoint, viewerCandidates } = require('../viewerEndpoint');
 const { selectViewerEndpoint } = require('../viewerLadder');
+const { runViewerCanary } = require('../viewerCanary');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
@@ -46,10 +51,46 @@ const resolveBridgeGatewayIp = async (docker) => {
   }
 };
 
+// Docker reporting a container "started" only means the process was
+// launched, not that the OTel collector inside it has finished booting and
+// bound its OTLP receiver. Racing the canary against that gap produces a
+// false "gateway-unreachable" verdict — indistinguishable, from the canary's
+// point of view, from an actually-dead gateway — which then suppresses every
+// remaining ladder candidate. Poll until something answers on the OTLP port,
+// or give up after a generous deadline; on timeout we still return (never
+// throw) and let the canary's own probe produce the real, now-truthful,
+// verdict. A connection failure while the collector is mid-boot is expected
+// here, not an error worth logging.
+const waitForGatewayReady = async ({
+  otlpBase = resolveGatewayOtlpBase(),
+  deadlineMs = 30_000,
+  intervalMs = 500,
+  axiosImpl = axios,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+} = {}) => {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    try {
+      // Any response at all — including an HTTP error status — means a
+      // listener has bound the port, which is all readiness means here.
+      await axiosImpl.get(otlpBase, { timeout: 2000, validateStatus: () => true });
+      return;
+    } catch {
+      /* expected while the collector is still starting up */
+    }
+    if (Date.now() >= deadline) return;
+    await sleep(intervalMs);
+  }
+};
+
 // Create the gateway container from scratch — the job docker-compose does in
 // the container path. Used on the first Docker-target commit when no gateway
 // exists yet. After this, recreateGateway() handles subsequent env edits.
-async function createGatewayFromScratch(docker, { name, env, configHostPath, otelStore }) {
+async function createGatewayFromScratch(docker, {
+  name, env, configHostPath, otelStore,
+  canary = runViewerCanary,
+  waitForReady = waitForGatewayReady,
+}) {
   // Pull only if absent (offline-friendly; image may already be local).
   try {
     await docker.getImage(GATEWAY_IMAGE).inspect();
@@ -88,13 +129,30 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath, ote
   // still a working gateway for Helix delivery.
   if (!otelStore) return { viewer: null };
   try {
-    const bridgeIp = await resolveBridgeGatewayIp(docker);
+    // viewerCandidates() ignores bridgeIp on the containerized branch, so
+    // skip the network round trip to look it up in that case.
+    const bridgeIp = IS_CONTAINERIZED ? null : await resolveBridgeGatewayIp(docker);
+    // Candidate 0 is preferredViewerEndpoint()'s output, which is exactly
+    // what the pre-create write above already put on disk and what the
+    // container just loaded at start — no write or restart needed to prove
+    // it, just a readiness wait before the first canary probe.
+    await waitForReady();
     const result = await selectViewerEndpoint({
       configHostPath,
       candidates: viewerCandidates({ containerized: IS_CONTAINERIZED, bridgeIp }),
       otelStore,
+      canary,
+      skipFirstApply: true,
       restartGateway: async () => {
         await withDockerTimeout(container.restart({ t: 5 }), 'container.restart', 30_000);
+        // On Docker Desktop a single-file bind mount resolves by path, so a
+        // running container would already see the renamed yaml even without
+        // this restart. On native Linux Docker Engine that same mount is
+        // inode-based, so a running container keeps the pre-rename content
+        // until the mount is re-established — restarting is what makes the
+        // new candidate visible there. Either way, wait for the freshly
+        // restarted collector to finish booting before the next canary probe.
+        await waitForReady();
       },
     });
     if (result.verdict !== 'ok') {
@@ -103,6 +161,7 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath, ote
     }
     return { viewer: result };
   } catch (e) {
+    errorLog.push('gateway.viewer.selection-failed', `candidate ladder threw: ${e.message}`);
     console.warn('createGatewayFromScratch: viewer endpoint selection skipped:', e.message);
     return { viewer: null };
   }

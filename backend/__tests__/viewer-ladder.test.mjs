@@ -72,4 +72,41 @@ describe('selectViewerEndpoint', () => {
     expect(r.attempts).toHaveLength(2);
     expect(fsp.state.yaml).toBe('yaml-for:http://a:1');
   });
+
+  it('skipFirstApply proves candidate 0 without writing or restarting, but still writes and restarts for later candidates', async () => {
+    const fsp = makeFsp('yaml-for:http://a:1'); // caller already wrote candidate 0 on disk
+    const canary = vi.fn()
+      .mockResolvedValueOnce({ verdict: 'fanout-failed' })
+      .mockResolvedValueOnce({ verdict: 'ok' });
+    const restartGateway = vi.fn(async () => {});
+    const r = await selectViewerEndpoint({
+      configHostPath: '/tmp/c.yaml', candidates: ['http://a:1', 'http://b:2'],
+      otelStore: {}, restartGateway, fsp, canary, rewrite, skipFirstApply: true,
+    });
+    expect(r.endpoint).toBe('http://b:2');
+    expect(fsp.writeFile).toHaveBeenCalledTimes(1); // only for candidate 1, not candidate 0
+    expect(restartGateway).toHaveBeenCalledTimes(1); // only for candidate 1
+    expect(fsp.state.yaml).toBe('yaml-for:http://b:2');
+  });
+
+  it('converts a thrown error mid-ladder into a failed attempt, keeps walking, and still restores candidate 0', async () => {
+    const fsp = makeFsp('original');
+    const restartGateway = vi.fn()
+      .mockRejectedValueOnce(new Error('docker restart timed out'))
+      .mockResolvedValueOnce(undefined);
+    const canary = vi.fn(async () => ({ verdict: 'fanout-failed' }));
+    const r = await selectViewerEndpoint({
+      configHostPath: '/tmp/c.yaml', candidates: ['http://a:1', 'http://b:2'],
+      otelStore: {}, restartGateway, fsp, canary, rewrite,
+    });
+    expect(r.endpoint).toBe(null);
+    expect(r.attempts).toEqual([
+      { endpoint: 'http://a:1', verdict: 'fanout-failed', error: 'docker restart timed out' },
+      { endpoint: 'http://b:2', verdict: 'fanout-failed' },
+    ]);
+    // canary only ran for the candidate whose restart succeeded
+    expect(canary).toHaveBeenCalledOnce();
+    // nothing threw out of selectViewerEndpoint, and the restore still ran
+    expect(fsp.state.yaml).toBe('yaml-for:http://a:1');
+  });
 });
