@@ -115,11 +115,18 @@ describe('capability probe vs the auth gate', () => {
     return app;
   };
 
+  // Asserts the WIRING (the probe is reachable ungated and reports what
+  // detectCapability says), not a fixed verdict: what it reports is
+  // platform-dependent. A bundled runtime means mode 'native' on macOS and
+  // Linux but 'windows' on win32, where the file-locked swap is not
+  // implemented — an earlier version of this test hardcoded 'native' and
+  // only failed once CI reached a Windows runner.
   it('serves the capability probe without credentials', async () => {
     const res = await request(appWithAuthGate(nativeRoot)).get('/api/update/capability');
     expect(res.status).toBe(200);
-    expect(res.body.supported).toBe(true);
-    expect(res.body.mode).toBe('native');
+    const expected = detectCapability({ installRoot: nativeRoot });
+    expect(res.body.supported).toBe(expected.supported);
+    expect(res.body.mode).toBe(expected.mode);
   });
 
   it('still reports an unsupported install without credentials, with its hint', async () => {
