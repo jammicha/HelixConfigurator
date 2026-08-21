@@ -16,6 +16,7 @@ const { PassThrough } = require('stream');
 const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse, resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util');
 const errorLog = require('../errorLog');
 const { analyzeCollectorErrorLog } = require('../exportErrorScan');
+const { readEnvContent, parseManagedEnv, DEFAULT_ENV_PATH } = require('./env');
 
 // Docker-API name (logs / inspect / restart) only. HTTP requests from this
 // process must go through resolveGateway*Base — container DNS doesn't exist
@@ -855,15 +856,9 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   // GET network diagnostics.
   app.get('/api/diagnostics/network', async (req, res) => {
     try {
-      const envPath = path.join(__dirname, '../../.env');
-      const envContent = fs.readFileSync(envPath, 'utf8');
-      const vars = {};
-      envContent.split('\n').forEach(line => {
-        const [key, ...value] = line.split('=');
-        if (key && value) vars[key.trim()] = value.join('=').trim();
-      });
-
-      const endpoint = vars.HELIX_ENDPOINT;
+      const envContent = await readEnvContent(DEFAULT_ENV_PATH);
+      const vars = parseManagedEnv(envContent);
+      const endpoint = vars.HELIX_ENDPOINT || process.env.HELIX_ENDPOINT;
       if (!endpoint) throw new Error('HELIX_ENDPOINT not configured');
 
       const startTime = Date.now();

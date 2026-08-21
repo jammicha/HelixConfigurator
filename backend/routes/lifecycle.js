@@ -258,6 +258,20 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
   await withDockerTimeout(fresh.start(), 'container.start', 15_000);
 };
 
+// Native installs lose the gateway when Docker is stopped/restarted without
+// compose. Start/Restart used to 404 here; bridge already create-or-recreates.
+const createGatewayIfMissing = async (docker, name, configPath) => {
+  try {
+    await docker.getContainer(name).inspect();
+    return false;
+  } catch (e) {
+    if (e.statusCode !== 404) throw e;
+    const env = (await readEnvAsArray()) || [];
+    await createGatewayFromScratch(docker, { name, env, configHostPath: configPath });
+    return true;
+  }
+};
+
 function register(app, { docker, configPath }) {
   // POST restart the configured target container. Recreates rather than
   // plain-restarts so updated .env values load (see recreateGateway above
@@ -265,6 +279,10 @@ function register(app, { docker, configPath }) {
   app.post('/api/lifecycle/restart', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
     try {
+      const created = await createGatewayIfMissing(docker, targetContainer, configPath);
+      if (created) {
+        return res.json({ message: `Container ${targetContainer} created successfully` });
+      }
       await recreateGateway(docker, targetContainer);
       res.json({ message: `Container ${targetContainer} restarted successfully` });
     } catch (e) {
@@ -281,6 +299,16 @@ function register(app, { docker, configPath }) {
     } catch (e) {
       // Already-running is a 304 from the API — treat as success.
       if (e.statusCode === 304) return res.json({ message: `Container ${targetContainer} already running` });
+      if (e.statusCode === 404) {
+        try {
+          const env = (await readEnvAsArray()) || [];
+          await createGatewayFromScratch(docker, { name: targetContainer, env, configHostPath: configPath });
+          return res.json({ message: `Container ${targetContainer} created and started successfully` });
+        } catch (createErr) {
+          if (sendDockerTimeoutResponse(res, createErr)) return;
+          return res.status(500).json({ error: 'Failed to create gateway', details: createErr.message });
+        }
+      }
       if (sendDockerTimeoutResponse(res, e)) return;
       res.status(500).json({ error: 'Failed to start container', details: e.message });
     }

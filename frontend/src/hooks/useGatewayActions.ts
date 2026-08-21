@@ -56,7 +56,8 @@ export const useGatewayActions = ({
         showToast('Gateway Restarted Successfully');
         pushTimelineEvent('restart', 'Gateway restarted');
         // Poll for the gateway to settle instead of a blind 3s sleep.
-        await waitForGatewayRunning(15000);
+        const ready = await waitForGatewayRunning(15000);
+        if (!ready.ok) showToast(ready.error, 'error');
         const collectorStatus = await fetch('/api/diagnostics/collector').then(r => r.json());
         setCollectorDiag(collectorStatus);
       } else {

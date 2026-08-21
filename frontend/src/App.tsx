@@ -719,8 +719,8 @@ const App = () => {
         return;
       }
       const ready = await waitForGatewayRunning(15000);
-      if (!ready) {
-        showToastMsg('Settings saved, but gateway did not reach running state', 'error');
+      if (!ready.ok) {
+        showToastMsg(`Settings saved, but ${ready.error.toLowerCase()}`, 'error');
         return;
       }
 
@@ -749,6 +749,15 @@ const App = () => {
     setIsVerifying(true);
     setSetupError('');
 
+    const apiError = async (res: Response, fallback: string) => {
+      try {
+        const data = await res.json();
+        return data.error || data.details || data.message || fallback;
+      } catch {
+        return fallback;
+      }
+    };
+
     try {
       // Kubernetes targets (plain + Operator): just persist the creds (POST
       // /api/env reloads process.env so the Step-2 chart preview bakes them in)
@@ -759,7 +768,7 @@ const App = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(envVars),
         });
-        if (!envRes.ok) throw new Error('Failed to save settings');
+        if (!envRes.ok) throw new Error(await apiError(envRes, 'Failed to save settings'));
         setSetupStep(2);
         return; // the finally block clears isVerifying
       }
@@ -770,7 +779,7 @@ const App = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(envVars)
       });
-      if (!envRes.ok) throw new Error('Failed to save settings');
+      if (!envRes.ok) throw new Error(await apiError(envRes, 'Failed to save settings'));
 
       // Apply Step 1's env changes by recreating the gateway. Compose only
       // evaluates env_file at container create time, so a plain restart
@@ -779,17 +788,19 @@ const App = () => {
       // and driven off APP_URL — that conflated two unrelated concerns).
       setBridgeStatus(null);
       const bridgeRes = await fetch('/api/lifecycle/bridge', { method: 'POST' });
+      const bridgeData = await bridgeRes.json().catch(() => ({}));
+      if (!bridgeRes.ok) {
+        const reason = bridgeData.error || bridgeData.details || 'Unknown error';
+        if (/docker\.sock|docker daemon|cannot connect to docker|enoent.*docker/i.test(reason)) {
+          throw new Error('Docker is not running. Start Docker Desktop, then try Save & initialize again.');
+        }
+        throw new Error(reason);
+      }
 
       // Poll until the gateway reports running. Slow hosts used to false-fail
       // the network diagnostic on a blind 3s sleep.
       const ready = await waitForGatewayRunning(15000);
-      if (!ready) throw new Error('Gateway did not reach running state within 15s');
-      if (!bridgeRes.ok) {
-        const bridgeData = await bridgeRes.json().catch(() => ({}));
-        const reason = bridgeData.error || bridgeData.details || 'Unknown error';
-        console.warn('Gateway recreate failed:', reason);
-        setBridgeStatus({ kind: 'error', reason });
-      }
+      if (!ready.ok) throw new Error(ready.error);
 
       // Helix only supports the collector-routed path now, so the wizard
       // doesn't branch on instrumentation style — Step 2 just shows the
