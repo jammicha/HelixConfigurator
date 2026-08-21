@@ -17,9 +17,8 @@ const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
 
 const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
-const { rewriteLocalViewerEndpoint } = require('../collectorFanout');
 const { preferredViewerEndpoint, viewerCandidates } = require('../viewerEndpoint');
-const { selectViewerEndpoint } = require('../viewerLadder');
+const { selectViewerEndpoint, writeEndpoint } = require('../viewerLadder');
 const { runViewerCanary } = require('../viewerCanary');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
@@ -83,6 +82,29 @@ const waitForGatewayReady = async ({
   }
 };
 
+// Point the on-disk collector yaml's viewer exporter at wherever this
+// configurator is actually reachable from inside the gateway container.
+//
+// This has to run before EVERY gateway create and recreate, not just create.
+// The rewrite being bidirectional is a property of the function, not of the
+// system: in the compose deployment the gateway is created by compose, so
+// this route only ever recreates and the container-direction rewrite would
+// otherwise never execute at all. Separately, a user who follows the
+// README's advice to set PORT after a port collision, restarts, and presses
+// Save would get a gateway recreated against the stale endpoint.
+//
+// The expensive part — restart plus canary — deliberately stays create-only;
+// this is a read, a string replace and a rename. Never throws: a gateway
+// that comes up with a stale fan-out target is still a working gateway for
+// Helix delivery, and the canary/preflight name the fan-out problem.
+const applyViewerEndpointToDisk = async (configHostPath) => {
+  try {
+    await writeEndpoint(configHostPath, preferredViewerEndpoint({ containerized: IS_CONTAINERIZED }));
+  } catch (e) {
+    console.warn('applyViewerEndpointToDisk: yaml fan-out rewrite skipped:', e.message);
+  }
+};
+
 // Create the gateway container from scratch — the job docker-compose does in
 // the container path. Used on the first Docker-target commit when no gateway
 // exists yet. After this, recreateGateway() handles subsequent env edits.
@@ -103,17 +125,10 @@ async function createGatewayFromScratch(docker, {
   } catch (e) {
     if (e.statusCode !== 409) throw e; // 409 = already exists
   }
-  // Configurator runs on the host, gateway in a container — flip the local
-  // fan-out target to host.docker.internal so traces reach the host viewer.
-  try {
-    const current = await fsp.readFile(configHostPath, 'utf8');
-    const tmp = `${configHostPath}.tmp`;
-    const target = preferredViewerEndpoint({ containerized: IS_CONTAINERIZED });
-    await fsp.writeFile(tmp, rewriteLocalViewerEndpoint(current, target));
-    await fsp.rename(tmp, configHostPath);
-  } catch (e) {
-    console.warn('createGatewayFromScratch: yaml host-rewrite skipped:', e.message);
-  }
+  // NB: the caller (the /bridge route) has already pointed configHostPath at
+  // preferredViewerEndpoint() — see applyViewerEndpointToDisk. That is what
+  // lets the ladder below pass skipFirstApply, and it is why the container
+  // loads the right endpoint the moment it starts.
   const spec = buildGatewayCreateSpec({ name, env, configHostPath });
   const container = await docker.createContainer(spec);
   try {
@@ -133,9 +148,9 @@ async function createGatewayFromScratch(docker, {
     // skip the network round trip to look it up in that case.
     const bridgeIp = IS_CONTAINERIZED ? null : await resolveBridgeGatewayIp(docker);
     // Candidate 0 is preferredViewerEndpoint()'s output, which is exactly
-    // what the pre-create write above already put on disk and what the
-    // container just loaded at start — no write or restart needed to prove
-    // it, just a readiness wait before the first canary probe.
+    // what the caller's applyViewerEndpointToDisk already put on disk and
+    // what the container just loaded at start — no write or restart needed
+    // to prove it, just a readiness wait before the first canary probe.
     await waitForReady();
     const result = await selectViewerEndpoint({
       configHostPath,
@@ -431,6 +446,9 @@ function register(app, { docker, configPath, otelStore }) {
     // cell from this instead. null on the recreate path: the ladder is
     // create-only by design (a restart plus a canary on every routine env
     // save is a bad trade).
+    // Both branches, deliberately — see applyViewerEndpointToDisk.
+    await applyViewerEndpointToDisk(configPath);
+
     let viewer = null;
     try {
       if (gatewayExists) {

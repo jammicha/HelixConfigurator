@@ -149,3 +149,72 @@ describe('POST /api/lifecycle/bridge — viewer verdict in the response', () => 
     expect(res.body.viewer).toBe(null);
   });
 });
+
+describe('POST /api/lifecycle/bridge — on-disk fan-out endpoint', () => {
+  // The rewrite is what makes the yaml agree with where the configurator is
+  // actually reachable. It used to run only inside createGatewayFromScratch,
+  // so in the compose deployment — where the gateway is created by compose
+  // and this route only ever recreates — it never ran at all. It also never
+  // ran for a user who set PORT after a collision, restarted, and pressed
+  // Save. It is a read, a string replace and a rename; the canary ladder,
+  // which is the expensive part, deliberately stays create-only.
+  const writeTempCollectorYaml = (endpoint) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'helix-cfg-'));
+    const cfg = path.join(dir, 'helix-otel-collector.yaml');
+    fs.writeFileSync(cfg, `exporters:\n  otlphttp/helix_local_viewer:\n    traces_endpoint: ${endpoint}/api/otlp/traces\n`);
+    return cfg;
+  };
+
+  const runBridge = async (cfg, { gatewayExists }) => {
+    const docker = {
+      getContainer: () => ({
+        inspect: vi.fn(async () => {
+          if (gatewayExists) return { Config: { Image: 'img', Env: [] }, HostConfig: {}, NetworkSettings: { Networks: {} } };
+          const e = new Error('no such container'); e.statusCode = 404; throw e;
+        }),
+        stop: vi.fn(async () => {}), remove: vi.fn(async () => {}),
+      }),
+      createContainer: vi.fn(async () => ({ start: vi.fn(async () => {}) })),
+      createNetwork: vi.fn(async () => {}),
+      getImage: () => ({ inspect: vi.fn(async () => ({})) }),
+      getNetwork: () => ({ connect: vi.fn(async () => {}) }),
+    };
+    const app = express();
+    app.use(express.json());
+    lifecycle.register(app, { docker, configPath: cfg });
+    return request(app).post('/api/lifecycle/bridge').send({});
+  };
+
+  it('rewrites a stale container-direction endpoint on the RECREATE path', async () => {
+    const cfg = writeTempCollectorYaml('http://helix-configurator:3001');
+    const res = await runBridge(cfg, { gatewayExists: true });
+    expect(res.status).toBe(200);
+    expect(fs.readFileSync(cfg, 'utf8')).toContain('http://host.docker.internal:8765/api/otlp/traces');
+  });
+
+  it('rewrites a stale PORT on the recreate path, so a post-collision PORT change takes effect', async () => {
+    const prevPort = process.env.PORT;
+    process.env.PORT = '9100';
+    try {
+      const cfg = writeTempCollectorYaml('http://host.docker.internal:8765');
+      const res = await runBridge(cfg, { gatewayExists: true });
+      expect(res.status).toBe(200);
+      expect(fs.readFileSync(cfg, 'utf8')).toContain('http://host.docker.internal:9100/api/otlp/traces');
+    } finally {
+      if (prevPort === undefined) delete process.env.PORT;
+      else process.env.PORT = prevPort;
+    }
+  });
+
+  it('still rewrites on the CREATE path', async () => {
+    const cfg = writeTempCollectorYaml('http://helix-configurator:3001');
+    const res = await runBridge(cfg, { gatewayExists: false });
+    expect(res.status).toBe(200);
+    expect(fs.readFileSync(cfg, 'utf8')).toContain('http://host.docker.internal:8765/api/otlp/traces');
+  });
+
+  it('a rewrite failure (unreadable yaml) does not fail the request', async () => {
+    const res = await runBridge('/nonexistent/dir/helix-otel-collector.yaml', { gatewayExists: true });
+    expect(res.status).toBe(200);
+  });
+});

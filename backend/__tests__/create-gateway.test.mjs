@@ -65,17 +65,6 @@ describe('createGatewayFromScratch — start failure cleanup', () => {
   });
 });
 
-describe('createGatewayFromScratch — host fan-out', () => {
-  it('rewrites the on-disk collector yaml to host.docker.internal before create', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'helix-cfg-'));
-    const cfg = path.join(dir, 'helix-otel-collector.yaml');
-    fs.writeFileSync(cfg, `exporters:\n  otlphttp/helix_local_viewer:\n    traces_endpoint: http://helix-configurator:3001/api/otlp/traces\n`);
-    const docker = mockDocker();
-    await createGatewayFromScratch(docker, { name: 'helix-gateway', env: [], configHostPath: cfg });
-    expect(fs.readFileSync(cfg, 'utf8')).toContain('host.docker.internal:8765');
-  });
-});
-
 // A docker instance whose container also exposes restart(), and whose
 // helix-bridge network inspect returns a gateway IP — enough for
 // viewerCandidates() to offer a second (bridgeIp) candidate so the ladder's

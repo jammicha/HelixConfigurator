@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { selectViewerEndpoint } from '../viewerLadder.js';
+import { selectViewerEndpoint, writeEndpoint } from '../viewerLadder.js';
 
 // Minimal fs promises double backed by a string.
 const makeFsp = (initial) => {
@@ -178,5 +178,24 @@ describe('selectViewerEndpoint', () => {
     // The failed restore never renamed, so disk still holds candidate 1's
     // content, not candidate 0's.
     expect(fsp.state.yaml).toBe('yaml-for:http://b:2');
+  });
+});
+
+describe('writeEndpoint', () => {
+  // Now a public export with two callers (the ladder and the lifecycle
+  // route's pre-create/pre-recreate rewrite), so its atomicity contract is
+  // worth pinning directly rather than only through the ladder.
+  it('writes through a .tmp sibling and renames, never editing the live file in place', async () => {
+    const fsp = makeFsp('original');
+    await writeEndpoint('/tmp/c.yaml', 'http://a:1', { fsp, rewrite });
+    expect(fsp.writeFile).toHaveBeenCalledWith('/tmp/c.yaml.tmp', 'yaml-for:http://a:1');
+    expect(fsp.rename).toHaveBeenCalledWith('/tmp/c.yaml.tmp', '/tmp/c.yaml');
+    expect(fsp.state.yaml).toBe('yaml-for:http://a:1');
+  });
+
+  it('propagates a read failure so the caller decides whether it is fatal', async () => {
+    const fsp = makeFsp('original');
+    fsp.readFile = vi.fn(async () => { throw new Error('ENOENT'); });
+    await expect(writeEndpoint('/tmp/c.yaml', 'http://a:1', { fsp, rewrite })).rejects.toThrow('ENOENT');
   });
 });

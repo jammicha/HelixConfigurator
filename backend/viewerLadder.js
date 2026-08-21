@@ -12,7 +12,15 @@ const fspDefault = require('fs').promises;
 const { rewriteLocalViewerEndpoint } = require('./collectorFanout');
 const { runViewerCanary } = require('./viewerCanary');
 
-const writeEndpoint = async (fsp, configHostPath, rewrite, endpoint) => {
+// Point the on-disk collector yaml's viewer exporter at `endpoint`, via a
+// tmp file and a rename so a crash mid-write cannot leave the user with a
+// truncated config. Exported because the lifecycle route needs exactly this
+// before every gateway create OR recreate, and had a verbatim second copy.
+const writeEndpoint = async (
+  configHostPath,
+  endpoint,
+  { fsp = fspDefault, rewrite = rewriteLocalViewerEndpoint } = {},
+) => {
   const current = await fsp.readFile(configHostPath, 'utf8');
   const tmp = `${configHostPath}.tmp`;
   await fsp.writeFile(tmp, rewrite(current, endpoint));
@@ -47,7 +55,7 @@ const selectViewerEndpoint = async ({
     const endpoint = candidates[i];
     try {
       if (!(i === 0 && skipFirstApply)) {
-        await writeEndpoint(fsp, configHostPath, rewrite, endpoint);
+        await writeEndpoint(configHostPath, endpoint, { fsp, rewrite });
         await restartGateway();
       }
       const result = await canary({ otelStore });
@@ -92,7 +100,7 @@ const selectViewerEndpoint = async ({
   let restoreError = null;
   if (attempts.length > 1) {
     try {
-      await writeEndpoint(fsp, configHostPath, rewrite, candidates[0]);
+      await writeEndpoint(configHostPath, candidates[0], { fsp, rewrite });
     } catch (e) {
       restoreError = e.message;
     }
@@ -107,4 +115,4 @@ const selectViewerEndpoint = async ({
   };
 };
 
-module.exports = { selectViewerEndpoint };
+module.exports = { selectViewerEndpoint, writeEndpoint };
