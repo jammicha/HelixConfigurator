@@ -12,7 +12,7 @@
 // path is a stronger signal in any case.
 const crypto = require('node:crypto');
 const axios = require('axios');
-const { resolveGatewayOtlpBase } = require('./util');
+const { resolveGatewayOtlpBase, DIAGNOSTIC_NAMESPACE } = require('./util');
 
 const CANARY_SERVICE_NAME = 'helix-configurator-canary';
 
@@ -23,7 +23,11 @@ const buildCanaryPayload = (traceId, spanId, nowMs) => ({
     resource: {
       attributes: [
         { key: 'service.name', value: { stringValue: CANARY_SERVICE_NAME } },
-        { key: 'service.namespace', value: { stringValue: CANARY_SERVICE_NAME } },
+        // The shared internal namespace, NOT a canary-specific one: this span
+        // traverses the gateway's full pipeline, so it also ships to
+        // otlphttp/bmchelix and lands in the customer's Helix tenant. Keeping
+        // service.name canary-specific is what makes it filterable there.
+        { key: 'service.namespace', value: { stringValue: DIAGNOSTIC_NAMESPACE } },
       ],
     },
     scopeSpans: [{

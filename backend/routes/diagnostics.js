@@ -13,7 +13,7 @@ const yaml = require('js-yaml');
 const axios = require('axios');
 const crypto = require('crypto');
 const { PassThrough } = require('stream');
-const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse, resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util');
+const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse, resolveGatewayOtlpBase, resolveGatewayMetricsBase, DIAGNOSTIC_NAMESPACE } = require('../util');
 const errorLog = require('../errorLog');
 const { analyzeCollectorErrorLog } = require('../exportErrorScan');
 const { runViewerCanary } = require('../viewerCanary');
@@ -22,12 +22,6 @@ const { runViewerCanary } = require('../viewerCanary');
 // process must go through resolveGateway*Base — container DNS doesn't exist
 // on native installs.
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
-
-// Synthetic diagnostic traces (inject-trace) carry an explicit OTel namespace
-// so Helix groups them on their own. Without it Helix
-// falls back to the X-Source header, landing these internal health checks
-// inside the customer's namespace and cluttering the AIOps topology/demo.
-const DIAGNOSTIC_NAMESPACE = 'Helix-Configurator-Internal';
 
 // Module-scope mutable state. activeLogProcesses is exported via
 // closeActiveLogProcesses() so the index.js shutdown handler can drain it.

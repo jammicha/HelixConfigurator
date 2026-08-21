@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runViewerCanary, CANARY_SERVICE_NAME } from '../viewerCanary.js';
+import { DIAGNOSTIC_NAMESPACE } from '../util.js';
 
 const noSleep = async () => {};
 
@@ -26,6 +27,22 @@ describe('runViewerCanary', () => {
     const payload = axiosImpl.post.mock.calls[0][1];
     const attrs = payload.resourceSpans[0].resource.attributes;
     expect(attrs).toContainEqual({ key: 'service.name', value: { stringValue: CANARY_SERVICE_NAME } });
+  });
+
+  it('groups under the shared internal diagnostic namespace, not a second invented one', async () => {
+    // The canary span traverses the gateway's full pipeline, so it also
+    // ships to otlphttp/bmchelix and lands in the CUSTOMER's Helix tenant —
+    // once per ladder run and once per Diagnostics-drawer open. inject-trace
+    // already carries DIAGNOSTIC_NAMESPACE precisely so Helix groups
+    // synthetic traces away from the customer's AIOps topology; a
+    // canary-specific namespace would be a second internal namespace in
+    // their tenant.
+    const axiosImpl = { post: vi.fn(async () => ({ status: 200 })) };
+    const otelStore = { getTrace: () => ({ summary: {}, spans: [{ spanId: 'a' }] }) };
+    await runViewerCanary({ otelStore, axiosImpl, sleep: noSleep, otlpBase: 'http://localhost:4318' });
+    const attrs = axiosImpl.post.mock.calls[0][1].resourceSpans[0].resource.attributes;
+    expect(attrs).toContainEqual({ key: 'service.namespace', value: { stringValue: DIAGNOSTIC_NAMESPACE } });
+    expect(DIAGNOSTIC_NAMESPACE).not.toBe(CANARY_SERVICE_NAME);
   });
 
   it('reports gateway-unreachable when the OTLP receiver refuses the injection', async () => {
