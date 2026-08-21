@@ -1,6 +1,6 @@
 // backend/k8sChart/transformCollectorConfig.js
 // PURE: transform the live collector config into the gateway ConfigMap payload.
-// - target='local': rewrites the local-viewer exporter to host.docker.internal:8765
+// - target='local': rewrites the local-viewer exporter to preferredViewerEndpoint()
 //   so telemetry flows back to the configurator running on the host.
 // - target='remote': strips the viewer exporter entirely (Helix-only).
 // - Ensures a health_check extension so the gateway Deployment can use httpGet probes.

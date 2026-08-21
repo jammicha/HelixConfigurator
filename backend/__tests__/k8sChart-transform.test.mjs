@@ -41,6 +41,21 @@ describe('transformCollectorConfig', () => {
     expect(out.service.pipelines.traces.exporters).toContain(VIEWER_EXPORTER_KEY);
   });
 
+  it('target=local: honours a PORT override, proving the endpoint is derived rather than hardcoded', () => {
+    const prevPort = process.env.PORT;
+    process.env.PORT = '9100';
+    try {
+      const out = yaml.load(transformCollectorConfig(BASE, { target: 'local' }));
+      const v = out.exporters[VIEWER_EXPORTER_KEY];
+      expect(v.traces_endpoint).toBe('http://host.docker.internal:9100/api/otlp/traces');
+      expect(v.logs_endpoint).toBe('http://host.docker.internal:9100/api/otlp/logs');
+      expect(v.metrics_endpoint).toBe('http://host.docker.internal:9100/api/otlp/metrics');
+    } finally {
+      if (prevPort === undefined) delete process.env.PORT;
+      else process.env.PORT = prevPort;
+    }
+  });
+
   it('target=remote: removes the viewer exporter and its pipeline refs, keeps bmchelix', () => {
     const out = yaml.load(transformCollectorConfig(BASE, { target: 'remote' }));
     expect(out.exporters[VIEWER_EXPORTER_KEY]).toBeUndefined();
