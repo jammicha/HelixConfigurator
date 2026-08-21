@@ -109,4 +109,34 @@ describe('selectViewerEndpoint', () => {
     // nothing threw out of selectViewerEndpoint, and the restore still ran
     expect(fsp.state.yaml).toBe('yaml-for:http://a:1');
   });
+
+  it('does not throw when the candidates[0] restore write itself fails, and reports the failure instead of discarding it', async () => {
+    const fsp = makeFsp('original');
+    let writeFileCalls = 0;
+    fsp.writeFile = vi.fn(async (_p, data) => {
+      writeFileCalls += 1;
+      // The first two writeFile calls are the two candidate attempts below;
+      // the third is the candidates[0] restore, which is the one under test.
+      if (writeFileCalls === 3) throw new Error('ENOSPC: no space left on device');
+      fsp.state.pending = data;
+    });
+    const canary = vi.fn(async () => ({ verdict: 'fanout-failed' }));
+    const restartGateway = vi.fn(async () => {});
+    const r = await selectViewerEndpoint({
+      configHostPath: '/tmp/c.yaml', candidates: ['http://a:1', 'http://b:2'],
+      otelStore: {}, restartGateway, fsp, canary, rewrite,
+    });
+    // Selection itself did not throw, and the normal failure payload
+    // (endpoint/verdict/attempts) is intact — the caller can still tell
+    // "no candidate worked" from the attempts array.
+    expect(r.endpoint).toBe(null);
+    expect(r.verdict).toBe('fanout-failed');
+    expect(r.attempts).toHaveLength(2);
+    // ...and separately, that the restore itself also failed, rather than
+    // that failure vanishing silently.
+    expect(r.restoreError).toBe('ENOSPC: no space left on device');
+    // The failed restore never renamed, so disk still holds candidate 1's
+    // content, not candidate 0's.
+    expect(fsp.state.yaml).toBe('yaml-for:http://b:2');
+  });
 });

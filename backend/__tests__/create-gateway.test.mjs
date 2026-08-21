@@ -101,13 +101,20 @@ const writeTempCollectorYaml = () => {
 };
 
 describe('createGatewayFromScratch — viewer ladder integration', () => {
-  it('runs the candidate ladder after start, restarting the gateway for the fallback candidate', async () => {
+  it('waits for readiness before the first canary probe and again after the restart, in that order', async () => {
     const { docker, fakeContainer } = mockDockerWithViewerSupport();
     const cfg = writeTempCollectorYaml();
+    // A shared order log, written to by each collaborator as it fires, is
+    // what actually pins "readiness is awaited before the first canary call,
+    // and again after each restart" — a bare toHaveBeenCalled() on
+    // waitForReady would still pass if either call site were deleted, since
+    // it fires twice either way. Ordering is what a regression would break.
+    const order = [];
     const canary = vi.fn()
-      .mockResolvedValueOnce({ verdict: 'fanout-failed' })
-      .mockResolvedValueOnce({ verdict: 'ok' });
-    const waitForReady = vi.fn(async () => {});
+      .mockImplementationOnce(async () => { order.push('canary:1'); return { verdict: 'fanout-failed' }; })
+      .mockImplementationOnce(async () => { order.push('canary:2'); return { verdict: 'ok' }; });
+    const waitForReady = vi.fn(async () => { order.push('waitForReady'); });
+    fakeContainer.restart = vi.fn(async () => { order.push('restart'); });
 
     const result = await createGatewayFromScratch(docker, {
       name: 'helix-gateway', env: [], configHostPath: cfg, otelStore: {},
@@ -115,12 +122,15 @@ describe('createGatewayFromScratch — viewer ladder integration', () => {
     });
 
     expect(result.viewer.verdict).toBe('ok');
-    expect(canary).toHaveBeenCalledTimes(2);
     // Candidate 0 (host.docker.internal) is skipped for write+restart since
     // the pre-create rewrite already put it on disk; only the fallback
-    // bridge-IP candidate triggers a real restart.
+    // bridge-IP candidate triggers a real restart. waitForReady runs exactly
+    // twice: once before candidate 0's canary probe, once after the restart
+    // that precedes candidate 1's.
+    expect(waitForReady).toHaveBeenCalledTimes(2);
+    expect(canary).toHaveBeenCalledTimes(2);
     expect(fakeContainer.restart).toHaveBeenCalledTimes(1);
-    expect(waitForReady).toHaveBeenCalled();
+    expect(order).toEqual(['waitForReady', 'canary:1', 'restart', 'waitForReady', 'canary:2']);
   });
 
   it('falls back to a single candidate when the bridge network cannot be inspected (no getNetwork on the docker double)', async () => {

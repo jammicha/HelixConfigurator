@@ -71,10 +71,21 @@ const selectViewerEndpoint = async ({
   // candidates[0]. Diagnostics reading live gateway behavior (Task 7) should
   // treat this file as "what the next create/recreate will try," not as
   // "what the gateway is exporting to right now."
+  //
+  // This write can itself fail (ENOSPC, EACCES, ...), and the ladder must
+  // never throw regardless of where a failure happens. Record the restore
+  // failure on the result rather than silently discarding it: a caller needs
+  // to be able to tell "no candidate worked" apart from "no candidate worked
+  // AND we could not put the file back."
+  let restoreError = null;
   if (attempts.length > 1) {
-    await writeEndpoint(fsp, configHostPath, rewrite, candidates[0]);
+    try {
+      await writeEndpoint(fsp, configHostPath, rewrite, candidates[0]);
+    } catch (e) {
+      restoreError = e.message;
+    }
   }
-  return { endpoint: null, verdict: lastVerdict, attempts };
+  return { endpoint: null, verdict: lastVerdict, attempts, restoreError };
 };
 
 module.exports = { selectViewerEndpoint };
