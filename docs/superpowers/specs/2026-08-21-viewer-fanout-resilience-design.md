@@ -249,6 +249,7 @@ cannot reach the configurator" is.
 - `backend/index.js` (dual-stack bind, preflight invocation)
 - `backend/preflight.js` (new, port ownership classification)
 - `backend/viewerCanary.js` (new, round-trip span canary)
+- `backend/viewerLadder.js` (new, candidate selection driven by the canary)
 - `backend/routes/lifecycle.js` (candidate ladder on gateway create and recreate)
 - `backend/routes/diagnostics.js` (viewer-scoped counters, `verify-fanout`)
 - frontend Diagnostics panel (surface the new verdict and remediation)
