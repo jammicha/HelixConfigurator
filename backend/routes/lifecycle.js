@@ -424,12 +424,22 @@ function register(app, { docker, configPath, otelStore }) {
       if (e.statusCode === 404) gatewayExists = false;
       else return res.status(500).json({ error: 'Failed to inspect gateway', details: e.message });
     }
+    // The create path blocks for tens of seconds proving the viewer fan-out
+    // end to end. Discarding that verdict and answering a bare "Gateway
+    // created" would defer a known-dead fan-out to a user noticing an empty
+    // View OTel Data page days later; the frontend seeds the Diagnostics
+    // cell from this instead. null on the recreate path: the ladder is
+    // create-only by design (a restart plus a canary on every routine env
+    // save is a bad trade).
+    let viewer = null;
     try {
       if (gatewayExists) {
         await recreateGateway(docker, sidecarName);
       } else {
         const env = (await readEnvAsArray()) || [];
-        await createGatewayFromScratch(docker, { name: sidecarName, env, configHostPath: configPath, otelStore });
+        ({ viewer } = await createGatewayFromScratch(
+          docker, { name: sidecarName, env, configHostPath: configPath, otelStore },
+        ));
       }
     } catch (e) {
       return res.status(500).json({
@@ -437,7 +447,10 @@ function register(app, { docker, configPath, otelStore }) {
         details: e.message,
       });
     }
-    res.json({ message: gatewayExists ? 'Gateway recreated with updated environment' : 'Gateway created' });
+    res.json({
+      message: gatewayExists ? 'Gateway recreated with updated environment' : 'Gateway created',
+      viewer,
+    });
   });
 
   // POST attach the sidecar to an arbitrary Docker network by name. Used by

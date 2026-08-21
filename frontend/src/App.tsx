@@ -537,7 +537,10 @@ const App = () => {
   useEffect(() => {
     if (!showDiagnostics) return;
     let cancelled = false;
-    setViewerDiag(computeViewerFanoutCellState(null));
+    // Only blank the cell to "checking" if nothing has answered yet. When
+    // the gateway-create ladder already seeded a verdict, showing it while
+    // this probe refreshes beats flashing it away for 15 seconds.
+    setViewerDiag(prev => (prev.status === 'unknown' ? computeViewerFanoutCellState(null) : prev));
     fetch('/api/diagnostics/verify-fanout', { method: 'POST', credentials: 'include' })
       .then(r => r.json())
       .then((d: VerifyFanoutResponse) => {
@@ -803,16 +806,24 @@ const App = () => {
       // and driven off APP_URL — that conflated two unrelated concerns).
       setBridgeStatus(null);
       const bridgeRes = await fetch('/api/lifecycle/bridge', { method: 'POST' });
+      const bridgeData = await bridgeRes.json().catch(() => ({} as any));
 
       // Poll until the gateway reports running. Slow hosts used to false-fail
       // the network diagnostic on a blind 3s sleep.
       const ready = await waitForGatewayRunning(15000);
       if (!ready) throw new Error('Gateway did not reach running state within 15s');
       if (!bridgeRes.ok) {
-        const bridgeData = await bridgeRes.json().catch(() => ({}));
         const reason = bridgeData.error || bridgeData.details || 'Unknown error';
         console.warn('Gateway recreate failed:', reason);
         setBridgeStatus({ kind: 'error', reason });
+      }
+
+      // On the create path the backend already ran the full canary ladder
+      // while we waited, so seed the Diagnostics cell from that verdict
+      // rather than leaving it 'unknown' until the drawer runs its own
+      // 15s probe. null on the recreate path — the ladder is create-only.
+      if (bridgeData.viewer?.verdict) {
+        setViewerDiag(computeViewerFanoutCellState({ ...bridgeData.viewer, counters: null }));
       }
 
       // Helix only supports the collector-routed path now, so the wizard

@@ -1,8 +1,20 @@
 // backend/__tests__/bridge-create-or-recreate.test.mjs
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createRequire } from 'module';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import express from 'express';
 import request from 'supertest';
 import lifecycle from '../routes/lifecycle.js';
+
+// lifecycle.js and viewerCanary.js are CommonJS (require('axios')), and
+// vi.mock('axios') does not intercept CJS require from an .mjs test file.
+// Patch the shared instance Node's require cache hands them, same technique
+// as diagnostics-verify-fanout.test.mjs — no network, and in particular no
+// traffic to whatever really is listening on 4318 on the dev machine.
+const require = createRequire(import.meta.url);
+const axios = require('axios');
 
 function makeApp({ gatewayExists }) {
   const created = { fromScratch: false };
@@ -85,5 +97,55 @@ describe('POST /api/lifecycle/bridge', () => {
     expect(res.status).toBe(500);
     // From-scratch create must NOT have been attempted
     expect(docker.createContainer).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/lifecycle/bridge — viewer verdict in the response', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const writeTempCollectorYaml = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'helix-cfg-'));
+    const cfg = path.join(dir, 'helix-otel-collector.yaml');
+    fs.writeFileSync(cfg, 'exporters:\n  otlphttp/helix_local_viewer:\n    traces_endpoint: http://helix-configurator:3001/api/otlp/traces\n');
+    return cfg;
+  };
+
+  it('returns the ladder verdict on the create path instead of discarding it', async () => {
+    // Readiness probe answers immediately; the canary's OTLP injection is
+    // refused, so the ladder returns gateway-unreachable on candidate 0.
+    vi.spyOn(axios, 'get').mockResolvedValue({ status: 200, data: '' });
+    vi.spyOn(axios, 'post').mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:4318'));
+
+    const docker = {
+      getContainer: () => ({
+        inspect: vi.fn(async () => { const e = new Error('no such container'); e.statusCode = 404; throw e; }),
+      }),
+      createContainer: vi.fn(async () => ({ start: vi.fn(async () => {}), restart: vi.fn(async () => {}) })),
+      createNetwork: vi.fn(async () => {}),
+      getImage: () => ({ inspect: vi.fn(async () => ({})) }),
+      getNetwork: () => ({ inspect: vi.fn(async () => ({ IPAM: { Config: [] } })) }),
+    };
+    const app = express();
+    app.use(express.json());
+    lifecycle.register(app, { docker, configPath: writeTempCollectorYaml(), otelStore: {} });
+
+    const res = await request(app).post('/api/lifecycle/bridge').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.viewer.verdict).toBe('gateway-unreachable');
+    expect(res.body.viewer.endpoint).toBe(null);
+    expect(res.body.viewer.attempts).toEqual([
+      { endpoint: 'http://host.docker.internal:8765', verdict: 'gateway-unreachable' },
+    ]);
+    // Detail and remediation ride along so the Diagnostics cell the frontend
+    // seeds from this can state a fix, not just a verdict string.
+    expect(res.body.viewer.detail).toContain('ECONNREFUSED');
+    expect(res.body.viewer.remediation).toMatch(/4318/);
+  });
+
+  it('answers viewer: null on the recreate path (the ladder is create-only)', async () => {
+    const { app } = makeApp({ gatewayExists: true });
+    const res = await request(app).post('/api/lifecycle/bridge').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.viewer).toBe(null);
   });
 });

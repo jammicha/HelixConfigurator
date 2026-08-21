@@ -110,6 +110,46 @@ describe('selectViewerEndpoint', () => {
     expect(fsp.state.yaml).toBe('yaml-for:http://a:1');
   });
 
+  it('carries the last canary result\'s detail and remediation onto the failure payload', async () => {
+    // The lifecycle route puts this payload straight into its 200 response
+    // and the Diagnostics cell renders it, so a bare verdict string with no
+    // "here is what to do" text is a cell the user cannot act on.
+    const fsp = makeFsp('original');
+    const canary = vi.fn()
+      .mockResolvedValueOnce({ verdict: 'fanout-failed', detail: 'first detail', remediation: 'first fix' })
+      .mockResolvedValueOnce({ verdict: 'fanout-failed', detail: 'never came back', remediation: 'check the gateway logs' });
+    const r = await selectViewerEndpoint({
+      configHostPath: '/tmp/c.yaml', candidates: ['http://a:1', 'http://b:2'],
+      otelStore: {}, restartGateway: vi.fn(async () => {}), fsp, canary, rewrite,
+    });
+    expect(r.verdict).toBe('fanout-failed');
+    expect(r.detail).toBe('never came back');
+    expect(r.remediation).toBe('check the gateway logs');
+  });
+
+  it('reports a thrown canary\'s message as the detail rather than a stale earlier one', async () => {
+    const fsp = makeFsp('original');
+    const canary = vi.fn()
+      .mockResolvedValueOnce({ verdict: 'fanout-failed', detail: 'first detail', remediation: 'first fix' })
+      .mockRejectedValueOnce(new Error('canary blew up'));
+    const r = await selectViewerEndpoint({
+      configHostPath: '/tmp/c.yaml', candidates: ['http://a:1', 'http://b:2'],
+      otelStore: {}, restartGateway: vi.fn(async () => {}), fsp, canary, rewrite,
+    });
+    expect(r.detail).toBe('canary blew up');
+    expect(r.remediation).toBe('');
+  });
+
+  it('a successful selection reports no detail or remediation', async () => {
+    const fsp = makeFsp('original');
+    const canary = vi.fn(async () => ({ verdict: 'ok', detail: '', remediation: '' }));
+    const r = await selectViewerEndpoint({
+      configHostPath: '/tmp/c.yaml', candidates: ['http://a:1'],
+      otelStore: {}, restartGateway: vi.fn(async () => {}), fsp, canary, rewrite,
+    });
+    expect(r).toMatchObject({ verdict: 'ok', detail: '', remediation: '' });
+  });
+
   it('does not throw when the candidates[0] restore write itself fails, and reports the failure instead of discarding it', async () => {
     const fsp = makeFsp('original');
     let writeFileCalls = 0;

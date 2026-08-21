@@ -36,6 +36,12 @@ const selectViewerEndpoint = async ({
 }) => {
   const attempts = [];
   let lastVerdict = 'fanout-failed';
+  // The canary's own per-verdict detail/remediation prose. The lifecycle
+  // route puts this payload straight into its 200 response and the
+  // Diagnostics cell renders it, so dropping it here would leave the user
+  // with a bare verdict string and no stated fix.
+  let lastDetail = '';
+  let lastRemediation = '';
 
   for (let i = 0; i < candidates.length; i++) {
     const endpoint = candidates[i];
@@ -47,8 +53,12 @@ const selectViewerEndpoint = async ({
       const result = await canary({ otelStore });
       attempts.push({ endpoint, verdict: result.verdict });
       lastVerdict = result.verdict;
+      lastDetail = result.detail || '';
+      lastRemediation = result.remediation || '';
 
-      if (result.verdict === 'ok') return { endpoint, verdict: 'ok', attempts };
+      if (result.verdict === 'ok') {
+        return { endpoint, verdict: 'ok', detail: '', remediation: '', attempts };
+      }
       // A gateway we cannot reach at all is not an endpoint problem. Trying the
       // remaining candidates would restart the gateway again for nothing.
       if (result.verdict === 'gateway-unreachable') break;
@@ -61,6 +71,8 @@ const selectViewerEndpoint = async ({
       // trail the success path already feeds.
       attempts.push({ endpoint, verdict: 'fanout-failed', error: e.message });
       lastVerdict = 'fanout-failed';
+      lastDetail = e.message;
+      lastRemediation = '';
     }
   }
 
@@ -85,7 +97,14 @@ const selectViewerEndpoint = async ({
       restoreError = e.message;
     }
   }
-  return { endpoint: null, verdict: lastVerdict, attempts, restoreError };
+  return {
+    endpoint: null,
+    verdict: lastVerdict,
+    detail: lastDetail,
+    remediation: lastRemediation,
+    attempts,
+    restoreError,
+  };
 };
 
 module.exports = { selectViewerEndpoint };
