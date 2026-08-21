@@ -68,6 +68,12 @@ app.get('/api/health', (req, res) => {
 // Update-check endpoint (public — banner works without auth, like /api/health)
 require('./routes/version').register(app, { current: VERSION });
 
+// The banner's "can this install update itself?" probe is public for the same
+// reason the version check is. Gated, it 401s and the banner can only ever
+// show generic text, so a password-protected install could never show the
+// update button. Read-only; start/apply stay behind requireAuth below.
+require('./routes/update').registerPublicRoutes(app, {});
+
 // --- OTel trace store (local fan-out from helix-gateway) -----------------
 // SQLite lives in a mounted volume so traces survive container restarts.
 // Outside Docker we fall back to backend/data so dev is self-contained.

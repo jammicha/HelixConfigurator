@@ -1,8 +1,8 @@
 // frontend/src/components/UpdateBanner.tsx
 import { useEffect, useRef, useState } from 'react'
+import { fetchCapabilityWithRetry, type Capability } from './updateCapability'
 
 type V = { current: string; latest: string | null; updateAvailable: boolean }
-type Capability = { supported: boolean; mode: string; hint?: string }
 type Phase =
   | 'idle'          // banner showing, no update running
   | 'working'       // start posted; polling /api/update/status
@@ -20,7 +20,10 @@ export function UpdateBanner() {
 
   useEffect(() => {
     fetch('/api/version').then(r => r.json()).then(setV).catch(() => {})
-    fetch('/api/update/capability').then(r => (r.ok ? r.json() : null)).then(setCap).catch(() => {})
+    // Retried, not one-shot: a blip during a backend restart used to leave this
+    // null for the life of the page, which silently downgraded the banner to
+    // generic text and hid the update button. See updateCapability.ts.
+    fetchCapabilityWithRetry(fetch).then(setCap)
     const timers = timersRef.current
     return () => { timers.forEach(t => window.clearTimeout(t)) }
   }, [])

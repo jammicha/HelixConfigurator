@@ -8,7 +8,7 @@ import path from 'path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { register, detectCapability, PLATFORM_ASSETS, PRESERVED_ENTRIES } = require('../routes/update.js');
+const { register, registerPublicRoutes, detectCapability, PLATFORM_ASSETS, PRESERVED_ENTRIES } = require('../routes/update.js');
 const { resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util.js');
 
 let nativeRoot; // temp dir shaped like a native install (has a bundled ./node)
@@ -97,5 +97,41 @@ describe('resolveGatewayOtlpBase / resolveGatewayMetricsBase', () => {
   });
   it('honors explicit overrides and strips trailing slashes', () => {
     expect(resolveGatewayOtlpBase({ override: 'http://10.0.0.5:4318///' })).toBe('http://10.0.0.5:4318');
+  });
+});
+
+// The update banner is deliberately usable without signing in: /api/version is
+// registered ahead of the auth gate for exactly that reason. The capability
+// probe has to sit on the same side of the gate, or a password-protected
+// install shows "update available" and can never show the button that applies
+// it. The endpoints that actually MUTATE the install must stay behind it.
+describe('capability probe vs the auth gate', () => {
+  // Mirrors backend/index.js: public routes, then the gate, then the rest.
+  const appWithAuthGate = (installRoot) => {
+    const app = express();
+    registerPublicRoutes(app, { currentVersion: '1.0.0', installRoot });
+    app.use('/api', (req, res) => res.status(401).json({ error: 'auth required' }));
+    register(app, { currentVersion: '1.0.0', installRoot });
+    return app;
+  };
+
+  it('serves the capability probe without credentials', async () => {
+    const res = await request(appWithAuthGate(nativeRoot)).get('/api/update/capability');
+    expect(res.status).toBe(200);
+    expect(res.body.supported).toBe(true);
+    expect(res.body.mode).toBe('native');
+  });
+
+  it('still reports an unsupported install without credentials, with its hint', async () => {
+    const res = await request(appWithAuthGate(devRoot)).get('/api/update/capability');
+    expect(res.status).toBe(200);
+    expect(res.body.supported).toBe(false);
+    expect(res.body.hint).toBeTruthy();
+  });
+
+  it('keeps the mutating endpoints behind the gate', async () => {
+    const app = appWithAuthGate(nativeRoot);
+    expect((await request(app).post('/api/update/start')).status).toBe(401);
+    expect((await request(app).post('/api/update/apply')).status).toBe(401);
   });
 });

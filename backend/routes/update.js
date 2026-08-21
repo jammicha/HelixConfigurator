@@ -71,6 +71,21 @@ function detectCapability({
   return { supported: true, mode: 'native', asset };
 }
 
+// PUBLIC, and registered ahead of the auth gate in index.js — same treatment
+// /api/version already gets, and for the same reason. The update banner is
+// meant to work without signing in, so a read-only "can this install update
+// itself?" probe has to be reachable too. Behind the gate it 401s, the banner
+// falls back to generic text, and a password-protected install can never show
+// the button that applies the update. Read-only: it reports, it never mutates.
+// The endpoints that DO mutate (start / apply) stay inside register(), behind
+// the gate, deliberately.
+function registerPublicRoutes(app, { installRoot = path.resolve(__dirname, '..', '..') } = {}) {
+  app.get('/api/update/capability', (req, res) => {
+    const { supported, mode, hint } = detectCapability({ installRoot });
+    res.json({ supported, mode, hint });
+  });
+}
+
 function register(app, { currentVersion, installRoot = path.resolve(__dirname, '..', '..') } = {}) {
   // Module-level state machine; one update at a time per process.
   const state = { phase: 'idle', error: null, targetVersion: null, staged: null };
@@ -103,11 +118,6 @@ function register(app, { currentVersion, installRoot = path.resolve(__dirname, '
     state.targetVersion = stagedPkg.version;
     state.phase = 'ready';
   };
-
-  app.get('/api/update/capability', (req, res) => {
-    const { supported, mode, hint } = detectCapability({ installRoot });
-    res.json({ supported, mode, hint });
-  });
 
   app.get('/api/update/status', (req, res) => {
     res.json({ phase: state.phase, error: state.error, targetVersion: state.targetVersion });
@@ -156,4 +166,4 @@ function register(app, { currentVersion, installRoot = path.resolve(__dirname, '
   });
 }
 
-module.exports = { register, detectCapability, PLATFORM_ASSETS, PRESERVED_ENTRIES };
+module.exports = { register, registerPublicRoutes, detectCapability, PLATFORM_ASSETS, PRESERVED_ENTRIES };
