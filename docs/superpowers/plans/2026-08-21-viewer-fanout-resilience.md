@@ -11,14 +11,14 @@
 ## Global Constraints
 
 - Backend modules are CommonJS (`require` / `module.exports`). Do not convert files to ESM.
-- Tests are vitest, colocated beside the module as `<module>.test.js` in `backend/`.
-- Test files use ESM `import` syntax with a **default import of the CJS module, then destructure**, matching `backend/otelMetrics.test.js`: `import mod from './x.js'; const { fn } = mod;`
-- Run backend tests with `npm --prefix backend test` from the repo root, or `npx vitest run <file>` from `backend/`.
+- Tests are vitest. The repo convention is `backend/__tests__/<kebab-case-name>.test.mjs`, where 33 of the 35 existing suites live. Do NOT colocate new tests beside the module; the two colocated `.test.js` files are legacy.
+- Test files use **named ESM imports** from the CJS module, matching `backend/__tests__/collector-fanout.test.mjs`: `import { fn } from '../module.js';`
+- Run backend tests with `npm --prefix backend test` from the repo root, or `npx vitest run __tests__/<file>.test.mjs` from `backend/`.
 - Every new module must be pure and injectable where it can be: pass `fetchImpl`, `axiosImpl`, `sleep`, and `docker` as options with real defaults, so tests need no network and no Docker.
 - Do not enable `sending_queue` or `retry_on_failure` on `otlphttp/helix_local_viewer`. This is an explicit non-goal in the spec.
 - Do not make the process refuse to start or auto-select a different port. Degraded states warn loudly and keep running.
 - Branch is `viewer-fanout-resilience`, already created off `main`. Commit after every task.
-- The working tree already carries unrelated uncommitted changes in `backend/routes/diagnostics.js`, `backend/routes/lifecycle.js`, `frontend/src/App.tsx`, `frontend/src/hooks/useGatewayActions.ts`, `frontend/src/utils/gateway.ts`, and `helix-otel-collector.yaml`. **Stage only the files each task names.** Never use `git add -A` or `git commit -a`.
+- Work happens in an isolated worktree at `.worktrees/viewer-fanout-resilience`, checked out on the branch with a clean baseline: backend 381 tests in 35 files, frontend 107 tests in 9 files, all passing. **Stage only the files each task names.** Never use `git add -A` or `git commit -a`.
 
 **Spec:** `docs/superpowers/specs/2026-08-21-viewer-fanout-resilience-design.md`
 
@@ -30,7 +30,7 @@ The endpoint the gateway ships to is currently the literal `host.docker.internal
 
 **Files:**
 - Create: `backend/viewerEndpoint.js`
-- Test: `backend/viewerEndpoint.test.js`
+- Test: `backend/__tests__/viewer-endpoint.test.mjs`
 - Read for context: `backend/portConfig.js`
 
 **Interfaces:**
@@ -42,13 +42,11 @@ The endpoint the gateway ships to is currently the literal `host.docker.internal
 
 - [ ] **Step 1: Write the failing test**
 
-Create `backend/viewerEndpoint.test.js`:
+Create `backend/__tests__/viewer-endpoint.test.mjs`:
 
 ```js
 import { describe, it, expect } from 'vitest';
-import viewerEndpoint from './viewerEndpoint.js';
-
-const { viewerCandidates, preferredViewerEndpoint, CONTAINER_ENDPOINT } = viewerEndpoint;
+import { viewerCandidates, preferredViewerEndpoint, CONTAINER_ENDPOINT } from '../viewerEndpoint.js';
 
 describe('viewerCandidates', () => {
   it('defaults to host.docker.internal on the default port', () => {
@@ -86,7 +84,7 @@ describe('viewerCandidates', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run viewerEndpoint.test.js` from `backend/`
+Run: `npx vitest run __tests__/viewer-endpoint.test.mjs` from `backend/`
 Expected: FAIL, cannot resolve `./viewerEndpoint.js`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -129,13 +127,13 @@ module.exports = { viewerCandidates, preferredViewerEndpoint, CONTAINER_ENDPOINT
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run viewerEndpoint.test.js` from `backend/`
+Run: `npx vitest run __tests__/viewer-endpoint.test.mjs` from `backend/`
 Expected: PASS, 6 tests
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/viewerEndpoint.js backend/viewerEndpoint.test.js
+git add backend/viewerEndpoint.js backend/__tests__/viewer-endpoint.test.mjs
 git commit -m "feat(viewer): derive the fan-out endpoint from PORT instead of hardcoding it"
 ```
 
@@ -147,7 +145,7 @@ git commit -m "feat(viewer): derive the fan-out endpoint from PORT instead of ha
 
 **Files:**
 - Modify: `backend/collectorFanout.js` (whole file)
-- Create: `backend/collectorFanout.test.js`
+- Rewrite: `backend/__tests__/collector-fanout.test.mjs`. **This suite already exists** and its 6 tests all call `rewriteLocalViewerToHost`, which this task deletes. Replace its contents wholesale with the tests below. Leaving it in place breaks the suite.
 - Modify: `backend/routes/lifecycle.js:16` (import) and `backend/routes/lifecycle.js:53` (call site)
 
 **Interfaces:**
@@ -156,13 +154,11 @@ git commit -m "feat(viewer): derive the fan-out endpoint from PORT instead of ha
 
 - [ ] **Step 1: Write the failing test**
 
-Create `backend/collectorFanout.test.js`:
+Replace the entire contents of `backend/__tests__/collector-fanout.test.mjs` with:
 
 ```js
 import { describe, it, expect } from 'vitest';
-import collectorFanout from './collectorFanout.js';
-
-const { rewriteLocalViewerEndpoint } = collectorFanout;
+import { rewriteLocalViewerEndpoint } from '../collectorFanout.js';
 
 const CONTAINER_YAML = `exporters:
   otlphttp/bmchelix:
@@ -220,7 +216,7 @@ describe('rewriteLocalViewerEndpoint', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run collectorFanout.test.js` from `backend/`
+Run: `npx vitest run __tests__/collector-fanout.test.mjs` from `backend/`
 Expected: FAIL, `rewriteLocalViewerEndpoint is not a function`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -275,7 +271,7 @@ module.exports = { rewriteLocalViewerEndpoint, VIEWER_EXPORTER_KEY };
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run collectorFanout.test.js` from `backend/`
+Run: `npx vitest run __tests__/collector-fanout.test.mjs` from `backend/`
 Expected: PASS, 7 tests
 
 - [ ] **Step 5: Update the one existing call site**
@@ -315,7 +311,7 @@ Expected: PASS, no regressions
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/collectorFanout.js backend/collectorFanout.test.js backend/routes/lifecycle.js
+git add backend/collectorFanout.js backend/__tests__/collector-fanout.test.mjs backend/routes/lifecycle.js
 git commit -m "feat(viewer): make the fan-out yaml rewrite bidirectional and parameterized"
 ```
 
@@ -328,7 +324,7 @@ To tell "the port answers, and it is us" from "the port answers, and it is someb
 **Files:**
 - Modify: `backend/index.js:57-59` (the `/api/health` handler)
 - Create: `backend/preflight.js`
-- Create: `backend/preflight.test.js`
+- Create: `backend/__tests__/preflight.test.mjs`
 
 **Interfaces:**
 - Produces:
@@ -361,13 +357,11 @@ This is an additive change to a documented public response shape. Existing consu
 
 - [ ] **Step 2: Write the failing test**
 
-Create `backend/preflight.test.js`:
+Create `backend/__tests__/preflight.test.mjs`:
 
 ```js
 import { describe, it, expect, vi } from 'vitest';
-import preflight from './preflight.js';
-
-const { classifyPortOwnership, reportPortOwnership } = preflight;
+import { classifyPortOwnership, reportPortOwnership } from '../preflight.js';
 
 const ID = 'instance-under-test';
 
@@ -470,7 +464,7 @@ describe('reportPortOwnership', () => {
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `npx vitest run preflight.test.js` from `backend/`
+Run: `npx vitest run __tests__/preflight.test.mjs` from `backend/`
 Expected: FAIL, cannot resolve `./preflight.js`
 
 - [ ] **Step 4: Write minimal implementation**
@@ -584,13 +578,13 @@ module.exports = { classifyPortOwnership, reportPortOwnership };
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `npx vitest run preflight.test.js` from `backend/`
+Run: `npx vitest run __tests__/preflight.test.mjs` from `backend/`
 Expected: PASS, 8 tests
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/preflight.js backend/preflight.test.js backend/index.js
+git add backend/preflight.js backend/__tests__/preflight.test.mjs backend/index.js
 git commit -m "feat(preflight): classify port ownership across both IP stacks"
 ```
 
@@ -729,7 +723,7 @@ A shell probe inside the gateway is impossible: `otel/opentelemetry-collector-co
 
 **Files:**
 - Create: `backend/viewerCanary.js`
-- Create: `backend/viewerCanary.test.js`
+- Create: `backend/__tests__/viewer-canary.test.mjs`
 - Read for context: `backend/routes/diagnostics.js:606-645` (the existing `inject-trace` payload shape), `backend/otelStore.js:1408` (`getTrace` returns `null` or `{ summary, spans }`)
 
 **Interfaces:**
@@ -741,13 +735,11 @@ A shell probe inside the gateway is impossible: `otel/opentelemetry-collector-co
 
 - [ ] **Step 1: Write the failing test**
 
-Create `backend/viewerCanary.test.js`:
+Create `backend/__tests__/viewer-canary.test.mjs`:
 
 ```js
 import { describe, it, expect, vi } from 'vitest';
-import viewerCanary from './viewerCanary.js';
-
-const { runViewerCanary, CANARY_SERVICE_NAME } = viewerCanary;
+import { runViewerCanary, CANARY_SERVICE_NAME } from '../viewerCanary.js';
 
 const noSleep = async () => {};
 
@@ -821,7 +813,7 @@ describe('runViewerCanary', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run viewerCanary.test.js` from `backend/`
+Run: `npx vitest run __tests__/viewer-canary.test.mjs` from `backend/`
 Expected: FAIL, cannot resolve `./viewerCanary.js`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -936,13 +928,13 @@ module.exports = { runViewerCanary, buildCanaryPayload, CANARY_SERVICE_NAME };
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run viewerCanary.test.js` from `backend/`
+Run: `npx vitest run __tests__/viewer-canary.test.mjs` from `backend/`
 Expected: PASS, 6 tests
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/viewerCanary.js backend/viewerCanary.test.js
+git add backend/viewerCanary.js backend/__tests__/viewer-canary.test.mjs
 git commit -m "feat(viewer): add a round-trip canary that proves the fan-out path"
 ```
 
@@ -956,7 +948,8 @@ Now the ladder can use the canary as its oracle.
 
 **Files:**
 - Create: `backend/viewerLadder.js`
-- Create: `backend/viewerLadder.test.js`
+- Create: `backend/__tests__/viewer-ladder.test.mjs`
+- Verify (do not rewrite unless it fails): `backend/__tests__/create-gateway.test.mjs`. Its 4 tests call `createGatewayFromScratch`, whose signature this task changes. They pass no `otelStore`, so the early return keeps them green; run them and fix only if they break.
 - Modify: `backend/routes/lifecycle.js` (`createGatewayFromScratch`, around lines 35-65)
 
 **Interfaces:**
@@ -965,13 +958,11 @@ Now the ladder can use the canary as its oracle.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `backend/viewerLadder.test.js`:
+Create `backend/__tests__/viewer-ladder.test.mjs`:
 
 ```js
 import { describe, it, expect, vi } from 'vitest';
-import viewerLadder from './viewerLadder.js';
-
-const { selectViewerEndpoint } = viewerLadder;
+import { selectViewerEndpoint } from '../viewerLadder.js';
 
 // Minimal fs promises double backed by a string.
 const makeFsp = (initial) => {
@@ -1049,7 +1040,7 @@ describe('selectViewerEndpoint', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run viewerLadder.test.js` from `backend/`
+Run: `npx vitest run __tests__/viewer-ladder.test.mjs` from `backend/`
 Expected: FAIL, cannot resolve `./viewerLadder.js`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1116,7 +1107,7 @@ module.exports = { selectViewerEndpoint };
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run viewerLadder.test.js` from `backend/`
+Run: `npx vitest run __tests__/viewer-ladder.test.mjs` from `backend/`
 Expected: PASS, 4 tests
 
 - [ ] **Step 5: Wire the ladder into gateway creation**
@@ -1200,7 +1191,7 @@ Expected: PASS
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/viewerLadder.js backend/viewerLadder.test.js backend/routes/lifecycle.js backend/index.js
+git add backend/viewerLadder.js backend/__tests__/viewer-ladder.test.mjs backend/routes/lifecycle.js backend/index.js
 git commit -m "feat(viewer): prove the fan-out endpoint with a candidate ladder at gateway create"
 ```
 
@@ -1212,7 +1203,7 @@ git commit -m "feat(viewer): prove the fan-out endpoint with a candidate ladder 
 
 **Files:**
 - Modify: `backend/routes/diagnostics.js` (add `fetchViewerCounters` beside `fetchCounters` around line 73, add the new route beside `inject-trace` around line 606)
-- Create: `backend/routes/diagnostics.viewer.test.js`
+- Create: `backend/__tests__/diagnostics-viewer.test.mjs`
 - Read for context: `backend/routes/diagnostics.js:49` (`sumPromCounter` already accepts `{ exporterFilter }`)
 
 **Interfaces:**
@@ -1223,13 +1214,11 @@ git commit -m "feat(viewer): prove the fan-out endpoint with a candidate ladder 
 
 - [ ] **Step 1: Write the failing test**
 
-Create `backend/routes/diagnostics.viewer.test.js`:
+Create `backend/__tests__/diagnostics-viewer.test.mjs`:
 
 ```js
 import { describe, it, expect } from 'vitest';
-import diagnostics from './diagnostics.js';
-
-const { fetchViewerCounters } = diagnostics;
+import { fetchViewerCounters } from '../routes/diagnostics.js';
 
 const METRICS = `
 # HELP otelcol_exporter_sent_spans
@@ -1254,7 +1243,7 @@ describe('fetchViewerCounters', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run routes/diagnostics.viewer.test.js` from `backend/`
+Run: `npx vitest run __tests__/diagnostics-viewer.test.mjs` from `backend/`
 Expected: FAIL, `fetchViewerCounters is not a function`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1319,7 +1308,7 @@ Then add the route inside `register`, directly after the existing `inject-trace`
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run routes/diagnostics.viewer.test.js` from `backend/`
+Run: `npx vitest run __tests__/diagnostics-viewer.test.mjs` from `backend/`
 Expected: PASS, 2 tests
 
 - [ ] **Step 5: Verify the route end to end against the running stack**
@@ -1340,7 +1329,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/routes/diagnostics.js backend/routes/diagnostics.viewer.test.js
+git add backend/routes/diagnostics.js backend/__tests__/diagnostics-viewer.test.mjs
 git commit -m "feat(diagnostics): add viewer-scoped counters and a verify-fanout endpoint"
 ```
 
