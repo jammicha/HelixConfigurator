@@ -8,7 +8,8 @@
 // arrive via the pod's env (Secret + values), and the ConfigMap embeds this file
 // via `.Files.Get` (raw bytes), so no Helm/Go templating touches them.
 const yaml = require('js-yaml');
-const { LOCAL_VIEWER_HOST, VIEWER_EXPORTER_KEY } = require('../collectorFanout');
+const { VIEWER_EXPORTER_KEY } = require('../collectorFanout');
+const { preferredViewerEndpoint } = require('../viewerEndpoint');
 
 function invalid(message, cause) {
   const err = new Error(message);
@@ -45,10 +46,11 @@ function transformCollectorConfig(yamlString, { target = 'local' } = {}) {
 
   if (target === 'local') {
     if (viewer) {
+      const viewerEndpoint = preferredViewerEndpoint({ containerized: false });
       for (const key of ['traces_endpoint', 'logs_endpoint', 'metrics_endpoint']) {
         if (typeof viewer[key] === 'string') {
           // Replace scheme + host:port, preserve the /api/otlp/* path.
-          viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, `http://${LOCAL_VIEWER_HOST}`);
+          viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, viewerEndpoint);
         }
       }
     }

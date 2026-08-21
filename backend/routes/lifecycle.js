@@ -13,7 +13,8 @@ const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
 
 const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
-const { rewriteLocalViewerToHost } = require('../collectorFanout');
+const { rewriteLocalViewerEndpoint } = require('../collectorFanout');
+const { preferredViewerEndpoint } = require('../viewerEndpoint');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
@@ -50,7 +51,8 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
   try {
     const current = await fsp.readFile(configHostPath, 'utf8');
     const tmp = `${configHostPath}.tmp`;
-    await fsp.writeFile(tmp, rewriteLocalViewerToHost(current));
+    const target = preferredViewerEndpoint({ containerized: IS_CONTAINERIZED });
+    await fsp.writeFile(tmp, rewriteLocalViewerEndpoint(current, target));
     await fsp.rename(tmp, configHostPath);
   } catch (e) {
     console.warn('createGatewayFromScratch: yaml host-rewrite skipped:', e.message);
