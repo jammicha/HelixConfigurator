@@ -123,8 +123,14 @@ app.use(errorHandler);
 // that into a real EADDRINUSE we can see and explain.
 const listenOn = (opts) => new Promise((resolve, reject) => {
   const s = app.listen(opts);
-  s.once('listening', () => resolve(s));
-  s.once('error', reject);
+  const onError = (e) => { s.removeListener('listening', onListening); reject(e); };
+  const onListening = () => {
+    s.removeListener('error', onError);
+    s.on('error', (e) => console.error(`Listener error on ${opts.host}:${opts.port}:`, e));
+    resolve(s);
+  };
+  s.once('error', onError);
+  s.once('listening', onListening);
 });
 
 const servers = [];
@@ -143,7 +149,13 @@ const start = async () => {
     servers.push(await listenOn({ port, host: '0.0.0.0' }));
     ipv4Bound = true;
   } catch (e) {
-    if (e.code !== 'EADDRINUSE') throw e;
+    // EADDRINUSE is the expected squatter case; the preflight below explains
+    // it. Any other IPv4 bind error is logged and tolerated as long as IPv6
+    // is already up — exiting is only correct when neither stack bound.
+    if (e.code !== 'EADDRINUSE') {
+      if (servers.length === 0) throw e;
+      console.error(`IPv4 bind on port ${port} failed:`, e);
+    }
   }
 
   if (servers.length === 0) {
@@ -174,9 +186,10 @@ const shutdown = (signal) => {
   shuttingDown = true;
   console.log(`Received ${signal} — closing log streams and HTTP server...`);
   diagnostics.closeActiveLogProcesses();
+  const toClose = servers.length;
   Promise.all(servers.map((s) => new Promise((resolve) => s.close(resolve))))
     .then(() => {
-      console.log('HTTP server closed.');
+      console.log(toClose > 0 ? 'HTTP server closed.' : 'No listeners were open (signal arrived during startup).');
       process.exit(0);
     });
   // Force-exit after 5s if server.close hangs (open SSE connections etc.)
