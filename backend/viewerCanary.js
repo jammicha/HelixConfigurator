@@ -36,8 +36,11 @@ const buildCanaryPayload = (traceId, spanId, nowMs) => ({
         spanId,
         name: 'viewer-fanout-canary',
         kind: 1,
-        startTimeUnixNano: String(nowMs * 1000000),
-        endTimeUnixNano: String((nowMs + 1) * 1000000),
+        // BigInt, not Number: epoch-ms * 1e6 lands past MAX_SAFE_INTEGER, so
+        // the product is an inexact double whose digits survive only because
+        // shortest-round-trip printing happens to recover them.
+        startTimeUnixNano: String(BigInt(nowMs) * 1000000n),
+        endTimeUnixNano: String((BigInt(nowMs) + 1n) * 1000000n),
         status: { code: 1 },
       }],
     }],
@@ -104,4 +107,4 @@ const runViewerCanary = async ({
   };
 };
 
-module.exports = { runViewerCanary, buildCanaryPayload, CANARY_SERVICE_NAME };
+module.exports = { runViewerCanary, CANARY_SERVICE_NAME };

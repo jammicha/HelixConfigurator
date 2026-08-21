@@ -45,6 +45,26 @@ describe('runViewerCanary', () => {
     expect(DIAGNOSTIC_NAMESPACE).not.toBe(CANARY_SERVICE_NAME);
   });
 
+  it('builds exact nanosecond timestamps rather than relying on float rounding', async () => {
+    // nowMs * 1_000_000 lands past Number.MAX_SAFE_INTEGER, so the product is
+    // an inexact double; the digits only survive because shortest-round-trip
+    // printing happens to recover them. BigInt makes that exact by
+    // construction instead of by luck.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-21T00:00:00.123Z'));
+    try {
+      const axiosImpl = { post: vi.fn(async () => ({ status: 200 })) };
+      const otelStore = { getTrace: () => ({ summary: {}, spans: [{ spanId: 'a' }] }) };
+      await runViewerCanary({ otelStore, axiosImpl, sleep: noSleep, otlpBase: 'http://x:4318' });
+      const span = axiosImpl.post.mock.calls[0][1].resourceSpans[0].scopeSpans[0].spans[0];
+      const ms = BigInt(Date.parse('2026-08-21T00:00:00.123Z'));
+      expect(span.startTimeUnixNano).toBe(String(ms * 1000000n));
+      expect(span.endTimeUnixNano).toBe(String((ms + 1n) * 1000000n));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reports gateway-unreachable when the OTLP receiver refuses the injection', async () => {
     const axiosImpl = { post: vi.fn(async () => { throw new Error('connect ECONNREFUSED'); }) };
     const otelStore = { getTrace: vi.fn(() => null) };

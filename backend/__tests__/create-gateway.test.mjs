@@ -159,6 +159,29 @@ describe('createGatewayFromScratch — viewer ladder integration', () => {
     expect(errorLog.recent(1)[0].tag).toBe('gateway.viewer.unproven');
   });
 
+  it('records the attempted endpoints, and a failed restore, in the errorLog entry', async () => {
+    // Task 6 spent a full fix round making the ladder REPORT a failed restore
+    // rather than discard it. The only consumer then discarded it anyway.
+    errorLog._reset();
+    const { docker } = mockDockerWithViewerSupport();
+    // An unwritable path makes every write fail, including the candidates[0]
+    // restore — which is the branch that populates restoreError.
+    const cfg = '/nonexistent-dir-for-tests/helix-otel-collector.yaml';
+    const canary = vi.fn(async () => ({ verdict: 'fanout-failed', detail: 'no round trip', remediation: 'x' }));
+
+    const result = await createGatewayFromScratch(docker, {
+      name: 'helix-gateway', env: [], configHostPath: cfg, otelStore: {},
+      canary, waitForReady: vi.fn(async () => {}),
+    });
+
+    expect(result.viewer.restoreError).toBeTruthy();
+    const entry = errorLog.recent(1)[0];
+    expect(entry.tag).toBe('gateway.viewer.unproven');
+    expect(entry.message).toContain('http://host.docker.internal:8765');
+    expect(entry.message).toContain('http://172.30.0.1:8765');
+    expect(entry.message).toContain(result.viewer.restoreError);
+  });
+
   it('skips the ladder entirely when otelStore is not provided (pre-existing callers)', async () => {
     const { docker } = mockDockerWithViewerSupport();
     const cfg = writeTempCollectorYaml();

@@ -13,7 +13,7 @@ const okResponse: VerifyFanoutResponse = {
 describe('computeViewerFanoutCellState', () => {
   it('ok verdict -> pass, no error, no remediation', () => {
     const s = computeViewerFanoutCellState(okResponse);
-    expect(s.status).toBe('ok');
+    expect(s.status).toBe('PASS');
     expect(s.error).toBe('');
     expect(s.remediation).toBe('');
   });
@@ -59,7 +59,7 @@ describe('computeViewerFanoutCellState', () => {
 
   it('counters: null does not change the verdict mapping (metrics endpoint merely unreachable)', () => {
     const s = computeViewerFanoutCellState({ ...okResponse, counters: null });
-    expect(s.status).toBe('ok');
+    expect(s.status).toBe('PASS');
   });
 
   it('missing detail falls back to the verdict string itself', () => {

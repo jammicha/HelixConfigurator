@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fetchViewerCounters } from '../routes/diagnostics.js';
+import { parseViewerCounters } from '../routes/diagnostics.js';
 
 // Metric names carry the Prometheus/OpenMetrics `_total` counter suffix,
 // matching what the OTel Collector's Prometheus exporter actually emits and
@@ -14,13 +14,13 @@ otelcol_exporter_send_failed_spans_total{exporter="otlphttp/helix_local_viewer"}
 otelcol_exporter_send_failed_log_records_total{exporter="otlphttp/helix_local_viewer"} 12
 `;
 
-describe('fetchViewerCounters', () => {
+describe('parseViewerCounters', () => {
   it('reads counters scoped to the viewer exporter, not the helix exporter', () => {
-    expect(fetchViewerCounters(METRICS)).toEqual({ sent: 0, failed: 143 });
+    expect(parseViewerCounters(METRICS)).toEqual({ sent: 0, failed: 143 });
   });
 
   it('returns zeroes when the viewer exporter is absent from the metrics', () => {
-    expect(fetchViewerCounters('otelcol_exporter_sent_spans_total{exporter="otlphttp/bmchelix"} 5'))
+    expect(parseViewerCounters('otelcol_exporter_sent_spans_total{exporter="otlphttp/bmchelix"} 5'))
       .toEqual({ sent: 0, failed: 0 });
   });
 });

@@ -171,8 +171,18 @@ async function createGatewayFromScratch(docker, {
       },
     });
     if (result.verdict !== 'ok') {
+      // Name the endpoints actually tried and surface a failed restore: the
+      // ladder goes to the trouble of reporting restoreError rather than
+      // discarding it, and this is its only consumer. Without it, "no
+      // candidate worked" is indistinguishable from "no candidate worked AND
+      // the yaml is now left pointing at the last one tried."
+      const tried = result.attempts.map(a => a.endpoint).join(', ') || 'none';
       errorLog.push('gateway.viewer.unproven',
-        `viewer fan-out unproven: ${result.verdict} after ${result.attempts.length} candidate(s)`);
+        `viewer fan-out unproven: ${result.verdict} after ${result.attempts.length} candidate(s) `
+        + `[${tried}]`
+        + (result.restoreError
+          ? `; restoring the preferred endpoint also failed: ${result.restoreError}`
+          : ''));
     }
     return { viewer: result };
   } catch (e) {
@@ -439,16 +449,16 @@ function register(app, { docker, configPath, otelStore }) {
       if (e.statusCode === 404) gatewayExists = false;
       else return res.status(500).json({ error: 'Failed to inspect gateway', details: e.message });
     }
+    // Before BOTH branches, deliberately — see applyViewerEndpointToDisk.
+    await applyViewerEndpointToDisk(configPath);
+
     // The create path blocks for tens of seconds proving the viewer fan-out
     // end to end. Discarding that verdict and answering a bare "Gateway
     // created" would defer a known-dead fan-out to a user noticing an empty
     // View OTel Data page days later; the frontend seeds the Diagnostics
-    // cell from this instead. null on the recreate path: the ladder is
+    // cell from this instead. Stays null on the recreate path: the ladder is
     // create-only by design (a restart plus a canary on every routine env
     // save is a bad trade).
-    // Both branches, deliberately — see applyViewerEndpointToDisk.
-    await applyViewerEndpointToDisk(configPath);
-
     let viewer = null;
     try {
       if (gatewayExists) {

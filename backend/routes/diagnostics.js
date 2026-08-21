@@ -95,7 +95,7 @@ const fetchCounters = async () => {
 // filters to otlphttp/bmchelix, which is why a totally dead viewer sink could
 // never show up in the health banner. Both are reported now, so "Helix
 // delivery healthy, local viewer failing" is a state we can actually express.
-const fetchViewerCounters = (metricsText) => {
+const parseViewerCounters = (metricsText) => {
   const sum = (baseName) =>
     sumPromCounter(metricsText, baseName, { exporterFilter: 'otlphttp/helix_local_viewer' });
   return {
@@ -695,9 +695,14 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     let counters = null;
     try {
       const response = await axios.get(`${resolveGatewayMetricsBase()}/metrics`, { timeout: 2000 });
-      counters = fetchViewerCounters(response.data);
-    } catch {
-      counters = null; // metrics endpoint unavailable; the verdict still stands
+      counters = parseViewerCounters(response.data);
+    } catch (e) {
+      // The verdict still stands — counters are a secondary signal. But this
+      // catch covers the parse as well as the fetch, so swallowing it would
+      // make any future defect inside parseViewerCounters present forever as
+      // "metrics endpoint down".
+      counters = null;
+      console.warn('verify-fanout: viewer counters unavailable:', e.message);
     }
     res.json({ ...result, counters });
   });
@@ -1100,4 +1105,4 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   });
 }
 
-module.exports = { register, closeActiveLogProcesses, runOtlpProbe, fetchViewerCounters };
+module.exports = { register, closeActiveLogProcesses, runOtlpProbe, parseViewerCounters };

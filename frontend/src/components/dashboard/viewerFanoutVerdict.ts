@@ -28,7 +28,11 @@ export type VerifyFanoutResponse = {
 // other checks (collectorDiag, apiKeyDiag, networkDiag): a status string plus
 // an error/remediation pair.
 export type ViewerFanoutCellState = {
-  status: 'CHECKING' | 'ok' | 'FAIL';
+  // 'PASS'/'CHECKING' match collectorDiag and apiKeyDiag, the closest
+  // siblings in DiagnosticChecksGrid. (Those four checks are not internally
+  // consistent with each other — networkDiag uses 'Success' — so this aligns
+  // with the majority spelling without touching any of their behaviour.)
+  status: 'CHECKING' | 'PASS' | 'FAIL';
   error: string;
   remediation: string;
 };
@@ -44,7 +48,7 @@ export function computeViewerFanoutCellState(
   }
 
   if (response.verdict === 'ok') {
-    return { status: 'ok', error: '', remediation: '' };
+    return { status: 'PASS', error: '', remediation: '' };
   }
 
   // gateway-unreachable, fanout-failed, and error all render as a failed

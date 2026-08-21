@@ -57,7 +57,7 @@ export const DiagnosticChecksGrid = ({
       }
       case 'Local Viewer Fan-out':
         return {
-          isPass: viewerDiag.status === 'ok',
+          isPass: viewerDiag.status === 'PASS',
           isChecking: viewerDiag.status === 'unknown' || viewerDiag.status === 'CHECKING',
           subDetail: viewerDiag.error || '',
           remediation: viewerDiag.remediation || '',
@@ -75,7 +75,7 @@ export const DiagnosticChecksGrid = ({
   return (
     <div className="adapt-card">
       <h2 className="text-lg font-semibold mb-4 text-gray-200">Helix troubleshooting & diagnostics</h2>
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
         {['Collector Configuration', 'X-API Key Format', 'X-Source Format', 'Tenant URL Endpoint', 'Local Viewer Fan-out'].map((title, i) => {
           const { isPass, isChecking, subDetail, remediation } = evaluate(title);
           return (

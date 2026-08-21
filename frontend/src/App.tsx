@@ -542,7 +542,14 @@ const App = () => {
     // this probe refreshes beats flashing it away for 15 seconds.
     setViewerDiag(prev => (prev.status === 'unknown' ? computeViewerFanoutCellState(null) : prev));
     fetch('/api/diagnostics/verify-fanout', { method: 'POST', credentials: 'include' })
-      .then(r => r.json())
+      // The route answers 200 for every verdict, so a non-ok status is a
+      // transport/session problem, not a fan-out result. An expired session's
+      // 401 body has no `verdict`, which would otherwise render the cell as a
+      // failure with no explanation; let the .catch below own that case.
+      .then(r => {
+        if (!r.ok) throw new Error(`Fan-out check unavailable (HTTP ${r.status})`);
+        return r.json();
+      })
       .then((d: VerifyFanoutResponse) => {
         if (cancelled) return;
         setViewerDiag(computeViewerFanoutCellState(d));

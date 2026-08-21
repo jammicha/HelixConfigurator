@@ -70,6 +70,24 @@ describe('POST /api/diagnostics/verify-fanout', () => {
     expect(res.body).toHaveProperty('counters');
   });
 
+  it('logs, rather than silently swallowing, a failure to read the viewer counters', async () => {
+    // The catch here covers BOTH the metrics fetch and the counter parse. A
+    // future defect inside the parser would otherwise present forever as
+    // "metrics endpoint down" with nothing anywhere saying why.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    postSpy.mockResolvedValue({ status: 200 });
+    getSpy.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8888'));
+    const otelStore = { getTrace: vi.fn(() => ({ summary: {}, spans: [{ spanId: 'a' }] })) };
+
+    const res = await request(buildApp(otelStore)).post('/api/diagnostics/verify-fanout');
+
+    expect(res.status).toBe(200);
+    expect(res.body.verdict).toBe('ok'); // the verdict still stands
+    expect(res.body.counters).toBeNull();
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy.mock.calls[0].join(' ')).toContain('ECONNREFUSED');
+  });
+
   it('returns 200 with verdict "error" (not a 500) when the canary throws mid-poll', async () => {
     postSpy.mockResolvedValue({ status: 200 }); // injection succeeds
     const otelStore = {
