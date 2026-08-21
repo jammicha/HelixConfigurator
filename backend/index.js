@@ -9,6 +9,12 @@ require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true })
 
 const VERSION = require('./package.json').version;
 
+// Per-process identity. The startup preflight probes our own port on both IP
+// stacks and compares this value, which is the only reliable way to tell
+// "the port answers and it is us" from "the port answers and it is a stale
+// Docker port proxy".
+const INSTANCE_ID = require('node:crypto').randomUUID();
+
 const docker = new Docker(); // uses /var/run/docker.sock by default
 const containerLogs = makeContainerLogs(docker);
 
@@ -55,7 +61,7 @@ registerAuthRoutes(app);
 
 // Health endpoint (public — for k8s liveness probes, load balancers, monitoring)
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, demoInstall: false });
+  res.json({ ok: true, version: VERSION, demoInstall: false, instanceId: INSTANCE_ID });
 });
 
 // Update-check endpoint (public — banner works without auth, like /api/health)
