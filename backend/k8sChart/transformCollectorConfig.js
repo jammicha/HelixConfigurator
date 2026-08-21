@@ -1,14 +1,20 @@
 // backend/k8sChart/transformCollectorConfig.js
 // PURE: transform the live collector config into the gateway ConfigMap payload.
-// - target='local': rewrites the local-viewer exporter to host.docker.internal:8765
-//   so telemetry flows back to the configurator running on the host.
+// - target='local': rewrites the local-viewer exporter to a host-facing URL so
+//   telemetry flows back to the configurator running on the host. A K8s pod
+//   cannot resolve the compose service name, so this is host.docker.internal
+//   on the PUBLISHED port even when the configurator is itself containerized
+//   (where PORT is the container-internal 3001, not the 8765 compose
+//   publishes). Callers may override `containerized` to keep this pure.
 // - target='remote': strips the viewer exporter entirely (Helix-only).
 // - Ensures a health_check extension so the gateway Deployment can use httpGet probes.
 // The Helix exporter's ${env:...} substitutions are left untouched — the values
 // arrive via the pod's env (Secret + values), and the ConfigMap embeds this file
 // via `.Files.Get` (raw bytes), so no Helm/Go templating touches them.
 const yaml = require('js-yaml');
-const { LOCAL_VIEWER_HOST, VIEWER_EXPORTER_KEY } = require('../collectorFanout');
+const { VIEWER_EXPORTER_KEY } = require('../collectorFanout');
+const { hostFacingViewerEndpoint } = require('../viewerEndpoint');
+const { IS_CONTAINERIZED } = require('../util');
 
 function invalid(message, cause) {
   const err = new Error(message);
@@ -31,7 +37,7 @@ function ensureHealthCheckExtension(doc) {
   doc.service.extensions = exts;
 }
 
-function transformCollectorConfig(yamlString, { target = 'local' } = {}) {
+function transformCollectorConfig(yamlString, { target = 'local', containerized = IS_CONTAINERIZED } = {}) {
   let doc;
   try {
     doc = yaml.load(yamlString);
@@ -45,10 +51,11 @@ function transformCollectorConfig(yamlString, { target = 'local' } = {}) {
 
   if (target === 'local') {
     if (viewer) {
+      const viewerEndpoint = hostFacingViewerEndpoint({ containerized });
       for (const key of ['traces_endpoint', 'logs_endpoint', 'metrics_endpoint']) {
         if (typeof viewer[key] === 'string') {
           // Replace scheme + host:port, preserve the /api/otlp/* path.
-          viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, `http://${LOCAL_VIEWER_HOST}`);
+          viewer[key] = viewer[key].replace(/^https?:\/\/[^/]+/, viewerEndpoint);
         }
       }
     }

@@ -8,6 +8,16 @@
 // paths (per-trace synthetic sends, 2s metrics polling).
 const IS_CONTAINERIZED = require('fs').existsSync('/app');
 
+// OTel service.namespace stamped on every SYNTHETIC trace this configurator
+// injects — the Step-2 inject-trace probe and the viewer fan-out canary.
+// Both traverse the gateway's full pipeline, so both also ship to
+// otlphttp/bmchelix and land in the customer's Helix tenant. Without an
+// explicit namespace Helix falls back to the X-Source header and files these
+// internal health checks inside the customer's own namespace, cluttering the
+// AIOps topology and the demo. One definition, shared: a second
+// internal-looking namespace would defeat the grouping it exists to provide.
+const DIAGNOSTIC_NAMESPACE = 'Helix-Configurator-Internal';
+
 // OTLP/HTTP base URL for reaching helix-gateway FROM THIS PROCESS. In the
 // Docker image the configurator shares the helix-bridge network, so the
 // container name resolves; natively (the PRIMARY path since native
@@ -206,6 +216,7 @@ module.exports = {
   makeContainerLogs,
   isValidContainerName,
   IS_CONTAINERIZED,
+  DIAGNOSTIC_NAMESPACE,
   resolveGatewayOtlpBase,
   resolveGatewayMetricsBase,
   DockerTimeoutError,

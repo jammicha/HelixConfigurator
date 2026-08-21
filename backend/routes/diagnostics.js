@@ -13,21 +13,16 @@ const yaml = require('js-yaml');
 const axios = require('axios');
 const crypto = require('crypto');
 const { PassThrough } = require('stream');
-const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse, resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util');
+const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse, resolveGatewayOtlpBase, resolveGatewayMetricsBase, DIAGNOSTIC_NAMESPACE } = require('../util');
 const errorLog = require('../errorLog');
 const { analyzeCollectorErrorLog } = require('../exportErrorScan');
 const { readEnvContent, parseManagedEnv, DEFAULT_ENV_PATH } = require('./env');
+const { runViewerCanary } = require('../viewerCanary');
 
 // Docker-API name (logs / inspect / restart) only. HTTP requests from this
 // process must go through resolveGateway*Base — container DNS doesn't exist
 // on native installs.
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
-
-// Synthetic diagnostic traces (inject-trace) carry an explicit OTel namespace
-// so Helix groups them on their own. Without it Helix
-// falls back to the X-Source header, landing these internal health checks
-// inside the customer's namespace and cluttering the AIOps topology/demo.
-const DIAGNOSTIC_NAMESPACE = 'Helix-Configurator-Internal';
 
 // Module-scope mutable state. activeLogProcesses is exported via
 // closeActiveLogProcesses() so the index.js shutdown handler can drain it.
@@ -94,6 +89,25 @@ const fetchCounters = async () => {
       extractSum('otelcol_exporter_send_failed_spans') +
       extractSum('otelcol_exporter_send_failed_metric_points') +
       extractSum('otelcol_exporter_send_failed_log_records'),
+  };
+};
+
+// Counters scoped to the LOCAL VIEWER exporter. fetchCounters deliberately
+// filters to otlphttp/bmchelix, which is why a totally dead viewer sink could
+// never show up in the health banner. Both are reported now, so "Helix
+// delivery healthy, local viewer failing" is a state we can actually express.
+const parseViewerCounters = (metricsText) => {
+  const sum = (baseName) =>
+    sumPromCounter(metricsText, baseName, { exporterFilter: 'otlphttp/helix_local_viewer' });
+  return {
+    sent:
+      sum('otelcol_exporter_sent_spans')
+      + sum('otelcol_exporter_sent_metric_points')
+      + sum('otelcol_exporter_sent_log_records'),
+    failed:
+      sum('otelcol_exporter_send_failed_spans')
+      + sum('otelcol_exporter_send_failed_metric_points')
+      + sum('otelcol_exporter_send_failed_log_records'),
   };
 };
 
@@ -646,6 +660,54 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     }
   });
 
+  // POST run the end-to-end viewer fan-out canary. Unlike inject-trace, which
+  // reports success as soon as the GATEWAY accepts a span, this waits for the
+  // span to come back through otlphttp/helix_local_viewer into our own store.
+  // Always answers 200: a failing verdict is a diagnostic result, not a
+  // request error, and the UI renders it as a check cell either way.
+  app.post('/api/diagnostics/verify-fanout', async (req, res) => {
+    // runViewerCanary's own try/catch covers only the initial injection POST.
+    // Its poll loop calls otelStore.getTrace() unguarded, and that can throw
+    // (e.g. SQLITE_BUSY under the concurrent writes this loop runs alongside
+    // while spans are being ingested). A throw there is a diagnostic-tool
+    // failure, not a fan-out failure, but it must still not become a 500 —
+    // the 200-for-every-verdict contract above applies here too. Generate
+    // the traceId here (rather than letting runViewerCanary default it) so
+    // it is available for the response even if the canary throws before
+    // returning one.
+    const traceId = crypto.randomBytes(16).toString('hex');
+    const startedAt = Date.now();
+    let result;
+    try {
+      result = await runViewerCanary({ otelStore, traceId });
+    } catch (e) {
+      return res.json({
+        verdict: 'error',
+        traceId,
+        detail: e.message,
+        remediation: 'The viewer fan-out check crashed before it could finish, most likely '
+          + 'a transient error reading the local OTel store rather than a real fan-out '
+          + 'failure. Retry the check; if it keeps happening, check the configurator '
+          + 'backend logs.',
+        elapsedMs: Date.now() - startedAt,
+        counters: null,
+      });
+    }
+    let counters = null;
+    try {
+      const response = await axios.get(`${resolveGatewayMetricsBase()}/metrics`, { timeout: 2000 });
+      counters = parseViewerCounters(response.data);
+    } catch (e) {
+      // The verdict still stands — counters are a secondary signal. But this
+      // catch covers the parse as well as the fetch, so swallowing it would
+      // make any future defect inside parseViewerCounters present forever as
+      // "metrics endpoint down".
+      counters = null;
+      console.warn('verify-fanout: viewer counters unavailable:', e.message);
+    }
+    res.json({ ...result, counters });
+  });
+
   // GET live metrics parsing.
   app.get('/api/diagnostics/metrics/live', async (req, res) => {
     try {
@@ -1038,4 +1100,4 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   });
 }
 
-module.exports = { register, closeActiveLogProcesses, runOtlpProbe };
+module.exports = { register, closeActiveLogProcesses, runOtlpProbe, parseViewerCounters };

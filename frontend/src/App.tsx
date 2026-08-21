@@ -48,6 +48,7 @@ import { AppHeader } from './components/AppHeader';
 import { UpdateBanner } from './components/UpdateBanner';
 import { DiscoveredServicesDrawer } from './components/dashboard/DiscoveredServicesDrawer';
 import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGrid';
+import { computeViewerFanoutCellState, type VerifyFanoutResponse } from './components/dashboard/viewerFanoutVerdict';
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
 import { GatewayConfigEditor } from './components/dashboard/GatewayConfigEditor';
 
@@ -78,6 +79,7 @@ const App = () => {
   const [collectorDiag, setCollectorDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [apiKeyDiag, setApiKeyDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [networkDiag, setNetworkDiag] = useState({ status: 'unknown', error: '', remediation: '' });
+  const [viewerDiag, setViewerDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [expandedRemediations, setExpandedRemediations] = useState<Record<number, boolean>>({});
   const [gatewayStatus, setGatewayStatus] = useState('unknown'); // running, exited, restarting, error
   const [isConfigSaving, setIsConfigSaving] = useState(false);
@@ -527,6 +529,38 @@ const App = () => {
     () => setNetworkDiag({ status: 'Failed', error: 'API unreachable', remediation: '' }),
     { enabled: isSetupComplete });
 
+  // The viewer fan-out check is a real end-to-end probe (it injects a span and
+  // waits for it to come back), so it runs on demand when the drawer opens
+  // rather than on a poll. Verdict-to-cell-state mapping is delegated to
+  // computeViewerFanoutCellState — see viewerFanoutVerdict.ts for why that
+  // logic isn't inlined here.
+  useEffect(() => {
+    if (!showDiagnostics) return;
+    let cancelled = false;
+    // Only blank the cell to "checking" if nothing has answered yet. When
+    // the gateway-create ladder already seeded a verdict, showing it while
+    // this probe refreshes beats flashing it away for 15 seconds.
+    setViewerDiag(prev => (prev.status === 'unknown' ? computeViewerFanoutCellState(null) : prev));
+    fetch('/api/diagnostics/verify-fanout', { method: 'POST', credentials: 'include' })
+      // The route answers 200 for every verdict, so a non-ok status is a
+      // transport/session problem, not a fan-out result. An expired session's
+      // 401 body has no `verdict`, which would otherwise render the cell as a
+      // failure with no explanation; let the .catch below own that case.
+      .then(r => {
+        if (!r.ok) throw new Error(`Fan-out check unavailable (HTTP ${r.status})`);
+        return r.json();
+      })
+      .then((d: VerifyFanoutResponse) => {
+        if (cancelled) return;
+        setViewerDiag(computeViewerFanoutCellState(d));
+      })
+      .catch(e => {
+        if (cancelled) return;
+        setViewerDiag({ status: 'FAIL', error: e.message, remediation: '' });
+      });
+    return () => { cancelled = true; };
+  }, [showDiagnostics]);
+
   useEffect(() => {
     if (!isSetupComplete) return;
     const fetchHealth = async () => {
@@ -788,7 +822,7 @@ const App = () => {
       // and driven off APP_URL — that conflated two unrelated concerns).
       setBridgeStatus(null);
       const bridgeRes = await fetch('/api/lifecycle/bridge', { method: 'POST' });
-      const bridgeData = await bridgeRes.json().catch(() => ({}));
+      const bridgeData = await bridgeRes.json().catch(() => ({} as any));
       if (!bridgeRes.ok) {
         const reason = bridgeData.error || bridgeData.details || 'Unknown error';
         if (/docker\.sock|docker daemon|cannot connect to docker|enoent.*docker/i.test(reason)) {
@@ -800,7 +834,19 @@ const App = () => {
       // Poll until the gateway reports running. Slow hosts used to false-fail
       // the network diagnostic on a blind 3s sleep.
       const ready = await waitForGatewayRunning(15000);
+      // waitForGatewayRunning returns a discriminated result, not a boolean:
+      // `!ready` would be permanently false on an object. The bridge branch's
+      // own !bridgeRes.ok handling is dropped as unreachable, since the check
+      // above now throws before we get here.
       if (!ready.ok) throw new Error(ready.error);
+
+      // On the create path the backend already ran the full canary ladder
+      // while we waited, so seed the Diagnostics cell from that verdict
+      // rather than leaving it 'unknown' until the drawer runs its own
+      // 15s probe. null on the recreate path — the ladder is create-only.
+      if (bridgeData.viewer?.verdict) {
+        setViewerDiag(computeViewerFanoutCellState({ ...bridgeData.viewer, counters: null }));
+      }
 
       // Helix only supports the collector-routed path now, so the wizard
       // doesn't branch on instrumentation style — Step 2 just shows the
@@ -1563,6 +1609,7 @@ const App = () => {
                     collectorDiag={collectorDiag}
                     apiKeyDiag={apiKeyDiag}
                     networkDiag={networkDiag}
+                    viewerDiag={viewerDiag}
                     xSource={envVars.X_SOURCE}
                     envLoaded={envLoaded}
                     expandedRemediations={expandedRemediations}

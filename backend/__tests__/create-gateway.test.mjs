@@ -1,9 +1,16 @@
 // backend/__tests__/create-gateway.test.mjs
 import { describe, it, expect, vi } from 'vitest';
+import { createRequire } from 'module';
 import { createGatewayFromScratch } from '../routes/lifecycle.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+
+// lifecycle.js reaches errorLog via require(); use the same CJS instance here
+// so we observe the buffer createGatewayFromScratch actually writes to (a
+// plain ESM import resolves to a separate module instance under vitest).
+const require = createRequire(import.meta.url);
+const errorLog = require('../errorLog.js');
 
 function mockDocker() {
   const calls = { pulled: false, networkCreated: false, started: false, createArgs: null };
@@ -58,13 +65,131 @@ describe('createGatewayFromScratch — start failure cleanup', () => {
   });
 });
 
-describe('createGatewayFromScratch — host fan-out', () => {
-  it('rewrites the on-disk collector yaml to host.docker.internal before create', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'helix-cfg-'));
-    const cfg = path.join(dir, 'helix-otel-collector.yaml');
-    fs.writeFileSync(cfg, `exporters:\n  otlphttp/helix_local_viewer:\n    traces_endpoint: http://helix-configurator:3001/api/otlp/traces\n`);
-    const docker = mockDocker();
-    await createGatewayFromScratch(docker, { name: 'helix-gateway', env: [], configHostPath: cfg });
-    expect(fs.readFileSync(cfg, 'utf8')).toContain('host.docker.internal:8765');
+// A docker instance whose container also exposes restart(), and whose
+// helix-bridge network inspect returns a gateway IP — enough for
+// viewerCandidates() to offer a second (bridgeIp) candidate so the ladder's
+// fall-through and restart path actually gets exercised.
+function mockDockerWithViewerSupport() {
+  const docker = mockDocker();
+  const fakeContainer = {
+    start: vi.fn(async () => { docker.calls.started = true; }),
+    restart: vi.fn(async () => {}),
+  };
+  docker.createContainer = vi.fn(async (spec) => { docker.calls.createArgs = spec; return fakeContainer; });
+  docker.getNetwork = vi.fn(() => ({
+    inspect: vi.fn(async () => ({ IPAM: { Config: [{ Gateway: '172.30.0.1' }] } })),
+  }));
+  return { docker, fakeContainer };
+}
+
+const writeTempCollectorYaml = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'helix-cfg-'));
+  const cfg = path.join(dir, 'helix-otel-collector.yaml');
+  fs.writeFileSync(cfg, `exporters:\n  otlphttp/helix_local_viewer:\n    traces_endpoint: http://helix-configurator:3001/api/otlp/traces\n`);
+  return cfg;
+};
+
+describe('createGatewayFromScratch — viewer ladder integration', () => {
+  it('waits for readiness before the first canary probe and again after the restart, in that order', async () => {
+    const { docker, fakeContainer } = mockDockerWithViewerSupport();
+    const cfg = writeTempCollectorYaml();
+    // A shared order log, written to by each collaborator as it fires, is
+    // what actually pins "readiness is awaited before the first canary call,
+    // and again after each restart" — a bare toHaveBeenCalled() on
+    // waitForReady would still pass if either call site were deleted, since
+    // it fires twice either way. Ordering is what a regression would break.
+    const order = [];
+    const canary = vi.fn()
+      .mockImplementationOnce(async () => { order.push('canary:1'); return { verdict: 'fanout-failed' }; })
+      .mockImplementationOnce(async () => { order.push('canary:2'); return { verdict: 'ok' }; });
+    const waitForReady = vi.fn(async () => { order.push('waitForReady'); });
+    fakeContainer.restart = vi.fn(async () => { order.push('restart'); });
+
+    const result = await createGatewayFromScratch(docker, {
+      name: 'helix-gateway', env: [], configHostPath: cfg, otelStore: {},
+      canary, waitForReady,
+    });
+
+    expect(result.viewer.verdict).toBe('ok');
+    // Candidate 0 (host.docker.internal) is skipped for write+restart since
+    // the pre-create rewrite already put it on disk; only the fallback
+    // bridge-IP candidate triggers a real restart. waitForReady runs exactly
+    // twice: once before candidate 0's canary probe, once after the restart
+    // that precedes candidate 1's.
+    expect(waitForReady).toHaveBeenCalledTimes(2);
+    expect(canary).toHaveBeenCalledTimes(2);
+    expect(fakeContainer.restart).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['waitForReady', 'canary:1', 'restart', 'waitForReady', 'canary:2']);
+  });
+
+  it('falls back to a single candidate when the bridge network cannot be inspected (no getNetwork on the docker double)', async () => {
+    const docker = mockDocker(); // no getNetwork() at all — resolveBridgeGatewayIp must swallow that and return null
+    const cfg = writeTempCollectorYaml();
+    const canary = vi.fn(async () => ({ verdict: 'ok' }));
+    const waitForReady = vi.fn(async () => {});
+
+    const result = await createGatewayFromScratch(docker, {
+      name: 'helix-gateway', env: [], configHostPath: cfg, otelStore: {},
+      canary, waitForReady,
+    });
+
+    expect(result.viewer.verdict).toBe('ok');
+    expect(result.viewer.attempts).toEqual([
+      { endpoint: 'http://host.docker.internal:8765', verdict: 'ok' },
+    ]);
+  });
+
+  it('resolves rather than throwing when the injected canary rejects on every candidate, and logs the unproven verdict', async () => {
+    errorLog._reset();
+    const { docker } = mockDockerWithViewerSupport();
+    const cfg = writeTempCollectorYaml();
+    const canary = vi.fn(async () => { throw new Error('canary blew up'); });
+    const waitForReady = vi.fn(async () => {});
+
+    const promise = createGatewayFromScratch(docker, {
+      name: 'helix-gateway', env: [], configHostPath: cfg, otelStore: {},
+      canary, waitForReady,
+    });
+    await expect(promise).resolves.toBeDefined();
+    const result = await promise;
+    expect(result.viewer.verdict).toBe('fanout-failed');
+    // The ladder itself swallows the thrown canary error into a failed
+    // attempt (never propagating), so this is createGatewayFromScratch's own
+    // "verdict !== ok" branch firing, not its outer catch.
+    expect(errorLog.recent(1)[0].tag).toBe('gateway.viewer.unproven');
+  });
+
+  it('records the attempted endpoints, and a failed restore, in the errorLog entry', async () => {
+    // Task 6 spent a full fix round making the ladder REPORT a failed restore
+    // rather than discard it. The only consumer then discarded it anyway.
+    errorLog._reset();
+    const { docker } = mockDockerWithViewerSupport();
+    // An unwritable path makes every write fail, including the candidates[0]
+    // restore — which is the branch that populates restoreError.
+    const cfg = '/nonexistent-dir-for-tests/helix-otel-collector.yaml';
+    const canary = vi.fn(async () => ({ verdict: 'fanout-failed', detail: 'no round trip', remediation: 'x' }));
+
+    const result = await createGatewayFromScratch(docker, {
+      name: 'helix-gateway', env: [], configHostPath: cfg, otelStore: {},
+      canary, waitForReady: vi.fn(async () => {}),
+    });
+
+    expect(result.viewer.restoreError).toBeTruthy();
+    const entry = errorLog.recent(1)[0];
+    expect(entry.tag).toBe('gateway.viewer.unproven');
+    expect(entry.message).toContain('http://host.docker.internal:8765');
+    expect(entry.message).toContain('http://172.30.0.1:8765');
+    expect(entry.message).toContain(result.viewer.restoreError);
+  });
+
+  it('skips the ladder entirely when otelStore is not provided (pre-existing callers)', async () => {
+    const { docker } = mockDockerWithViewerSupport();
+    const cfg = writeTempCollectorYaml();
+    const canary = vi.fn();
+    const result = await createGatewayFromScratch(docker, {
+      name: 'helix-gateway', env: [], configHostPath: cfg, canary,
+    });
+    expect(result).toEqual({ viewer: null });
+    expect(canary).not.toHaveBeenCalled();
   });
 });

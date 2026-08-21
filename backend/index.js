@@ -9,11 +9,18 @@ require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true })
 
 const VERSION = require('./package.json').version;
 
+// Per-process identity. The startup preflight probes our own port on both IP
+// stacks and compares this value, which is the only reliable way to tell
+// "the port answers and it is us" from "the port answers and it is a stale
+// Docker port proxy".
+const INSTANCE_ID = require('node:crypto').randomUUID();
+
 const docker = new Docker(); // uses /var/run/docker.sock by default
 const containerLogs = makeContainerLogs(docker);
 
 const { requireAuth, registerAuthRoutes } = require('./auth');
 const { errorHandler } = require('./errorHandler');
+const { classifyPortOwnership, reportPortOwnership } = require('./preflight');
 
 const { resolvePort } = require('./portConfig');
 const port = resolvePort(process.env);
@@ -55,7 +62,7 @@ registerAuthRoutes(app);
 
 // Health endpoint (public — for k8s liveness probes, load balancers, monitoring)
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, demoInstall: false });
+  res.json({ ok: true, version: VERSION, demoInstall: false, instanceId: INSTANCE_ID });
 });
 
 // Update-check endpoint (public — banner works without auth, like /api/health)
@@ -80,7 +87,7 @@ require('./routes/situations').register(app, { otelStore });
 require('./routes/business-service').register(app, { otelStore });
 require('./routes/discovery').register(app, { docker });
 require('./routes/containers').register(app, { docker });
-require('./routes/lifecycle').register(app, { docker, configPath: CONFIG_PATH });
+require('./routes/lifecycle').register(app, { docker, configPath: CONFIG_PATH, otelStore });
 require('./routes/step-zero/synthetic').register(app, { docker });
 require('./routes/step-zero/instrument').register(app);
 require('./routes/env').register(app);
@@ -108,16 +115,69 @@ require('./routes/config').register(app, {
 // stack-trace page or crashing the process on an unhandledRejection.
 app.use(errorHandler);
 
-const server = app.listen(port, () => {
-  console.log(`Backend listening at http://localhost:${port}`);
-  console.log(`Helix Ingest Endpoint: ${process.env.HELIX_ENDPOINT || 'NOT CONFIGURED'}`);
+// Bind each address family explicitly. A single app.listen(port) binds `::`
+// dual-stack, and when another process already holds the IPv4 wildcard the
+// bind silently degrades to IPv6-only with no error at all. That is invisible
+// in the browser (localhost resolves to ::1 first) and fatal to the gateway's
+// viewer fan-out (host.docker.internal is IPv4). Two explicit listeners turn
+// that into a real EADDRINUSE we can see and explain.
+const listenOn = (opts) => new Promise((resolve, reject) => {
+  const s = app.listen(opts);
+  const onError = (e) => { s.removeListener('listening', onListening); reject(e); };
+  const onListening = () => {
+    s.removeListener('error', onError);
+    s.on('error', (e) => console.error(`Listener error on ${opts.host}:${opts.port}:`, e));
+    resolve(s);
+  };
+  s.once('error', onError);
+  s.once('listening', onListening);
 });
-server.on('error', (e) => {
-  if (e.code === 'EADDRINUSE') {
+
+const servers = [];
+let ipv4Bound = false;
+
+const start = async () => {
+  // IPv6 first, and ipv6Only so it cannot claim the v4 wildcard implicitly.
+  try {
+    servers.push(await listenOn({ port, host: '::', ipv6Only: true }));
+  } catch (e) {
+    // A host with no IPv6 at all is fine; we fall through to the v4 bind.
+    if (e.code !== 'EADDRINUSE' && e.code !== 'EAFNOSUPPORT' && e.code !== 'EADDRNOTAVAIL') throw e;
+  }
+
+  try {
+    servers.push(await listenOn({ port, host: '0.0.0.0' }));
+    ipv4Bound = true;
+  } catch (e) {
+    // EADDRINUSE is the expected squatter case; the preflight below explains
+    // it. Any other IPv4 bind error is logged and tolerated as long as IPv6
+    // is already up — exiting is only correct when neither stack bound.
+    if (e.code !== 'EADDRINUSE') {
+      if (servers.length === 0) throw e;
+      console.error(`IPv4 bind on port ${port} failed:`, e);
+    }
+  }
+
+  if (servers.length === 0) {
     console.error(`\nPort ${port} is in use. Set PORT in .env to a free port and relaunch.\n`);
     process.exit(1);
   }
-  throw e;
+
+  console.log(`Backend listening at http://localhost:${port}`);
+  console.log(`Helix Ingest Endpoint: ${process.env.HELIX_ENDPOINT || 'NOT CONFIGURED'}`);
+
+  // Non-fatal, and deliberately after the listening log so the URL is the
+  // first thing a user sees. Failures here must never block startup.
+  try {
+    reportPortOwnership(await classifyPortOwnership({ port, instanceId: INSTANCE_ID, ipv4Bound }));
+  } catch (e) {
+    console.warn('Port preflight skipped:', e.message);
+  }
+};
+
+start().catch((e) => {
+  console.error('Failed to start:', e);
+  process.exit(1);
 });
 
 let shuttingDown = false;
@@ -126,10 +186,12 @@ const shutdown = (signal) => {
   shuttingDown = true;
   console.log(`Received ${signal} — closing log streams and HTTP server...`);
   diagnostics.closeActiveLogProcesses();
-  server.close(() => {
-    console.log('HTTP server closed.');
-    process.exit(0);
-  });
+  const toClose = servers.length;
+  Promise.all(servers.map((s) => new Promise((resolve) => s.close(resolve))))
+    .then(() => {
+      console.log(toClose > 0 ? 'HTTP server closed.' : 'No listeners were open (signal arrived during startup).');
+      process.exit(0);
+    });
   // Force-exit after 5s if server.close hangs (open SSE connections etc.)
   setTimeout(() => {
     console.warn('Forced exit after 5s timeout.');

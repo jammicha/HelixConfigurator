@@ -8,12 +8,19 @@
 const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
-const { withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers, IS_CONTAINERIZED } = require('../util');
+const axios = require('axios');
+const {
+  withDockerTimeout, sendDockerTimeoutResponse, detectCollectorContainers, IS_CONTAINERIZED,
+  resolveGatewayOtlpBase,
+} = require('../util');
 const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
 
 const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
-const { rewriteLocalViewerToHost } = require('../collectorFanout');
+const { preferredViewerEndpoint, viewerCandidates } = require('../viewerEndpoint');
+const { selectViewerEndpoint, writeEndpoint } = require('../viewerLadder');
+const { readLocalViewerEndpoint } = require('../collectorFanout');
+const { runViewerCanary } = require('../viewerCanary');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
@@ -29,10 +36,105 @@ function pullImage(docker, image) {
   });
 }
 
+// The helix-bridge gateway address, used as the IPv4 fallback for hosts where
+// host.docker.internal does not resolve. Returns null when it cannot be read;
+// callers treat that as "no fallback candidate".
+const resolveBridgeGatewayIp = async (docker) => {
+  try {
+    const net = await withDockerTimeout(
+      docker.getNetwork('helix-bridge').inspect(), 'network.inspect', 5_000,
+    );
+    const cfg = (net.IPAM?.Config || [])[0];
+    return cfg?.Gateway || null;
+  } catch {
+    return null;
+  }
+};
+
+// Docker reporting a container "started" only means the process was
+// launched, not that the OTel collector inside it has finished booting and
+// bound its OTLP receiver. Racing the canary against that gap produces a
+// false "gateway-unreachable" verdict — indistinguishable, from the canary's
+// point of view, from an actually-dead gateway — which then suppresses every
+// remaining ladder candidate. Poll until something answers on the OTLP port,
+// or give up after a generous deadline; on timeout we still return (never
+// throw) and let the canary's own probe produce the real, now-truthful,
+// verdict. A connection failure while the collector is mid-boot is expected
+// here, not an error worth logging.
+const waitForGatewayReady = async ({
+  otlpBase = resolveGatewayOtlpBase(),
+  deadlineMs = 30_000,
+  intervalMs = 500,
+  axiosImpl = axios,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+} = {}) => {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    try {
+      // Any response at all — including an HTTP error status — means a
+      // listener has bound the port, which is all readiness means here.
+      await axiosImpl.get(otlpBase, { timeout: 2000, validateStatus: () => true });
+      return;
+    } catch {
+      /* expected while the collector is still starting up */
+    }
+    if (Date.now() >= deadline) return;
+    await sleep(intervalMs);
+  }
+};
+
+// Point the on-disk collector yaml's viewer exporter at wherever this
+// configurator is actually reachable from inside the gateway container.
+//
+// This has to run before EVERY gateway create and recreate, not just create.
+// The rewrite being bidirectional is a property of the function, not of the
+// system: in the compose deployment the gateway is created by compose, so
+// this route only ever recreates and the container-direction rewrite would
+// otherwise never execute at all. Separately, a user who follows the
+// README's advice to set PORT after a port collision, restarts, and presses
+// Save would get a gateway recreated against the stale endpoint.
+//
+// The expensive part — restart plus canary — deliberately stays create-only;
+// this is a read, a string replace and a rename. Never throws: a gateway
+// that comes up with a stale fan-out target is still a working gateway for
+// Helix delivery, and the canary/preflight name the fan-out problem.
+//
+// `preserveIfAmong` is for the RECREATE branch, and only that branch.
+// When the create-time ladder fell through and succeeded on candidate 1 (the
+// bridge gateway IP — the case that exists for Linux Docker Engine, where
+// host.docker.internal can fail to resolve despite the injected ExtraHosts),
+// it left that PROVEN endpoint on disk. The ladder is create-only, so nothing
+// re-derives it. Writing candidate 0 unconditionally here would overwrite a
+// working endpoint with one the ladder had ALREADY DISPROVED on this host,
+// and `viewer` is null on the recreate response, so nothing would report it:
+// first Save works, second Save silently kills the fan-out.
+//
+// So on recreate we only decline to write when what is already there is
+// STILL a legitimate candidate. A stale PORT, a container-direction endpoint,
+// or a bridge IP carried over from another machine all fail that test and are
+// rewritten — which is the whole point of running this on recreate at all.
+// The create path always writes candidate 0, because createGatewayFromScratch
+// passes skipFirstApply, which asserts exactly that.
+const applyViewerEndpointToDisk = async (configHostPath, { preserveIfAmong = null } = {}) => {
+  try {
+    if (preserveIfAmong) {
+      const current = readLocalViewerEndpoint(await fsp.readFile(configHostPath, 'utf8'));
+      if (current && preserveIfAmong.includes(current)) return;
+    }
+    await writeEndpoint(configHostPath, preferredViewerEndpoint({ containerized: IS_CONTAINERIZED }));
+  } catch (e) {
+    console.warn('applyViewerEndpointToDisk: yaml fan-out rewrite skipped:', e.message);
+  }
+};
+
 // Create the gateway container from scratch — the job docker-compose does in
 // the container path. Used on the first Docker-target commit when no gateway
 // exists yet. After this, recreateGateway() handles subsequent env edits.
-async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
+async function createGatewayFromScratch(docker, {
+  name, env, configHostPath, otelStore,
+  canary = runViewerCanary,
+  waitForReady = waitForGatewayReady,
+}) {
   // Pull only if absent (offline-friendly; image may already be local).
   try {
     await docker.getImage(GATEWAY_IMAGE).inspect();
@@ -45,16 +147,10 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
   } catch (e) {
     if (e.statusCode !== 409) throw e; // 409 = already exists
   }
-  // Configurator runs on the host, gateway in a container — flip the local
-  // fan-out target to host.docker.internal so traces reach the host viewer.
-  try {
-    const current = await fsp.readFile(configHostPath, 'utf8');
-    const tmp = `${configHostPath}.tmp`;
-    await fsp.writeFile(tmp, rewriteLocalViewerToHost(current));
-    await fsp.rename(tmp, configHostPath);
-  } catch (e) {
-    console.warn('createGatewayFromScratch: yaml host-rewrite skipped:', e.message);
-  }
+  // NB: the caller (the /bridge route) has already pointed configHostPath at
+  // preferredViewerEndpoint() — see applyViewerEndpointToDisk. That is what
+  // lets the ladder below pass skipFirstApply, and it is why the container
+  // loads the right endpoint the moment it starts.
   const spec = buildGatewayCreateSpec({ name, env, configHostPath });
   const container = await docker.createContainer(spec);
   try {
@@ -62,6 +158,59 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
   } catch (e) {
     try { await container.remove({ force: true }); } catch { /* best effort */ }
     throw e;
+  }
+
+  // Prove the fan-out endpoint end to end now that the gateway is running,
+  // and fall through the candidate list if the first one does not round-trip.
+  // Never throw: a gateway that is up but whose viewer sink is unproven is
+  // still a working gateway for Helix delivery.
+  if (!otelStore) return { viewer: null };
+  try {
+    // viewerCandidates() ignores bridgeIp on the containerized branch, so
+    // skip the network round trip to look it up in that case.
+    const bridgeIp = IS_CONTAINERIZED ? null : await resolveBridgeGatewayIp(docker);
+    // Candidate 0 is preferredViewerEndpoint()'s output, which is exactly
+    // what the caller's applyViewerEndpointToDisk already put on disk and
+    // what the container just loaded at start — no write or restart needed
+    // to prove it, just a readiness wait before the first canary probe.
+    await waitForReady();
+    const result = await selectViewerEndpoint({
+      configHostPath,
+      candidates: viewerCandidates({ containerized: IS_CONTAINERIZED, bridgeIp }),
+      otelStore,
+      canary,
+      skipFirstApply: true,
+      restartGateway: async () => {
+        await withDockerTimeout(container.restart({ t: 5 }), 'container.restart', 30_000);
+        // On Docker Desktop a single-file bind mount resolves by path, so a
+        // running container would already see the renamed yaml even without
+        // this restart. On native Linux Docker Engine that same mount is
+        // inode-based, so a running container keeps the pre-rename content
+        // until the mount is re-established — restarting is what makes the
+        // new candidate visible there. Either way, wait for the freshly
+        // restarted collector to finish booting before the next canary probe.
+        await waitForReady();
+      },
+    });
+    if (result.verdict !== 'ok') {
+      // Name the endpoints actually tried and surface a failed restore: the
+      // ladder goes to the trouble of reporting restoreError rather than
+      // discarding it, and this is its only consumer. Without it, "no
+      // candidate worked" is indistinguishable from "no candidate worked AND
+      // the yaml is now left pointing at the last one tried."
+      const tried = result.attempts.map(a => a.endpoint).join(', ') || 'none';
+      errorLog.push('gateway.viewer.unproven',
+        `viewer fan-out unproven: ${result.verdict} after ${result.attempts.length} candidate(s) `
+        + `[${tried}]`
+        + (result.restoreError
+          ? `; restoring the preferred endpoint also failed: ${result.restoreError}`
+          : ''));
+    }
+    return { viewer: result };
+  } catch (e) {
+    errorLog.push('gateway.viewer.selection-failed', `candidate ladder threw: ${e.message}`);
+    console.warn('createGatewayFromScratch: viewer endpoint selection skipped:', e.message);
+    return { viewer: null };
   }
 }
 
@@ -260,6 +409,14 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
 
 // Native installs lose the gateway when Docker is stopped/restarted without
 // compose. Start/Restart used to 404 here; bridge already create-or-recreates.
+//
+// The fan-out endpoint has to be on disk BEFORE the container starts, or the
+// gateway this creates loads a stale one and the viewer stays empty. We do not
+// run the candidate ladder here, though: these are recovery buttons, and the
+// ladder costs a readiness wait plus a canary per candidate. Writing candidate
+// 0 is correct by construction on Docker Desktop, and the Diagnostics panel's
+// Local Viewer Fan-out cell proves or disproves it on demand. The full
+// prove-then-fall-through flow stays on the documented /bridge Save path.
 const createGatewayIfMissing = async (docker, name, configPath) => {
   try {
     await docker.getContainer(name).inspect();
@@ -267,12 +424,13 @@ const createGatewayIfMissing = async (docker, name, configPath) => {
   } catch (e) {
     if (e.statusCode !== 404) throw e;
     const env = (await readEnvAsArray()) || [];
+    await applyViewerEndpointToDisk(configPath);
     await createGatewayFromScratch(docker, { name, env, configHostPath: configPath });
     return true;
   }
 };
 
-function register(app, { docker, configPath }) {
+function register(app, { docker, configPath, otelStore }) {
   // POST restart the configured target container. Recreates rather than
   // plain-restarts so updated .env values load (see recreateGateway above
   // for the env_file-at-create-time rationale).
@@ -302,6 +460,10 @@ function register(app, { docker, configPath }) {
       if (e.statusCode === 404) {
         try {
           const env = (await readEnvAsArray()) || [];
+          // Same reasoning as createGatewayIfMissing: write the fan-out
+          // endpoint before the container starts, but leave the ladder to
+          // the /bridge Save path.
+          await applyViewerEndpointToDisk(configPath);
           await createGatewayFromScratch(docker, { name: targetContainer, env, configHostPath: configPath });
           return res.json({ message: `Container ${targetContainer} created and started successfully` });
         } catch (createErr) {
@@ -350,12 +512,34 @@ function register(app, { docker, configPath }) {
       if (e.statusCode === 404) gatewayExists = false;
       else return res.status(500).json({ error: 'Failed to inspect gateway', details: e.message });
     }
+    // Before BOTH branches, deliberately — see applyViewerEndpointToDisk.
+    // On recreate, pass the legitimate candidate set so a fallback endpoint
+    // the create-time ladder proved is not clobbered by candidate 0.
+    await applyViewerEndpointToDisk(configPath, {
+      preserveIfAmong: gatewayExists
+        ? viewerCandidates({
+          containerized: IS_CONTAINERIZED,
+          bridgeIp: IS_CONTAINERIZED ? null : await resolveBridgeGatewayIp(docker),
+        })
+        : null,
+    });
+
+    // The create path blocks for tens of seconds proving the viewer fan-out
+    // end to end. Discarding that verdict and answering a bare "Gateway
+    // created" would defer a known-dead fan-out to a user noticing an empty
+    // View OTel Data page days later; the frontend seeds the Diagnostics
+    // cell from this instead. Stays null on the recreate path: the ladder is
+    // create-only by design (a restart plus a canary on every routine env
+    // save is a bad trade).
+    let viewer = null;
     try {
       if (gatewayExists) {
         await recreateGateway(docker, sidecarName);
       } else {
         const env = (await readEnvAsArray()) || [];
-        await createGatewayFromScratch(docker, { name: sidecarName, env, configHostPath: configPath });
+        ({ viewer } = await createGatewayFromScratch(
+          docker, { name: sidecarName, env, configHostPath: configPath, otelStore },
+        ));
       }
     } catch (e) {
       return res.status(500).json({
@@ -363,7 +547,10 @@ function register(app, { docker, configPath }) {
         details: e.message,
       });
     }
-    res.json({ message: gatewayExists ? 'Gateway recreated with updated environment' : 'Gateway created' });
+    res.json({
+      message: gatewayExists ? 'Gateway recreated with updated environment' : 'Gateway created',
+      viewer,
+    });
   });
 
   // POST attach the sidecar to an arbitrary Docker network by name. Used by
