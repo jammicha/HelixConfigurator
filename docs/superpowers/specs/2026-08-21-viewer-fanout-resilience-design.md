@@ -159,21 +159,41 @@ The process still starts in the degraded cases. It never starts silently in
 them. Startup failure modes stay legible rather than becoming a new class of
 "the app will not launch" support load.
 
-### 4. Verify the endpoint from the gateway's side before accepting it
+### 4. Verify the endpoint by round-trip, and walk a fallback ladder
+
+Correction to the original approach: a `docker exec` probe inside the gateway
+container is not possible. `otel/opentelemetry-collector-contrib` ships without
+a shell, confirmed by `docker run --entrypoint /bin/sh`, which fails with
+`stat /bin/sh: no such file or directory`. There is no `sh`, `wget`, or `curl`
+to exec.
+
+Instead, the gateway proves reachability using its own exporter, over the real
+path, which is a stronger signal than a shell probe anyway. `viewerCanary.js`
+injects a uniquely-tagged synthetic span into the gateway's OTLP receiver and
+then polls `otelStore.getTrace(traceId)` for it with a bounded timeout. If the
+span comes back, the fan-out endpoint currently written in the yaml is proven
+end to end.
 
 After `createGatewayFromScratch` or a gateway recreate writes the yaml,
-`lifecycle.js` runs a reachability probe from inside the gateway container via
-dockerode exec, against the candidate fan-out URL. On failure it walks the
-fallback ladder from `viewerEndpoint` and persists the first candidate that
-demonstrably round-trips.
+`lifecycle.js` runs the canary. On failure it rewrites the yaml to the next
+candidate from `viewerEndpoint`, restarts the gateway, and retries, bounded by
+the candidate list. The first candidate that round-trips is persisted.
 
-A configuration is accepted only once the gateway has proven it can reach the
-configurator. If no candidate works, the write still completes, but the lifecycle route returns the failure with the
-probe output attached and the Diagnostics panel shows it, rather than deferring
-it to a user noticing an empty page days later.
+Scope limit, stated so this does not overpromise: every native-path candidate
+resolves to an IPv4 host address, so in the split-brain case that caused the
+original failure, no candidate can succeed. The ladder fixes the resolvable
+cases (a non-default `PORT`, and Linux Docker Engine where
+`host.docker.internal` does not resolve). The split-brain case is caught and
+named by the preflight in section 3 and the diagnosis in section 5. Together
+they cover it: the ladder prevents what is preventable, the preflight makes the
+rest loud and specific.
 
-This is the control that would have caught the original failure at config-write
-time instead of days later. It fixes weakness 1.
+If no candidate works, the write still completes, but the lifecycle route
+returns the failure with the canary verdict attached and the Diagnostics panel
+shows it, rather than deferring it to a user noticing an empty page days later.
+
+This is the control that would have surfaced the original failure at
+config-write time. It fixes weakness 1.
 
 ### 5. One-click diagnosis
 
@@ -186,12 +206,13 @@ between "Helix delivery healthy" and "local viewer failing" is representable
 instead of invisible. This addresses weakness 4 without changing what the
 existing banner measures.
 
-**`POST /api/diagnostics/verify-fanout`.** Closes the loop that the current
-`inject-trace` endpoint leaves open. `inject-trace` pushes a synthetic span into
+**`POST /api/diagnostics/verify-fanout`.** Exposes the same `viewerCanary`
+module from section 4 over HTTP, so the user can run on demand what the
+lifecycle path runs automatically. It closes the loop that the current
+`inject-trace` endpoint leaves open: `inject-trace` pushes a synthetic span into
 the gateway and reports success as soon as the gateway accepts it, which is
-exactly the half of the path that was never broken. The new endpoint injects a
-uniquely-tagged span, then polls the local OTel store for that specific trace id
-with a bounded timeout, and returns one of three verdicts, each with a specific
+exactly the half of the path that was never broken. The new endpoint returns one
+of three verdicts, each with a specific
 remediation string:
 
 - the span never reached the gateway: gateway receiver or connectivity problem
@@ -227,7 +248,8 @@ cannot reach the configurator" is.
 - `backend/collectorFanout.js` (signature change, `LOCAL_VIEWER_HOST` removed)
 - `backend/index.js` (dual-stack bind, preflight invocation)
 - `backend/preflight.js` (new, port ownership classification)
-- `backend/routes/lifecycle.js` (probe ladder on gateway create and recreate)
+- `backend/viewerCanary.js` (new, round-trip span canary)
+- `backend/routes/lifecycle.js` (candidate ladder on gateway create and recreate)
 - `backend/routes/diagnostics.js` (viewer-scoped counters, `verify-fanout`)
 - frontend Diagnostics panel (surface the new verdict and remediation)
 - `README.md` (Port and Process Reference: document the split-brain failure and
