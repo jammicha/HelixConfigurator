@@ -1,5 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
+import { fetchCapabilityWithRetry } from '../updateCapability';
+import { formatInstallLabel } from './installLabel';
 
 type EnvVars = {
   HELIX_ENDPOINT: string;
@@ -35,6 +37,24 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+
+  // Which install is serving this UI, for the footer label. Fetched when the
+  // drawer opens rather than on mount, since it is only ever shown here, and
+  // fetched once per open (both endpoints are cheap and public). Failures are
+  // silent: the label simply does not render.
+  const [installLabel, setInstallLabel] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    Promise.all([
+      fetch('/api/version').then(r => (r.ok ? r.json() : null)).catch(() => null),
+      fetchCapabilityWithRetry(fetch, { attempts: 2 }),
+    ]).then(([version, cap]) => {
+      if (cancelled) return;
+      setInstallLabel(formatInstallLabel({ version: version?.current, mode: cap?.mode }));
+    });
+    return () => { cancelled = true; };
+  }, [open]);
 
   // Lock body scroll while open so the page underneath doesn't shift when
   // the drawer takes focus.
@@ -246,7 +266,11 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
           </div>
         </div>
 
-        <footer className="sticky bottom-0 bg-gray-1000 border-t border-gray-800 px-6 py-4 flex justify-end gap-3">
+        <footer className="sticky bottom-0 bg-gray-1000 border-t border-gray-800 px-6 py-4 flex items-center justify-between gap-3">
+          <span className="text-tiny text-gray-500 truncate" title="The configurator install serving this page">
+            {installLabel}
+          </span>
+          <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 rounded font-semibold text-sm text-gray-300 hover:text-gray-100 hover:bg-gray-900 transition-colors"
@@ -261,6 +285,7 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
             {isUpdatingSettings && <Loader2 className="w-4 h-4 animate-spin" />}
             {isUpdatingSettings ? 'Updating…' : 'Update Settings'}
           </button>
+          </div>
         </footer>
       </aside>
     </>
