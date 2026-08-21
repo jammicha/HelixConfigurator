@@ -41,6 +41,15 @@ const FAN_OUT_CONSEQUENCE =
   + 'the local viewer fan-out will fail and the View OTel Data page will stay empty. '
   + 'Delivery to your Helix tenant is unaffected.';
 
+// The mirror case. Here the FAN-OUT is the half that works: the gateway
+// reaches us over IPv4 via host.docker.internal. It is the human whose
+// browser resolves localhost to ::1 first and lands on the other process.
+const IPV6_FOREIGN_REMEDIATION =
+  'Reach this configurator at http://127.0.0.1:%PORT% meanwhile, which is unambiguous. '
+  + 'Identify the other listener with `lsof -nP -iTCP:%PORT% -sTCP:LISTEN` and stop it, '
+  + 'then restart the configurator so it can bind both stacks. '
+  + 'If that process needs the port, set PORT in .env to a free port instead.';
+
 const DOCKER_REMEDIATION =
   'Usually a stale Docker Desktop port proxy from a previous `docker compose up` of '
   + 'the configurator stack, still holding the port with no container behind it. '
@@ -66,6 +75,28 @@ const classifyPortOwnership = async ({
   // never an override, so a blocked loopback probe cannot be misread as a
   // squatter.
   if (ipv4Bound) {
+    // ...but owning IPv4 says nothing about who owns `::`. index.js swallows
+    // the EADDRINUSE from the IPv6 bind, so a foreign process there is
+    // silent, and `localhost` resolves to ::1 first on macOS and on modern
+    // Linux — the user's browser reaches THAT process, not this one, while
+    // everything here reports healthy. Only 'foreign' is unambiguous: a
+    // bound and healthy IPv6 stack probes 'self', and a host without IPv6
+    // probes 'unreachable'.
+    if (ipv6 === 'foreign') {
+      return {
+        verdict: 'ipv6-foreign',
+        ipv4,
+        ipv6,
+        headline: 'Your browser may not be reaching this configurator.',
+        message:
+          `Another process owns IPv6 port ${port} and is answering on it, while this `
+          + `configurator holds IPv4. Browsers resolve localhost to ::1 first, so `
+          + `http://localhost:${port} can reach that other process instead of this one. `
+          + `The gateway's viewer fan-out is unaffected — it reaches this configurator `
+          + `over IPv4 via host.docker.internal.`,
+        remediation: IPV6_FOREIGN_REMEDIATION.replaceAll('%PORT%', String(port)),
+      };
+    }
     return { verdict: 'healthy', ipv4, ipv6, message: '', remediation: '' };
   }
   if (ipv4 === 'unreachable') {
@@ -73,6 +104,7 @@ const classifyPortOwnership = async ({
       verdict: 'ipv4-unreachable',
       ipv4,
       ipv6,
+      headline: 'Local viewer fan-out will not work.',
       message:
         `Another process owns IPv4 port ${port}. It accepts connections and then closes them `
         + `without responding. ${FAN_OUT_CONSEQUENCE}`,
@@ -83,6 +115,7 @@ const classifyPortOwnership = async ({
     verdict: 'ipv4-foreign',
     ipv4,
     ipv6,
+    headline: 'Local viewer fan-out will not work.',
     message:
       `Another process owns IPv4 port ${port} and is answering on it. `
       + `This configurator is reachable over IPv6 only. ${FAN_OUT_CONSEQUENCE}`,
@@ -93,7 +126,7 @@ const classifyPortOwnership = async ({
 const reportPortOwnership = (verdict, { log = console } = {}) => {
   if (!verdict || verdict.verdict === 'healthy') return;
   log.warn(
-    `\n  Local viewer fan-out will not work.\n`
+    `\n  ${verdict.headline || 'Local viewer fan-out will not work.'}\n`
     + `  ${verdict.message}\n\n`
     + `  ${verdict.remediation}\n`,
   );

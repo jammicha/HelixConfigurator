@@ -68,6 +68,34 @@ describe('classifyPortOwnership', () => {
     expect(v.verdict).toBe('healthy');
   });
 
+  it('names the MIRROR split-brain: IPv4 bound but something foreign answers on IPv6', async () => {
+    // The symmetric case of the bug this module exists to name. index.js
+    // swallows the EADDRINUSE, IPv4 binds, so ipv4Bound is true — but the
+    // user's browser resolves localhost to ::1 first and reaches the other
+    // process. Short-circuiting on ipv4Bound reported this as healthy.
+    const fetchImpl = stubFetch({
+      '127.0.0.1': jsonOk({ ok: true, instanceId: ID }),
+      '[::1]': jsonOk({ ok: true, instanceId: 'someone-else' }),
+    });
+    const v = await classifyPortOwnership({ port: 8765, instanceId: ID, ipv4Bound: true, fetchImpl });
+    expect(v.verdict).toBe('ipv6-foreign');
+    expect(v.ipv4).toBe('self');
+    expect(v.ipv6).toBe('foreign');
+    expect(v.message).toContain('8765');
+    // The fan-out is the half that still works here, so the message must not
+    // claim otherwise; 127.0.0.1 is the working way in meanwhile.
+    expect(v.remediation).toContain('127.0.0.1:8765');
+  });
+
+  it('a non-JSON answer on the IPv6 side also counts as foreign', async () => {
+    const fetchImpl = stubFetch({
+      '127.0.0.1': jsonOk({ ok: true, instanceId: ID }),
+      '[::1]': { ok: true, json: async () => { throw new Error('not json'); } },
+    });
+    const v = await classifyPortOwnership({ port: 8765, instanceId: ID, ipv4Bound: true, fetchImpl });
+    expect(v.verdict).toBe('ipv6-foreign');
+  });
+
   it('stays healthy on an IPv6-less host where only IPv4 bound and answers', async () => {
     const fetchImpl = stubFetch({
       '127.0.0.1': jsonOk({ ok: true, instanceId: ID }),
@@ -85,6 +113,22 @@ describe('reportPortOwnership', () => {
     reportPortOwnership({ verdict: 'healthy', message: '', remediation: '' }, { log });
     expect(log.warn).not.toHaveBeenCalled();
     expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('uses the verdict\'s own headline so the mirror case is not mislabelled as a fan-out failure', () => {
+    const log = { warn: vi.fn(), error: vi.fn(), log: vi.fn() };
+    reportPortOwnership(
+      {
+        verdict: 'ipv6-foreign',
+        headline: 'Your browser may not be reaching this configurator.',
+        message: 'MSG',
+        remediation: 'FIX',
+      },
+      { log },
+    );
+    const printed = log.warn.mock.calls.flat().join('\n');
+    expect(printed).toContain('Your browser may not be reaching this configurator.');
+    expect(printed).not.toContain('Local viewer fan-out will not work.');
   });
 
   it('warns with both the message and the remediation when degraded', () => {
