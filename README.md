@@ -360,7 +360,11 @@ Diagnostics popover (top-right of the page) lists detected upstream OTel collect
 In the native path the configurator is a **host process** (port `PORT`, default 8765). When you choose the Docker onboarding target, the configurator creates `helix-gateway` itself via dockerode — pulling the pinned `otel/opentelemetry-collector-contrib` release (same tag the generated Helm charts use), creating the `helix-bridge` network, and publishing ports 4317/4318/8888. The gateway's local fan-out endpoint is `http://host.docker.internal:8765` (the configurator is on the host, not in a container); `ExtraHosts: host.docker.internal:host-gateway` is injected so this resolves on Linux Docker Engine as well as Docker Desktop.
 
 The fan-out endpoint is derived from `PORT`, not hardcoded, so relocating the UI
-moves the fan-out target with it. It is also verified: after the configurator
+moves the fan-out target with it. Host-facing URLs (the gateway container's
+fan-out target, and the local-target Helm chart) always carry the **published**
+port rather than the port the process listens on — in the Docker image those
+differ, since `PORT` is the container-internal 3001 and compose publishes 8765.
+Set `VIEWER_PUBLISHED_PORT` if you remap that publish. It is also verified: after the configurator
 creates the gateway it injects a canary span and waits for it to come back, and
 falls through to the bridge gateway IP if `host.docker.internal` does not
 resolve. You can re-run that check any time from the Diagnostics panel's

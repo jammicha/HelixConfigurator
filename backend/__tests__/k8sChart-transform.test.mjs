@@ -56,6 +56,24 @@ describe('transformCollectorConfig', () => {
     }
   });
 
+  it('target=local: a containerized configurator emits its PUBLISHED port, not its internal PORT', () => {
+    // The Docker image sets ENV PORT=3001 and compose publishes 8765:3001.
+    // The chart's URL is host-facing (a K8s pod cannot resolve the compose
+    // service name), so 3001 there is a permanently dead fan-out.
+    const prevPort = process.env.PORT;
+    process.env.PORT = '3001';
+    try {
+      const out = yaml.load(transformCollectorConfig(BASE, { target: 'local', containerized: true }));
+      const v = out.exporters[VIEWER_EXPORTER_KEY];
+      expect(v.traces_endpoint).toBe('http://host.docker.internal:8765/api/otlp/traces');
+      expect(v.logs_endpoint).toBe('http://host.docker.internal:8765/api/otlp/logs');
+      expect(v.metrics_endpoint).toBe('http://host.docker.internal:8765/api/otlp/metrics');
+    } finally {
+      if (prevPort === undefined) delete process.env.PORT;
+      else process.env.PORT = prevPort;
+    }
+  });
+
   it('target=remote: removes the viewer exporter and its pipeline refs, keeps bmchelix', () => {
     const out = yaml.load(transformCollectorConfig(BASE, { target: 'remote' }));
     expect(out.exporters[VIEWER_EXPORTER_KEY]).toBeUndefined();
