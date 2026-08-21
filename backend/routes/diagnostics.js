@@ -671,7 +671,33 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   // Always answers 200: a failing verdict is a diagnostic result, not a
   // request error, and the UI renders it as a check cell either way.
   app.post('/api/diagnostics/verify-fanout', async (req, res) => {
-    const result = await runViewerCanary({ otelStore });
+    // runViewerCanary's own try/catch covers only the initial injection POST.
+    // Its poll loop calls otelStore.getTrace() unguarded, and that can throw
+    // (e.g. SQLITE_BUSY under the concurrent writes this loop runs alongside
+    // while spans are being ingested). A throw there is a diagnostic-tool
+    // failure, not a fan-out failure, but it must still not become a 500 —
+    // the 200-for-every-verdict contract above applies here too. Generate
+    // the traceId here (rather than letting runViewerCanary default it) so
+    // it is available for the response even if the canary throws before
+    // returning one.
+    const traceId = crypto.randomBytes(16).toString('hex');
+    const startedAt = Date.now();
+    let result;
+    try {
+      result = await runViewerCanary({ otelStore, traceId });
+    } catch (e) {
+      return res.json({
+        verdict: 'error',
+        traceId,
+        detail: e.message,
+        remediation: 'The viewer fan-out check crashed before it could finish, most likely '
+          + 'a transient error reading the local OTel store rather than a real fan-out '
+          + 'failure. Retry the check; if it keeps happening, check the configurator '
+          + 'backend logs.',
+        elapsedMs: Date.now() - startedAt,
+        counters: null,
+      });
+    }
     let counters = null;
     try {
       const response = await axios.get(`${resolveGatewayMetricsBase()}/metrics`, { timeout: 2000 });
