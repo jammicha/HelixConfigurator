@@ -14,7 +14,8 @@ const errorLog = require('../errorLog');
 
 const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
 const { rewriteLocalViewerEndpoint } = require('../collectorFanout');
-const { preferredViewerEndpoint } = require('../viewerEndpoint');
+const { preferredViewerEndpoint, viewerCandidates } = require('../viewerEndpoint');
+const { selectViewerEndpoint } = require('../viewerLadder');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
 const ENV_PATH = path.join(__dirname, '..', '..', '.env');
@@ -30,10 +31,25 @@ function pullImage(docker, image) {
   });
 }
 
+// The helix-bridge gateway address, used as the IPv4 fallback for hosts where
+// host.docker.internal does not resolve. Returns null when it cannot be read;
+// callers treat that as "no fallback candidate".
+const resolveBridgeGatewayIp = async (docker) => {
+  try {
+    const net = await withDockerTimeout(
+      docker.getNetwork('helix-bridge').inspect(), 'network.inspect', 5_000,
+    );
+    const cfg = (net.IPAM?.Config || [])[0];
+    return cfg?.Gateway || null;
+  } catch {
+    return null;
+  }
+};
+
 // Create the gateway container from scratch — the job docker-compose does in
 // the container path. Used on the first Docker-target commit when no gateway
 // exists yet. After this, recreateGateway() handles subsequent env edits.
-async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
+async function createGatewayFromScratch(docker, { name, env, configHostPath, otelStore }) {
   // Pull only if absent (offline-friendly; image may already be local).
   try {
     await docker.getImage(GATEWAY_IMAGE).inspect();
@@ -64,6 +80,31 @@ async function createGatewayFromScratch(docker, { name, env, configHostPath }) {
   } catch (e) {
     try { await container.remove({ force: true }); } catch { /* best effort */ }
     throw e;
+  }
+
+  // Prove the fan-out endpoint end to end now that the gateway is running,
+  // and fall through the candidate list if the first one does not round-trip.
+  // Never throw: a gateway that is up but whose viewer sink is unproven is
+  // still a working gateway for Helix delivery.
+  if (!otelStore) return { viewer: null };
+  try {
+    const bridgeIp = await resolveBridgeGatewayIp(docker);
+    const result = await selectViewerEndpoint({
+      configHostPath,
+      candidates: viewerCandidates({ containerized: IS_CONTAINERIZED, bridgeIp }),
+      otelStore,
+      restartGateway: async () => {
+        await withDockerTimeout(container.restart({ t: 5 }), 'container.restart', 30_000);
+      },
+    });
+    if (result.verdict !== 'ok') {
+      errorLog.push('gateway.viewer.unproven',
+        `viewer fan-out unproven: ${result.verdict} after ${result.attempts.length} candidate(s)`);
+    }
+    return { viewer: result };
+  } catch (e) {
+    console.warn('createGatewayFromScratch: viewer endpoint selection skipped:', e.message);
+    return { viewer: null };
   }
 }
 
@@ -260,7 +301,7 @@ const recreateGateway = async (docker, name, { addNetwork, dropNetworks } = {}) 
   await withDockerTimeout(fresh.start(), 'container.start', 15_000);
 };
 
-function register(app, { docker, configPath }) {
+function register(app, { docker, configPath, otelStore }) {
   // POST restart the configured target container. Recreates rather than
   // plain-restarts so updated .env values load (see recreateGateway above
   // for the env_file-at-create-time rationale).
@@ -329,7 +370,7 @@ function register(app, { docker, configPath }) {
         await recreateGateway(docker, sidecarName);
       } else {
         const env = (await readEnvAsArray()) || [];
-        await createGatewayFromScratch(docker, { name: sidecarName, env, configHostPath: configPath });
+        await createGatewayFromScratch(docker, { name: sidecarName, env, configHostPath: configPath, otelStore });
       }
     } catch (e) {
       return res.status(500).json({

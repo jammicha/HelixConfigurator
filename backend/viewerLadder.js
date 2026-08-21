@@ -1,0 +1,55 @@
+// backend/viewerLadder.js
+// Write a fan-out endpoint, restart the gateway, and prove the endpoint with
+// the round-trip canary. On failure, try the next candidate.
+//
+// Scope limit, deliberately: every native candidate resolves to an IPv4 host
+// address, so when another process owns the IPv4 side of the configurator's
+// port no candidate can succeed. The ladder fixes the cases that ARE
+// resolvable (a non-default PORT, and Linux Docker Engine where
+// host.docker.internal may not resolve). The IPv4/IPv6 split-brain is named by
+// the startup preflight and by /api/diagnostics/verify-fanout instead.
+const fspDefault = require('fs').promises;
+const { rewriteLocalViewerEndpoint } = require('./collectorFanout');
+const { runViewerCanary } = require('./viewerCanary');
+
+const writeEndpoint = async (fsp, configHostPath, rewrite, endpoint) => {
+  const current = await fsp.readFile(configHostPath, 'utf8');
+  const tmp = `${configHostPath}.tmp`;
+  await fsp.writeFile(tmp, rewrite(current, endpoint));
+  await fsp.rename(tmp, configHostPath);
+};
+
+const selectViewerEndpoint = async ({
+  configHostPath,
+  candidates,
+  otelStore,
+  restartGateway,
+  fsp = fspDefault,
+  canary = runViewerCanary,
+  rewrite = rewriteLocalViewerEndpoint,
+}) => {
+  const attempts = [];
+  let lastVerdict = 'fanout-failed';
+
+  for (const endpoint of candidates) {
+    await writeEndpoint(fsp, configHostPath, rewrite, endpoint);
+    await restartGateway();
+    const result = await canary({ otelStore });
+    attempts.push({ endpoint, verdict: result.verdict });
+    lastVerdict = result.verdict;
+
+    if (result.verdict === 'ok') return { endpoint, verdict: 'ok', attempts };
+    // A gateway we cannot reach at all is not an endpoint problem. Trying the
+    // remaining candidates would restart the gateway again for nothing.
+    if (result.verdict === 'gateway-unreachable') break;
+  }
+
+  // Nothing worked. The first candidate is the best guess for the deployment
+  // mode, so leave that one on disk rather than the last one tried.
+  if (candidates.length > 1 && attempts.length > 1) {
+    await writeEndpoint(fsp, configHostPath, rewrite, candidates[0]);
+  }
+  return { endpoint: null, verdict: lastVerdict, attempts };
+};
+
+module.exports = { selectViewerEndpoint };
