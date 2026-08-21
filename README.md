@@ -364,11 +364,14 @@ moves the fan-out target with it. Host-facing URLs (the gateway container's
 fan-out target, and the local-target Helm chart) always carry the **published**
 port rather than the port the process listens on — in the Docker image those
 differ, since `PORT` is the container-internal 3001 and compose publishes 8765.
-Set `VIEWER_PUBLISHED_PORT` if you remap that publish. It is also verified: after the configurator
-creates the gateway it injects a canary span and waits for it to come back, and
-falls through to the bridge gateway IP if `host.docker.internal` does not
-resolve. You can re-run that check any time from the Diagnostics panel's
-**Local Viewer Fan-out** cell.
+Set `VIEWER_PUBLISHED_PORT` if you remap that publish.
+
+The endpoint is also *verified*, not assumed: after the configurator creates the
+gateway it injects a canary span and waits for it to come back, falling through
+to the bridge gateway IP if `host.docker.internal` does not resolve. The result
+comes back with the gateway-create request, and the Diagnostics panel's
+**Local Viewer Fan-out** cell shows it — the panel re-runs the probe each time
+you open it.
 
 **If View OTel Data is empty while Helix delivery works**, the usual cause is
 another process owning the IPv4 side of the configurator's port, most often a
@@ -377,9 +380,20 @@ configurator stack. The browser still works, because `localhost` resolves to
 `::1` first, but the gateway reaches the configurator over IPv4 via
 `host.docker.internal` and gets a connection that is accepted and then closed,
 which the collector logs as a bare `EOF`. The configurator prints a warning at
-startup when it detects this. Confirm with `lsof -nP -iTCP:8765 -sTCP:LISTEN`:
+startup when it detects this. Confirm with
+`lsof -nP -iTCP:$PORT -sTCP:LISTEN` (substitute your `PORT`, 8765 by default):
 two listeners on the same port, one IPv4 and one IPv6, is the fingerprint. Clear
-it with `docker compose down --remove-orphans` or by restarting Docker Desktop.
+it with `docker compose down --remove-orphans` or by restarting Docker Desktop —
+**then restart the configurator**. That last step is load-bearing: clearing the
+squatter does not retroactively hand the already-running process the IPv4
+wildcard, so until you restart it the configurator keeps holding an IPv6-only
+listener and the viewer stays empty.
+
+The mirror of this can also happen: the configurator gets IPv4 and something
+else owns the IPv6 wildcard, so the gateway's fan-out works but your browser,
+resolving `localhost` to `::1` first, lands on the other process. Startup names
+that case too, and `http://127.0.0.1:$PORT` reaches the configurator
+unambiguously in the meantime.
 
 Application containers can be attached to the same `helix-bridge` network at runtime via the *Discovered Services* panel — once attached, point your app's OTel exporter at `helix-gateway:4317` or `:4318`.
 
@@ -388,6 +402,15 @@ The gateway fan-outs traces, logs, and metrics to the configurator backend
 the local **View OTel Data** page can render them. The trace store is SQLite at `./data/otel-store.db` (time-based retention, 24h default, with a 25,000-trace safety cap — tune via `TRACE_RETENTION_HOURS` / `TRACE_CAP`) and persists across restarts.
 
 The configurator exposes a public `GET /api/health` endpoint (returns `{ ok: true, version }`) for liveness probes and an `GET /api/version` endpoint that compares the embedded version to the latest GitHub release — the UI shows an "update available" banner when they differ.
+
+`POST /api/diagnostics/verify-fanout` (authenticated) runs the fan-out check on
+demand: it injects a uniquely-tagged canary span into the gateway's OTLP
+receiver and waits up to 15s for that exact trace id to come back through
+`otlphttp/helix_local_viewer` into the local store. It always answers `200` — a
+failing verdict (`ok`, `fanout-failed`, `gateway-unreachable`, `error`) is a
+diagnostic result, not a request error — with `detail`, `remediation`, and
+viewer-exporter-scoped `{ sent, failed }` counters. This is what the
+**Local Viewer Fan-out** cell renders.
 
 ## Demo — `helix-aiops-mock`
 
