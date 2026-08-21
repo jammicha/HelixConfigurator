@@ -22,13 +22,19 @@ function resolvePort(env) {
 
 // `containerized` is a fact about where THIS process runs, not a style
 // choice: pass the real value (util.js's IS_CONTAINERIZED) even when the URL
-// being built is host-facing. VIEWER_PUBLISHED_PORT overrides both branches,
-// for a user who remapped the compose publish away from 8765.
+// being built is host-facing.
 function resolvePublishedPort(env, { containerized = false } = {}) {
+  // Natively the published port IS the listen port, by definition — there is
+  // no port mapping to disagree with. So VIEWER_PUBLISHED_PORT has no
+  // legitimate native meaning and is deliberately ignored here: honouring it
+  // would let one .env shared between the compose and native deployments
+  // point the fan-out at a port nothing is listening on.
+  if (!containerized) return resolvePort(env);
+  // Containerized: PORT is internal and must not appear in a host-facing URL.
+  // VIEWER_PUBLISHED_PORT is for a user who remapped the compose publish.
   const override = Number.parseInt(env.VIEWER_PUBLISHED_PORT, 10);
   if (Number.isFinite(override) && override > 0) return override;
-  // Containerized: PORT is internal and must not appear in a host-facing URL.
-  return containerized ? DEFAULT_PORT : resolvePort(env);
+  return DEFAULT_PORT;
 }
 
 module.exports = { resolvePort, resolvePublishedPort, DEFAULT_PORT };

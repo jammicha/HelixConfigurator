@@ -31,7 +31,10 @@ service:
 
 describe('transformCollectorConfig', () => {
   it('target=local: rewrites viewer endpoints to host.docker.internal:8765', () => {
-    const out = yaml.load(transformCollectorConfig(BASE, { target: 'local' }));
+    // containerized is passed explicitly: left to its IS_CONTAINERIZED
+    // default this assertion reads the ambient filesystem (/app), so the
+    // suite would expect 8765 and get it only when run outside the image.
+    const out = yaml.load(transformCollectorConfig(BASE, { target: 'local', containerized: false }));
     const v = out.exporters[VIEWER_EXPORTER_KEY];
     expect(v.traces_endpoint).toBe('http://host.docker.internal:8765/api/otlp/traces');
     expect(v.logs_endpoint).toBe('http://host.docker.internal:8765/api/otlp/logs');
@@ -45,7 +48,7 @@ describe('transformCollectorConfig', () => {
     const prevPort = process.env.PORT;
     process.env.PORT = '9100';
     try {
-      const out = yaml.load(transformCollectorConfig(BASE, { target: 'local' }));
+      const out = yaml.load(transformCollectorConfig(BASE, { target: 'local', containerized: false }));
       const v = out.exporters[VIEWER_EXPORTER_KEY];
       expect(v.traces_endpoint).toBe('http://host.docker.internal:9100/api/otlp/traces');
       expect(v.logs_endpoint).toBe('http://host.docker.internal:9100/api/otlp/logs');

@@ -165,7 +165,7 @@ describe('POST /api/lifecycle/bridge — on-disk fan-out endpoint', () => {
     return cfg;
   };
 
-  const runBridge = async (cfg, { gatewayExists }) => {
+  const runBridge = async (cfg, { gatewayExists, bridgeIp = null }) => {
     const docker = {
       getContainer: () => ({
         inspect: vi.fn(async () => {
@@ -177,7 +177,10 @@ describe('POST /api/lifecycle/bridge — on-disk fan-out endpoint', () => {
       createContainer: vi.fn(async () => ({ start: vi.fn(async () => {}) })),
       createNetwork: vi.fn(async () => {}),
       getImage: () => ({ inspect: vi.fn(async () => ({})) }),
-      getNetwork: () => ({ connect: vi.fn(async () => {}) }),
+      getNetwork: () => ({
+        connect: vi.fn(async () => {}),
+        inspect: vi.fn(async () => ({ IPAM: { Config: bridgeIp ? [{ Gateway: bridgeIp }] : [] } })),
+      }),
     };
     const app = express();
     app.use(express.json());
@@ -209,6 +212,56 @@ describe('POST /api/lifecycle/bridge — on-disk fan-out endpoint', () => {
   it('still rewrites on the CREATE path', async () => {
     const cfg = writeTempCollectorYaml('http://helix-configurator:3001');
     const res = await runBridge(cfg, { gatewayExists: false });
+    expect(res.status).toBe(200);
+    expect(fs.readFileSync(cfg, 'utf8')).toContain('http://host.docker.internal:8765/api/otlp/traces');
+  });
+
+  it('does NOT clobber a ladder-proven bridge-IP endpoint on the recreate path', async () => {
+    // The create-time ladder falls through to the bridge gateway IP on hosts
+    // where host.docker.internal does not resolve (Linux Docker Engine,
+    // despite the injected ExtraHosts), and leaves that PROVEN endpoint on
+    // disk. The ladder is create-only, so nothing re-derives it. A recreate
+    // that unconditionally wrote candidate 0 would overwrite a working
+    // endpoint with one the ladder had already disproved on this host — and
+    // `viewer` is null on the recreate response, so nothing would report it.
+    const cfg = writeTempCollectorYaml('http://172.30.0.1:8765');
+    const res = await runBridge(cfg, { gatewayExists: true, bridgeIp: '172.30.0.1' });
+    expect(res.status).toBe(200);
+    expect(fs.readFileSync(cfg, 'utf8')).toContain('http://172.30.0.1:8765/api/otlp/traces');
+  });
+
+  it('still rewrites a bridge-IP endpoint that is no longer a candidate (PORT moved)', async () => {
+    // Preserving is scoped to endpoints that are still legitimate. A stale
+    // port makes this one not a candidate any more, so item 3's rewrite must
+    // still fire.
+    const prevPort = process.env.PORT;
+    process.env.PORT = '9100';
+    try {
+      const cfg = writeTempCollectorYaml('http://172.30.0.1:8765');
+      const res = await runBridge(cfg, { gatewayExists: true, bridgeIp: '172.30.0.1' });
+      expect(res.status).toBe(200);
+      expect(fs.readFileSync(cfg, 'utf8')).toContain('http://host.docker.internal:9100/api/otlp/traces');
+    } finally {
+      if (prevPort === undefined) delete process.env.PORT;
+      else process.env.PORT = prevPort;
+    }
+  });
+
+  it('rewrites a bridge IP that is not THIS host\'s bridge gateway', async () => {
+    // A yaml carried over from another machine. 10.0.0.1 is not a candidate
+    // here, so preserving it would strand the fan-out.
+    const cfg = writeTempCollectorYaml('http://10.0.0.1:8765');
+    const res = await runBridge(cfg, { gatewayExists: true, bridgeIp: '172.30.0.1' });
+    expect(res.status).toBe(200);
+    expect(fs.readFileSync(cfg, 'utf8')).toContain('http://host.docker.internal:8765/api/otlp/traces');
+  });
+
+  it('the CREATE path still writes candidate 0 over a bridge-IP endpoint', async () => {
+    // createGatewayFromScratch passes skipFirstApply, which asserts that
+    // candidate 0 is what is on disk and what the container loaded. Preserving
+    // on create would break that invariant.
+    const cfg = writeTempCollectorYaml('http://172.30.0.1:8765');
+    const res = await runBridge(cfg, { gatewayExists: false, bridgeIp: '172.30.0.1' });
     expect(res.status).toBe(200);
     expect(fs.readFileSync(cfg, 'utf8')).toContain('http://host.docker.internal:8765/api/otlp/traces');
   });

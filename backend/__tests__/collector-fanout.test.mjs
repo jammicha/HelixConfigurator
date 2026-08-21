@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rewriteLocalViewerEndpoint } from '../collectorFanout.js';
+import { rewriteLocalViewerEndpoint, readLocalViewerEndpoint } from '../collectorFanout.js';
 
 const CONTAINER_YAML = `exporters:
   otlphttp/bmchelix:
@@ -51,5 +51,35 @@ describe('rewriteLocalViewerEndpoint', () => {
 
   it('throws when the target is missing or empty', () => {
     expect(() => rewriteLocalViewerEndpoint(CONTAINER_YAML, '')).toThrow(TypeError);
+  });
+});
+
+describe('readLocalViewerEndpoint', () => {
+  it('reads the viewer block\'s endpoint host, not a user-added exporter\'s', () => {
+    expect(readLocalViewerEndpoint(CONTAINER_YAML)).toBe('http://helix-configurator:3001');
+  });
+
+  it('is the exact inverse of the rewrite, for every target the ladder can write', () => {
+    for (const target of [
+      'http://host.docker.internal:8765',
+      'http://host.docker.internal:9100',
+      'http://172.30.0.1:8765',
+      'http://helix-configurator:3001',
+    ]) {
+      expect(readLocalViewerEndpoint(rewriteLocalViewerEndpoint(CONTAINER_YAML, target))).toBe(target);
+    }
+  });
+
+  it('returns null when there is no viewer block at all', () => {
+    expect(readLocalViewerEndpoint('exporters:\n  otlphttp/bmchelix:\n    endpoint: x\n')).toBe(null);
+  });
+
+  it('returns null for a viewer block with no endpoint keys', () => {
+    expect(readLocalViewerEndpoint('exporters:\n  otlphttp/helix_local_viewer:\n    encoding: json\n'))
+      .toBe(null);
+  });
+
+  it('returns null for non-string input', () => {
+    expect(readLocalViewerEndpoint(null)).toBe(null);
   });
 });

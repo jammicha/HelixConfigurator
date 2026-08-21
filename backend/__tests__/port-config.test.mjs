@@ -24,10 +24,16 @@ describe('resolvePublishedPort', () => {
     expect(resolvePublishedPort({ PORT: '3001' }, { containerized: true })).toBe(8765);
   });
 
-  it('VIEWER_PUBLISHED_PORT overrides both, for a remapped compose publish', () => {
+  it('VIEWER_PUBLISHED_PORT overrides the containerized default, for a remapped compose publish', () => {
     expect(resolvePublishedPort({ PORT: '3001', VIEWER_PUBLISHED_PORT: '9999' }, { containerized: true }))
       .toBe(9999);
-    expect(resolvePublishedPort({ PORT: '9100', VIEWER_PUBLISHED_PORT: '9999' })).toBe(9999);
+  });
+
+  it('IGNORES VIEWER_PUBLISHED_PORT natively, where the published port is the listen port', () => {
+    // One .env shared between the compose and native deployments would
+    // otherwise aim the native fan-out at a port nothing listens on.
+    expect(resolvePublishedPort({ PORT: '9100', VIEWER_PUBLISHED_PORT: '9999' })).toBe(9100);
+    expect(resolvePublishedPort({ VIEWER_PUBLISHED_PORT: '9999' })).toBe(8765);
   });
 
   it('ignores a non-numeric VIEWER_PUBLISHED_PORT', () => {

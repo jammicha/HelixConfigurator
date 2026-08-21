@@ -19,6 +19,7 @@ const errorLog = require('../errorLog');
 const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
 const { preferredViewerEndpoint, viewerCandidates } = require('../viewerEndpoint');
 const { selectViewerEndpoint, writeEndpoint } = require('../viewerLadder');
+const { readLocalViewerEndpoint } = require('../collectorFanout');
 const { runViewerCanary } = require('../viewerCanary');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
@@ -97,8 +98,29 @@ const waitForGatewayReady = async ({
 // this is a read, a string replace and a rename. Never throws: a gateway
 // that comes up with a stale fan-out target is still a working gateway for
 // Helix delivery, and the canary/preflight name the fan-out problem.
-const applyViewerEndpointToDisk = async (configHostPath) => {
+//
+// `preserveIfAmong` is for the RECREATE branch, and only that branch.
+// When the create-time ladder fell through and succeeded on candidate 1 (the
+// bridge gateway IP — the case that exists for Linux Docker Engine, where
+// host.docker.internal can fail to resolve despite the injected ExtraHosts),
+// it left that PROVEN endpoint on disk. The ladder is create-only, so nothing
+// re-derives it. Writing candidate 0 unconditionally here would overwrite a
+// working endpoint with one the ladder had ALREADY DISPROVED on this host,
+// and `viewer` is null on the recreate response, so nothing would report it:
+// first Save works, second Save silently kills the fan-out.
+//
+// So on recreate we only decline to write when what is already there is
+// STILL a legitimate candidate. A stale PORT, a container-direction endpoint,
+// or a bridge IP carried over from another machine all fail that test and are
+// rewritten — which is the whole point of running this on recreate at all.
+// The create path always writes candidate 0, because createGatewayFromScratch
+// passes skipFirstApply, which asserts exactly that.
+const applyViewerEndpointToDisk = async (configHostPath, { preserveIfAmong = null } = {}) => {
   try {
+    if (preserveIfAmong) {
+      const current = readLocalViewerEndpoint(await fsp.readFile(configHostPath, 'utf8'));
+      if (current && preserveIfAmong.includes(current)) return;
+    }
     await writeEndpoint(configHostPath, preferredViewerEndpoint({ containerized: IS_CONTAINERIZED }));
   } catch (e) {
     console.warn('applyViewerEndpointToDisk: yaml fan-out rewrite skipped:', e.message);
@@ -450,7 +472,16 @@ function register(app, { docker, configPath, otelStore }) {
       else return res.status(500).json({ error: 'Failed to inspect gateway', details: e.message });
     }
     // Before BOTH branches, deliberately — see applyViewerEndpointToDisk.
-    await applyViewerEndpointToDisk(configPath);
+    // On recreate, pass the legitimate candidate set so a fallback endpoint
+    // the create-time ladder proved is not clobbered by candidate 0.
+    await applyViewerEndpointToDisk(configPath, {
+      preserveIfAmong: gatewayExists
+        ? viewerCandidates({
+          containerized: IS_CONTAINERIZED,
+          bridgeIp: IS_CONTAINERIZED ? null : await resolveBridgeGatewayIp(docker),
+        })
+        : null,
+    });
 
     // The create path blocks for tens of seconds proving the viewer fan-out
     // end to end. Discarding that verdict and answering a bare "Gateway

@@ -364,7 +364,9 @@ moves the fan-out target with it. Host-facing URLs (the gateway container's
 fan-out target, and the local-target Helm chart) always carry the **published**
 port rather than the port the process listens on — in the Docker image those
 differ, since `PORT` is the container-internal 3001 and compose publishes 8765.
-Set `VIEWER_PUBLISHED_PORT` if you remap that publish.
+Set `VIEWER_PUBLISHED_PORT` if you remap that publish. It applies to the Docker
+image only — natively the published port *is* the listen port, so there is
+nothing for it to override and it is ignored.
 
 The endpoint is also *verified*, not assumed: after the configurator creates the
 gateway it injects a canary span and waits for it to come back, falling through
@@ -406,11 +408,12 @@ The configurator exposes a public `GET /api/health` endpoint (returns `{ ok: tru
 `POST /api/diagnostics/verify-fanout` (authenticated) runs the fan-out check on
 demand: it injects a uniquely-tagged canary span into the gateway's OTLP
 receiver and waits up to 15s for that exact trace id to come back through
-`otlphttp/helix_local_viewer` into the local store. It always answers `200` — a
-failing verdict (`ok`, `fanout-failed`, `gateway-unreachable`, `error`) is a
-diagnostic result, not a request error — with `detail`, `remediation`, and
-viewer-exporter-scoped `{ sent, failed }` counters. This is what the
-**Local Viewer Fan-out** cell renders.
+`otlphttp/helix_local_viewer` into the local store. It always answers `200`: the
+verdict (`ok`, `fanout-failed`, `gateway-unreachable`, or `error`) rides in the
+body, because a failing check is a diagnostic result, not a request error.
+Alongside it come `detail`, `remediation`, and viewer-exporter-scoped
+`{ sent, failed }` counters. This is what the **Local Viewer Fan-out** cell
+renders.
 
 ## Demo — `helix-aiops-mock`
 
