@@ -16,6 +16,7 @@ const { PassThrough } = require('stream');
 const { demuxLogBuffer, isValidContainerName, withDockerTimeout, sendDockerTimeoutResponse, resolveGatewayOtlpBase, resolveGatewayMetricsBase } = require('../util');
 const errorLog = require('../errorLog');
 const { analyzeCollectorErrorLog } = require('../exportErrorScan');
+const { runViewerCanary } = require('../viewerCanary');
 
 // Docker-API name (logs / inspect / restart) only. HTTP requests from this
 // process must go through resolveGateway*Base — container DNS doesn't exist
@@ -93,6 +94,25 @@ const fetchCounters = async () => {
       extractSum('otelcol_exporter_send_failed_spans') +
       extractSum('otelcol_exporter_send_failed_metric_points') +
       extractSum('otelcol_exporter_send_failed_log_records'),
+  };
+};
+
+// Counters scoped to the LOCAL VIEWER exporter. fetchCounters deliberately
+// filters to otlphttp/bmchelix, which is why a totally dead viewer sink could
+// never show up in the health banner. Both are reported now, so "Helix
+// delivery healthy, local viewer failing" is a state we can actually express.
+const fetchViewerCounters = (metricsText) => {
+  const sum = (baseName) =>
+    sumPromCounter(metricsText, baseName, { exporterFilter: 'otlphttp/helix_local_viewer' });
+  return {
+    sent:
+      sum('otelcol_exporter_sent_spans')
+      + sum('otelcol_exporter_sent_metric_points')
+      + sum('otelcol_exporter_sent_log_records'),
+    failed:
+      sum('otelcol_exporter_send_failed_spans')
+      + sum('otelcol_exporter_send_failed_metric_points')
+      + sum('otelcol_exporter_send_failed_log_records'),
   };
 };
 
@@ -645,6 +665,23 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
     }
   });
 
+  // POST run the end-to-end viewer fan-out canary. Unlike inject-trace, which
+  // reports success as soon as the GATEWAY accepts a span, this waits for the
+  // span to come back through otlphttp/helix_local_viewer into our own store.
+  // Always answers 200: a failing verdict is a diagnostic result, not a
+  // request error, and the UI renders it as a check cell either way.
+  app.post('/api/diagnostics/verify-fanout', async (req, res) => {
+    const result = await runViewerCanary({ otelStore });
+    let counters = null;
+    try {
+      const response = await axios.get(`${resolveGatewayMetricsBase()}/metrics`, { timeout: 2000 });
+      counters = fetchViewerCounters(response.data);
+    } catch {
+      counters = null; // metrics endpoint unavailable; the verdict still stands
+    }
+    res.json({ ...result, counters });
+  });
+
   // GET live metrics parsing.
   app.get('/api/diagnostics/metrics/live', async (req, res) => {
     try {
@@ -1043,4 +1080,4 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   });
 }
 
-module.exports = { register, closeActiveLogProcesses, runOtlpProbe };
+module.exports = { register, closeActiveLogProcesses, runOtlpProbe, fetchViewerCounters };
