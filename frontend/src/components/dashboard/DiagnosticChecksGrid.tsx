@@ -6,6 +6,7 @@ type Props = {
   collectorDiag: DiagState;
   apiKeyDiag: DiagState;
   networkDiag: DiagState;
+  viewerDiag: DiagState;
   xSource: string;
   envLoaded: boolean;
   expandedRemediations: Record<number, boolean>;
@@ -15,13 +16,14 @@ type Props = {
 
 type Check = { isPass: boolean; isChecking: boolean; subDetail: string; remediation: string };
 
-// The four-cell diagnostic summary (Collector Configuration, X-API Key Format,
-// X-Source Format, Tenant URL Endpoint) with per-cell pass/checking/fail state
-// and an expandable remediation step.
+// The five-cell diagnostic summary (Collector Configuration, X-API Key Format,
+// X-Source Format, Tenant URL Endpoint, Local Viewer Fan-out) with per-cell
+// pass/checking/fail state and an expandable remediation step.
 export const DiagnosticChecksGrid = ({
   collectorDiag,
   apiKeyDiag,
   networkDiag,
+  viewerDiag,
   xSource,
   envLoaded,
   expandedRemediations,
@@ -53,6 +55,13 @@ export const DiagnosticChecksGrid = ({
           remediation: isPass ? '' : 'X-Source is required to identify your telemetry data.',
         };
       }
+      case 'Local Viewer Fan-out':
+        return {
+          isPass: viewerDiag.status === 'ok',
+          isChecking: viewerDiag.status === 'unknown' || viewerDiag.status === 'CHECKING',
+          subDetail: viewerDiag.error || '',
+          remediation: viewerDiag.remediation || '',
+        };
       default: // 'Tenant URL Endpoint'
         return {
           isPass: networkDiag.status === 'Success',
@@ -66,8 +75,8 @@ export const DiagnosticChecksGrid = ({
   return (
     <div className="adapt-card">
       <h2 className="text-lg font-semibold mb-4 text-gray-200">Helix troubleshooting & diagnostics</h2>
-      <div className="grid grid-cols-4 gap-4">
-        {['Collector Configuration', 'X-API Key Format', 'X-Source Format', 'Tenant URL Endpoint'].map((title, i) => {
+      <div className="grid grid-cols-5 gap-4">
+        {['Collector Configuration', 'X-API Key Format', 'X-Source Format', 'Tenant URL Endpoint', 'Local Viewer Fan-out'].map((title, i) => {
           const { isPass, isChecking, subDetail, remediation } = evaluate(title);
           return (
             <div key={i} className="flex flex-col gap-2">

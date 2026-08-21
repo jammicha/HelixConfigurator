@@ -48,6 +48,7 @@ import { AppHeader } from './components/AppHeader';
 import { UpdateBanner } from './components/UpdateBanner';
 import { DiscoveredServicesDrawer } from './components/dashboard/DiscoveredServicesDrawer';
 import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGrid';
+import { computeViewerFanoutCellState, type VerifyFanoutResponse } from './components/dashboard/viewerFanoutVerdict';
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
 import { GatewayConfigEditor } from './components/dashboard/GatewayConfigEditor';
 
@@ -78,6 +79,7 @@ const App = () => {
   const [collectorDiag, setCollectorDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [apiKeyDiag, setApiKeyDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [networkDiag, setNetworkDiag] = useState({ status: 'unknown', error: '', remediation: '' });
+  const [viewerDiag, setViewerDiag] = useState({ status: 'unknown', error: '', remediation: '' });
   const [expandedRemediations, setExpandedRemediations] = useState<Record<number, boolean>>({});
   const [gatewayStatus, setGatewayStatus] = useState('unknown'); // running, exited, restarting, error
   const [isConfigSaving, setIsConfigSaving] = useState(false);
@@ -526,6 +528,28 @@ const App = () => {
     data => setNetworkDiag(data),
     () => setNetworkDiag({ status: 'Failed', error: 'API unreachable', remediation: '' }),
     { enabled: isSetupComplete });
+
+  // The viewer fan-out check is a real end-to-end probe (it injects a span and
+  // waits for it to come back), so it runs on demand when the drawer opens
+  // rather than on a poll. Verdict-to-cell-state mapping is delegated to
+  // computeViewerFanoutCellState — see viewerFanoutVerdict.ts for why that
+  // logic isn't inlined here.
+  useEffect(() => {
+    if (!showDiagnostics) return;
+    let cancelled = false;
+    setViewerDiag(computeViewerFanoutCellState(null));
+    fetch('/api/diagnostics/verify-fanout', { method: 'POST', credentials: 'include' })
+      .then(r => r.json())
+      .then((d: VerifyFanoutResponse) => {
+        if (cancelled) return;
+        setViewerDiag(computeViewerFanoutCellState(d));
+      })
+      .catch(e => {
+        if (cancelled) return;
+        setViewerDiag({ status: 'FAIL', error: e.message, remediation: '' });
+      });
+    return () => { cancelled = true; };
+  }, [showDiagnostics]);
 
   useEffect(() => {
     if (!isSetupComplete) return;
@@ -1552,6 +1576,7 @@ const App = () => {
                     collectorDiag={collectorDiag}
                     apiKeyDiag={apiKeyDiag}
                     networkDiag={networkDiag}
+                    viewerDiag={viewerDiag}
                     xSource={envVars.X_SOURCE}
                     envLoaded={envLoaded}
                     expandedRemediations={expandedRemediations}
