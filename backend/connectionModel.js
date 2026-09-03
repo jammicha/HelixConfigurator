@@ -23,6 +23,7 @@ const ensureUniqueId = (base, existingIds) => {
 const envSuffix = (id) => String(id).toUpperCase().replace(/[^A-Z0-9]/g, '_');
 const exporterName = (id) => `${MANAGED_PREFIX}${id}`;
 
+// eslint-disable-next-line no-control-regex -- intentional: rejects control characters in header values
 const CONTROL_CHARS = /[\x00-\x1F\x7F]/;
 
 const validateConnection = (input = {}) => {
