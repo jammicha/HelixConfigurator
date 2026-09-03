@@ -92,6 +92,21 @@ describe('remove', () => {
   });
 });
 
+describe('remove', () => {
+  it('leaves activeId null when removing the active connection and every survivor is disabled', async () => {
+    const store = createConnectionsStore({ connectionsPath, envPath });
+    await store.create(valid);
+    await store.create({ ...valid, name: 'Beta', apiKey: 'B::A::S' });
+    await store.update('beta', { name: 'Beta', endpoint: valid.endpoint, xSource: valid.xSource, enabled: false, signals: { traces: true, metrics: true, logs: true } });
+    await store.remove(['acme-prod']);
+    const state = await store.load();
+    expect(state.connections.map((c) => c.id)).toEqual(['beta']);
+    expect(state.activeId).toBe(null);
+    expect(envVal('HELIX_API_KEY')).toBe('');
+    expect(envVal('HELIX_ENDPOINT')).toBe('');
+  });
+});
+
 describe('setActive', () => {
   it('refuses a disabled connection', async () => {
     const store = createConnectionsStore({ connectionsPath, envPath });

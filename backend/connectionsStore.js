@@ -141,7 +141,12 @@ function createConnectionsStore({ connectionsPath, envPath }) {
       const drop = new Set(ids);
       state.connections = state.connections.filter((c) => !drop.has(c.id));
       if (drop.has(state.activeId)) {
-        const next = state.connections.find((c) => c.enabled) || state.connections[0] || null;
+        // Only promote an ENABLED survivor. Promoting a disabled one would
+        // violate the "active must be enabled" invariant that setActive and
+        // update enforce elsewhere: a disabled active mirrors its creds into
+        // the bare env keys but has no exporter in the YAML, so single-
+        // tenant features would point at a tenant nothing ships to.
+        const next = state.connections.find((c) => c.enabled) || null;
         state.activeId = next ? next.id : null;
       }
       await persist(state);

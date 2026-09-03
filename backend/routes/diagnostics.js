@@ -68,6 +68,19 @@ const sumPromCounter = (metricsText, baseName, { exporterFilter, exporterMatch }
 // needs to recognize "any managed exporter" rather than one exact name.
 const MANAGED_EXPORTER_PREFIX = 'otlphttp/bmchelix_';
 
+// Exact name of the pre-Task-3 exporter. An upgraded single-tenant install's
+// collector YAML is not rewritten by migration (readState only synthesizes a
+// `default` connection in connections.json/.env, and the /api/env save path
+// doesn't resync the YAML either), so that install keeps shipping telemetry
+// through this bare exporter indefinitely. Any code that recognizes "managed
+// exporter" by prefix alone misses it and reports sent = 0 for a healthy
+// install.
+const LEGACY_MANAGED_EXPORTER_NAME = 'otlphttp/bmchelix';
+
+// True for either shape of a managed exporter: the exact legacy name, or any
+// prefixed per-connection name.
+const isManagedExporterName = (n) => n === LEGACY_MANAGED_EXPORTER_NAME || n.startsWith(MANAGED_EXPORTER_PREFIX);
+
 // Per-managed-exporter sent/failed summed across all three signals. Lets a
 // dead tenant surface even when another tenant is healthy (a global sum hides
 // it because overall sent > 0).
@@ -77,7 +90,7 @@ const perExporterCounters = (metricsText) => {
     for (const line of metricsText.split('\n')) {
       if (!line.startsWith(base + '_total')) continue;
       const m = line.match(/exporter="([^"]+)"/);
-      if (!m || !m[1].startsWith(MANAGED_EXPORTER_PREFIX)) continue;
+      if (!m || !isManagedExporterName(m[1])) continue;
       const val = parseFloat(line.trim().split(/\s+/).pop());
       if (isNaN(val)) continue;
       out[m[1]] = out[m[1]] || { sent: 0, failed: 0 };
@@ -121,7 +134,7 @@ const fetchCounters = async () => {
   const extractSum = (baseName) =>
     sumPromCounter(metrics, baseName,
       baseName.includes('exporter')
-        ? { exporterMatch: (n) => n.startsWith(MANAGED_EXPORTER_PREFIX) }
+        ? { exporterMatch: isManagedExporterName }
         : {});
 
   return {
@@ -1148,4 +1161,4 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   });
 }
 
-module.exports = { register, closeActiveLogProcesses, runOtlpProbe, parseViewerCounters, sumPromCounter, perExporterCounters, exporterVerdict };
+module.exports = { register, closeActiveLogProcesses, runOtlpProbe, parseViewerCounters, sumPromCounter, perExporterCounters, exporterVerdict, isManagedExporterName, LEGACY_MANAGED_EXPORTER_NAME };

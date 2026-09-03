@@ -9,7 +9,7 @@ const { syncManagedExporters, verifyManagedYaml } = require('../collectorConnect
 const { ValidationError } = require('../connectionsStore');
 const { waitForGatewaySettle, extractCollectorError } = require('./config');
 const lifecycle = require('./lifecycle');
-const { perExporterCounters, exporterVerdict } = require('./diagnostics');
+const { perExporterCounters, exporterVerdict, LEGACY_MANAGED_EXPORTER_NAME } = require('./diagnostics');
 const { exporterName } = require('../connectionModel');
 const { resolveGatewayMetricsBase } = require('../util');
 
@@ -115,7 +115,19 @@ function register(app, { docker, containerLogs, configPath, connectionsPath, env
       const state = await store.getState();
       const out = {};
       for (const c of state.connections) {
-        const counters = byExp[exporterName(c.id)] || { sent: 0, failed: 0 };
+        // An upgraded single-tenant install still runs the bare legacy
+        // exporter (no per-connection suffix) because migration never
+        // rewrites the collector YAML. When this connection's own namespaced
+        // exporter has no counters, it is the active connection, and the
+        // legacy exporter is present, attribute the legacy traffic to it.
+        // A legacy install has exactly one connection (`default`), which is
+        // active, so this can't double-count: only one connection per state
+        // can match "active" at a time.
+        let counters = byExp[exporterName(c.id)];
+        if (!counters && c.id === state.activeId && byExp[LEGACY_MANAGED_EXPORTER_NAME]) {
+          counters = byExp[LEGACY_MANAGED_EXPORTER_NAME];
+        }
+        counters = counters || { sent: 0, failed: 0 };
         out[c.id] = { ...counters, verdict: c.enabled ? exporterVerdict(counters) : 'disabled' };
       }
       res.json(out);
