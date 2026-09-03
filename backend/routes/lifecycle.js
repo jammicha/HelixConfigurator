@@ -819,4 +819,4 @@ function register(app, { docker, configPath, otelStore }) {
   }
 }
 
-module.exports = { register, createGatewayFromScratch };
+module.exports = { register, createGatewayFromScratch, recreateGateway, readEnvAsArray };
