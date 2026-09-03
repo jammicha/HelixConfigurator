@@ -102,7 +102,10 @@ export const Step1: React.FC<Props> = ({
       >
         New to OpenTelemetry? <span className="font-semibold underline">Start here</span>
       </a>
-      <h2 className="text-lg font-semibold mb-4 text-gray-200">{heading}</h2>
+      <h2 className="text-lg font-semibold mb-1 text-gray-200">{heading}</h2>
+      <a href="/connections" className="block mb-4 text-tiny text-blue-400 hover:underline">
+        Manage connections →
+      </a>
       <div className="mb-4">
         <ConnectionForm
           value={formValue}
