@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { Loader2 } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
@@ -51,6 +51,7 @@ import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGri
 import { computeViewerFanoutCellState, type VerifyFanoutResponse } from './components/dashboard/viewerFanoutVerdict';
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
 import { GatewayConfigEditor } from './components/dashboard/GatewayConfigEditor';
+import { ActiveConnectionSwitcher } from './components/dashboard/ActiveConnectionSwitcher';
 
 const App = () => {
   const monaco = useMonaco();
@@ -215,6 +216,20 @@ const App = () => {
 
   const { testConnectionResult, testingConnection, handleTestConnection } =
     useTestConnection(envVars.HELIX_ENDPOINT, envVars.HELIX_API_KEY);
+
+  // Re-fetch /api/env only (no wizard/onboarding side effects) so the
+  // dashboard's env-derived values (external deep links, settings drawer)
+  // pick up the newly-active connection right after a switch, without
+  // reworking the larger auth-gated fetch effect below.
+  const refreshEnvVars = useCallback(() => {
+    fetch('/api/env')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data || typeof data !== 'object' || 'error' in data) return;
+        setEnvVars(data);
+      })
+      .catch((err) => console.error('Failed to refresh env vars', err));
+  }, []);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const metricsIntervalRef = useRef<any>(null);
@@ -1542,6 +1557,15 @@ const App = () => {
             )
           ) : (
             <>
+              {/* Active-connection switcher: invisible for single-tenant
+                  setups (0-1 connections), a header-style control once a
+                  second connection exists. Reads as a header control for
+                  the dashboard even though it sits above the status
+                  banner, since it's the thing everything below applies to. */}
+              <div className="flex justify-end">
+                <ActiveConnectionSwitcher onActivated={refreshEnvVars} />
+              </div>
+
               {/* Pipeline status banner — "is this thing working?" at the top.
                   K8s/operator targets judge by received telemetry, not by the
                   (intentionally unused) local Docker gateway. */}
