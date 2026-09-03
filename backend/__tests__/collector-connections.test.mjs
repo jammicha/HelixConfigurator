@@ -102,6 +102,18 @@ describe('syncManagedExporters', () => {
       expect(doc.service.pipelines[sig].exporters.some((e) => e.startsWith('otlphttp/bmchelix'))).toBe(false);
     }
   });
+
+  it('preserves a comment sitting between one pipeline exporters list and the next pipeline key', () => {
+    const withPipelineComment = SHIPPED.replace(
+      '    metrics:',
+      '      # next pipeline configures metrics\n    metrics:'
+    );
+    const out = syncManagedExporters(withPipelineComment, [{ id: 'default', signals: allSignals }]);
+    expect(out).toContain('# next pipeline configures metrics');
+    const doc = yaml.load(out);
+    expect(doc.service.pipelines.traces.exporters).toContain('otlphttp/bmchelix_default');
+    expect(doc.service.pipelines.metrics.exporters).toContain('otlphttp/bmchelix_default');
+  });
 });
 
 describe('verifyManagedYaml', () => {

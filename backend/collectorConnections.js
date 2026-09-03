@@ -104,6 +104,10 @@ const replacePipelineExporters = (lines, signal, ids) => {
     if (indentWidth(lines[i]) > 6 && lines[i].trim().startsWith('- ')) { to = i + 1; continue; }
     break;
   }
+  // Trailing blank/comment lines right before the boundary describe whatever
+  // follows (the next pipeline/signal, or trail the block), not this list;
+  // do not swallow them into the spliced range or they get deleted.
+  while (to > from && isBlankOrComment(lines[to - 1])) to--;
   const items = [];
   for (let i = from; i < to; i++) {
     const m = lines[i].match(/^\s*-\s*([\w./-]+)\s*(#.*)?$/);
