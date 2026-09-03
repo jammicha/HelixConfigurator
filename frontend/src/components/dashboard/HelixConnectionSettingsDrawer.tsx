@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { fetchCapabilityWithRetry } from '../updateCapability';
 import { formatInstallLabel } from './installLabel';
+import { ConnectionForm } from '../connections/ConnectionForm';
+import type { ConnectionFormValue } from '../connections/ConnectionForm';
+import { validateConnectionFields } from '../../utils/connectionValidators';
 
 type EnvVars = {
   HELIX_ENDPOINT: string;
@@ -24,9 +27,55 @@ type Props = {
   extractServiceKey: (raw: string) => string;
 };
 
+// The drawer saves through the same single-connection /api/env facade Step 1
+// uses (see handleUpdateEnvSettings in App.tsx), which has no notion of a
+// connection name or per-signal toggles. ConnectionFormValue still requires
+// both, so the adapter fills them with a fixed, always-valid placeholder;
+// hideName/hideSignals keep them off screen and the placeholders keep the
+// shared validator from ever reporting an error for a field this form does
+// not render. Name and signals for a saved connection are set on the Manage
+// Connections page instead.
+const PLACEHOLDER_SIGNALS = { traces: true, metrics: true, logs: true };
+
+const toFormValue = (envVars: EnvVars): ConnectionFormValue => ({
+  name: 'drawer-connection',
+  endpoint: envVars.HELIX_ENDPOINT,
+  apiKey: envVars.HELIX_API_KEY,
+  xSource: envVars.X_SOURCE,
+  businessServiceKey: envVars.BUSINESS_SERVICE_KEY,
+  eventsEndpoint: envVars.HELIX_EVENTS_ENDPOINT || '',
+  signals: PLACEHOLDER_SIGNALS,
+});
+
+const fromFormValue = (envVars: EnvVars, next: ConnectionFormValue): EnvVars => ({
+  ...envVars,
+  HELIX_ENDPOINT: next.endpoint,
+  HELIX_API_KEY: next.apiKey,
+  X_SOURCE: next.xSource,
+  BUSINESS_SERVICE_KEY: next.businessServiceKey,
+  HELIX_EVENTS_ENDPOINT: next.eventsEndpoint,
+});
+
+// Mirrors the field set the drawer actually renders (endpoint, apiKey,
+// xSource). name/signals errors can never fire given the always-valid
+// placeholders above, but are stripped defensively so a future validator
+// change can't surface an error for a field this form hides.
+const computeErrors = (envVars: EnvVars): Record<string, string> => {
+  const { errors } = validateConnectionFields({
+    name: 'drawer-connection',
+    endpoint: envVars.HELIX_ENDPOINT,
+    apiKey: envVars.HELIX_API_KEY,
+    xSource: envVars.X_SOURCE,
+    signals: PLACEHOLDER_SIGNALS,
+  });
+  delete errors.name;
+  delete errors.signals;
+  return errors;
+};
+
 export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
   open, onClose, envVars, setEnvVars, showApiKey, setShowApiKey,
-  isUpdatingSettings, onUpdate, parseHelixKeyBundle, extractServiceKey,
+  isUpdatingSettings, onUpdate, parseHelixKeyBundle: _parseHelixKeyBundle, extractServiceKey: _extractServiceKey,
 }) => {
   // ESC to close. Mount listener only while the drawer is open so other
   // ESC-sensitive UI (modals, services panel) isn't disturbed when this is
@@ -150,71 +199,19 @@ export const HelixConnectionSettingsDrawer: React.FC<Props> = ({
         </header>
 
         <div className="flex-1 p-6 space-y-5">
-          <div className="space-y-1">
-            <label htmlFor="conn-endpoint" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Ingest Endpoint</label>
-            <input
-              id="conn-endpoint"
-              type="text"
-              value={envVars.HELIX_ENDPOINT}
-              onChange={(e) => setEnvVars({ ...envVars, HELIX_ENDPOINT: e.target.value })}
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
-              placeholder="https://otel-itom.onbmc.com"
-            />
-          </div>
+          <a href="/connections" className="block text-tiny text-blue-400 hover:underline">
+            Manage connections →
+          </a>
 
-          <div className="space-y-1">
-            <label htmlFor="conn-api-key" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">X-Api-Key (TenantID::AccessKey::SecretKey)</label>
-            <div className="relative">
-              <input
-                type="text"
-                id="conn-api-key"
-                name="helix-x-api-key"
-                autoComplete="off"
-                spellCheck={false}
-                data-1p-ignore
-                data-lpignore="true"
-                style={!showApiKey ? ({ WebkitTextSecurity: 'disc', textSecurity: 'disc' } as React.CSSProperties) : undefined}
-                value={envVars.HELIX_API_KEY}
-                onChange={(e) => {
-                  const parsed = parseHelixKeyBundle(e.target.value);
-                  setEnvVars({ ...envVars, HELIX_API_KEY: parsed ?? e.target.value });
-                }}
-                className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
-                placeholder="123456789::ABCDE12345::FGHIJ67890..."
-              />
-              <button
-                type="button"
-                onClick={() => setShowApiKey((s) => !s)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-tiny text-gray-400 hover:text-gray-200 uppercase tracking-wider font-semibold px-1"
-              >
-                {showApiKey ? 'Hide' : 'Show'}
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label htmlFor="conn-x-source" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">X-Source (Business Service)</label>
-            <input
-              id="conn-x-source"
-              type="text"
-              value={envVars.X_SOURCE}
-              onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
-              placeholder="Source Name"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label htmlFor="conn-bskey" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AIOps Business Service Key (optional)</label>
-            <input
-              id="conn-bskey"
-              type="text"
-              value={envVars.BUSINESS_SERVICE_KEY}
-              onChange={(e) => setEnvVars({ ...envVars, BUSINESS_SERVICE_KEY: extractServiceKey(e.target.value) })}
-              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
-              placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
-            />
-          </div>
+          <ConnectionForm
+            value={toFormValue(envVars)}
+            onChange={(next) => setEnvVars(fromFormValue(envVars, next))}
+            errors={computeErrors(envVars)}
+            showApiKey={showApiKey}
+            onToggleApiKey={() => setShowApiKey((s) => !s)}
+            hideName
+            hideSignals
+          />
 
           <div className="space-y-2 pt-2 border-t border-gray-800">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AIOps Provisioning</div>

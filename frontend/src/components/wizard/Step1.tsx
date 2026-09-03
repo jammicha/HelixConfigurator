@@ -1,12 +1,18 @@
 import React from 'react';
-import { Check, X, Loader2, AlertTriangle } from 'lucide-react';
-import { parseHelixKeyBundle } from '../../utils/helixKey';
+import { X, Loader2, AlertTriangle, Check } from 'lucide-react';
+import { ConnectionForm } from '../connections/ConnectionForm';
+import type { ConnectionFormValue } from '../connections/ConnectionForm';
+import { validateConnectionFields } from '../../utils/connectionValidators';
 
 export type EnvVars = {
   HELIX_ENDPOINT: string;
   HELIX_API_KEY: string;
   X_SOURCE: string;
   BUSINESS_SERVICE_KEY: string;
+  // Optional: not part of the wizard's original four fields, but /api/env
+  // reads and writes it (see backend/routes/env.js) and ConnectionForm
+  // renders an Events Endpoint field alongside the others.
+  HELIX_EVENTS_ENDPOINT?: string;
 };
 
 type Props = {
@@ -24,30 +30,50 @@ type Props = {
   heading?: string;
 };
 
-// Per-field validation. Returns null when valid, or a short user-facing error.
-const validateEndpoint = (value: string): string | null => {
-  if (!value) return 'Required';
-  if (!/^https?:\/\//i.test(value)) return 'Must start with https://';
-  if (/\/otlp(\/|$)/.test(value)) return 'Remove /otlp/... The gateway adds the path itself.';
-  try { new URL(value); } catch { return 'Not a valid URL'; }
-  return null;
-};
-const validateApiKey = (value: string): string | null => {
-  if (!value) return 'Required';
-  const parts = value.split('::');
-  if (parts.length !== 3 || parts.some(p => !p.trim())) {
-    return 'Must be three non-empty :: separated parts';
-  }
-  return null;
-};
-const validateXSource = (value: string): string | null => {
-  if (!value) return 'Required';
-  if (value !== value.trim()) return 'No leading or trailing whitespace';
-  // OTel resource attribute values are arbitrary UTF-8 strings; only reject
-  // control chars (which would also break the HTTP header these flow into).
-  // eslint-disable-next-line no-control-regex -- matching control chars is the intent here
-  if (/[\x00-\x1f\x7f]/.test(value)) return 'Cannot contain control characters';
-  return null;
+// Step 1 saves through the single-connection /api/env facade (see
+// handleInitialize in App.tsx), which knows nothing about a connection name
+// or per-signal toggles - those belong to a Connection record and are set on
+// the Manage Connections page. ConnectionForm still requires a `name` and
+// `signals` value on its ConnectionFormValue shape, so the adapter below
+// fills both with a fixed, always-valid placeholder: `hideName`/`hideSignals`
+// keep them off screen, and the placeholders keep the shared validator from
+// ever reporting an error for a field this form doesn't render.
+const PLACEHOLDER_SIGNALS = { traces: true, metrics: true, logs: true };
+
+const toFormValue = (envVars: EnvVars): ConnectionFormValue => ({
+  name: 'step1-connection',
+  endpoint: envVars.HELIX_ENDPOINT,
+  apiKey: envVars.HELIX_API_KEY,
+  xSource: envVars.X_SOURCE,
+  businessServiceKey: envVars.BUSINESS_SERVICE_KEY,
+  eventsEndpoint: envVars.HELIX_EVENTS_ENDPOINT || '',
+  signals: PLACEHOLDER_SIGNALS,
+});
+
+const fromFormValue = (envVars: EnvVars, next: ConnectionFormValue): EnvVars => ({
+  ...envVars,
+  HELIX_ENDPOINT: next.endpoint,
+  HELIX_API_KEY: next.apiKey,
+  X_SOURCE: next.xSource,
+  BUSINESS_SERVICE_KEY: next.businessServiceKey,
+  HELIX_EVENTS_ENDPOINT: next.eventsEndpoint,
+});
+
+// Mirrors the field set Step 1 actually renders (endpoint, apiKey, xSource).
+// name/signals errors can never fire given the always-valid placeholders
+// above, but are stripped defensively so a future validator change can't
+// surface an error for a field this form hides.
+const computeErrors = (envVars: EnvVars): Record<string, string> => {
+  const { errors } = validateConnectionFields({
+    name: 'step1-connection',
+    endpoint: envVars.HELIX_ENDPOINT,
+    apiKey: envVars.HELIX_API_KEY,
+    xSource: envVars.X_SOURCE,
+    signals: PLACEHOLDER_SIGNALS,
+  });
+  delete errors.name;
+  delete errors.signals;
+  return errors;
 };
 
 export const Step1: React.FC<Props> = ({
@@ -64,12 +90,9 @@ export const Step1: React.FC<Props> = ({
   primaryLabel = 'Save & initialize →',
   heading = 'Step 1: Configure helix-gateway',
 }) => {
-  const errors = {
-    HELIX_ENDPOINT: validateEndpoint(envVars.HELIX_ENDPOINT),
-    HELIX_API_KEY: validateApiKey(envVars.HELIX_API_KEY),
-    X_SOURCE: validateXSource(envVars.X_SOURCE),
-  };
-  const canSubmit = Object.values(errors).every(e => e === null);
+  const errors = computeErrors(envVars);
+  const canSubmit = Object.keys(errors).length === 0;
+  const formValue = toFormValue(envVars);
 
   return (
     <div className="adapt-card">
@@ -80,96 +103,16 @@ export const Step1: React.FC<Props> = ({
         New to OpenTelemetry? <span className="font-semibold underline">Start here</span>
       </a>
       <h2 className="text-lg font-semibold mb-4 text-gray-200">{heading}</h2>
-      <div className="space-y-3 mb-4">
-        <div className="space-y-1">
-          <label htmlFor="helix-endpoint" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-            Helix Endpoint
-            {!errors.HELIX_ENDPOINT && envVars.HELIX_ENDPOINT && <Check className="w-3.5 h-3.5 text-success-text inline" aria-label="OK" />}
-          </label>
-          <input
-            id="helix-endpoint"
-            type="url"
-            name="helix-ingest-endpoint"
-            autoComplete="off"
-            spellCheck={false}
-            data-1p-ignore
-            data-lpignore="true"
-            value={envVars.HELIX_ENDPOINT}
-            onChange={(e) => setEnvVars({ ...envVars, HELIX_ENDPOINT: e.target.value })}
-            aria-invalid={!!(envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT)}
-            aria-describedby={envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT ? 'helix-endpoint-error' : undefined}
-            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm ${envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-link'}`}
-            placeholder="https://your-tenant.onbmc.com"
-          />
-          {envVars.HELIX_ENDPOINT && errors.HELIX_ENDPOINT && (
-            <p id="helix-endpoint-error" className="text-tiny text-danger-text">{errors.HELIX_ENDPOINT}</p>
-          )}
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="helix-api-key" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-            X-API Key
-            {!errors.HELIX_API_KEY && envVars.HELIX_API_KEY && <Check className="w-3.5 h-3.5 text-success-text inline" aria-label="OK" />}
-          </label>
-          <div className="relative">
-            <input
-              id="helix-api-key"
-              type="text"
-              name="helix-x-api-key"
-              autoComplete="off"
-              spellCheck={false}
-              data-1p-ignore
-              data-lpignore="true"
-              value={envVars.HELIX_API_KEY}
-              onChange={(e) => {
-                const parsed = parseHelixKeyBundle(e.target.value);
-                setEnvVars({ ...envVars, HELIX_API_KEY: parsed ?? e.target.value });
-              }}
-              aria-invalid={!!(envVars.HELIX_API_KEY && errors.HELIX_API_KEY)}
-              aria-describedby={envVars.HELIX_API_KEY && errors.HELIX_API_KEY ? 'helix-api-key-error' : undefined}
-              style={!showApiKey ? { WebkitTextSecurity: 'disc', textSecurity: 'disc' } as React.CSSProperties : undefined}
-              className={`w-full bg-gray-1000 border rounded px-3 py-2 pr-16 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm ${envVars.HELIX_API_KEY && errors.HELIX_API_KEY ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-link'}`}
-              placeholder="Paste your API key from the Helix portal"
-            />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(s => !s)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-tiny text-gray-400 hover:text-gray-200 uppercase tracking-wider font-semibold px-1"
-            >
-              {showApiKey ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <p className="text-tiny text-gray-500">Paste the full key. The format is parsed automatically.</p>
-          {envVars.HELIX_API_KEY && errors.HELIX_API_KEY && (
-            <p id="helix-api-key-error" className="text-tiny text-danger-text">{errors.HELIX_API_KEY}</p>
-          )}
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="helix-x-source" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-baseline gap-2 flex-wrap">
-            <span className="flex items-center gap-2">
-              X-Source
-              {!errors.X_SOURCE && envVars.X_SOURCE && <Check className="w-3.5 h-3.5 text-success-text inline" aria-label="OK" />}
-            </span>
-            <span className="normal-case tracking-normal text-gray-500 font-normal">· Business Service name in Helix topology &amp; AIOps</span>
-          </label>
-          <input
-            id="helix-x-source"
-            type="text"
-            name="helix-x-source"
-            autoComplete="off"
-            spellCheck={false}
-            data-1p-ignore
-            data-lpignore="true"
-            value={envVars.X_SOURCE}
-            onChange={(e) => setEnvVars({ ...envVars, X_SOURCE: e.target.value })}
-            aria-invalid={!!(envVars.X_SOURCE && errors.X_SOURCE)}
-            aria-describedby={envVars.X_SOURCE && errors.X_SOURCE ? 'helix-x-source-error' : undefined}
-            className={`w-full bg-gray-1000 border rounded px-3 py-2 text-gray-100 focus:outline-none focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm ${envVars.X_SOURCE && errors.X_SOURCE ? 'border-danger/60 focus:border-danger' : 'border-gray-800 focus:border-link'}`}
-            placeholder="e.g. payment-service"
-          />
-          {envVars.X_SOURCE && errors.X_SOURCE && (
-            <p id="helix-x-source-error" className="text-tiny text-danger-text">{errors.X_SOURCE}</p>
-          )}
-        </div>
+      <div className="mb-4">
+        <ConnectionForm
+          value={formValue}
+          onChange={(next) => setEnvVars(fromFormValue(envVars, next))}
+          errors={errors}
+          showApiKey={showApiKey}
+          onToggleApiKey={() => setShowApiKey(s => !s)}
+          hideName
+          hideSignals
+        />
       </div>
 
       {setupError && (

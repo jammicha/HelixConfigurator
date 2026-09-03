@@ -40,6 +40,13 @@ type Props = {
   errors: Record<string, string>;
   showApiKey: boolean;
   onToggleApiKey: () => void;
+  // Consumers that manage name/signals elsewhere (the wizard's Step 1, the
+  // dashboard's settings drawer - both save through the single-connection
+  // /api/env facade, which has no notion of either) hide those sections
+  // instead of rendering fields nothing will ever read. Both default to
+  // false so existing callers (ManageConnectionsPage) are unaffected.
+  hideName?: boolean;
+  hideSignals?: boolean;
 };
 
 // Controlled connection fields, extracted from wizard/Step1.tsx so every
@@ -47,12 +54,13 @@ type Props = {
 // validation-error display. Per-field errors follow Step1's convention:
 // shown only once the field has content, so a pristine "Required" error
 // doesn't greet the user before they've typed anything.
-export const ConnectionForm: React.FC<Props> = ({ value, onChange, errors, showApiKey, onToggleApiKey }) => {
+export const ConnectionForm: React.FC<Props> = ({ value, onChange, errors, showApiKey, onToggleApiKey, hideName = false, hideSignals = false }) => {
   const set = (patch: Partial<ConnectionFormValue>) => onChange({ ...value, ...patch });
   const setSignal = (key: keyof Signals, checked: boolean) => set({ signals: { ...value.signals, [key]: checked } });
 
   return (
     <div className="space-y-3">
+      {!hideName && (
       <div className="space-y-1">
         <label htmlFor="conn-form-name" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
           Connection Name
@@ -75,6 +83,7 @@ export const ConnectionForm: React.FC<Props> = ({ value, onChange, errors, showA
           <p id="conn-form-name-error" className="text-tiny text-danger-text">{errors.name}</p>
         )}
       </div>
+      )}
 
       <div className="space-y-1">
         <label htmlFor="conn-form-endpoint" className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
@@ -196,6 +205,7 @@ export const ConnectionForm: React.FC<Props> = ({ value, onChange, errors, showA
         />
       </div>
 
+      {!hideSignals && (
       <div className="space-y-1">
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Signals to send</p>
         <div className="flex flex-wrap gap-x-5 gap-y-2">
@@ -216,6 +226,7 @@ export const ConnectionForm: React.FC<Props> = ({ value, onChange, errors, showA
           <p className="text-tiny text-danger-text">{errors.signals}</p>
         )}
       </div>
+      )}
     </div>
   );
 };
