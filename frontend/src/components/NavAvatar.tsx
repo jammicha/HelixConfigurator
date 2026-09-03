@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2, Compass, FlaskConical } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ExternalLink, HelpCircle, LayoutDashboard, LayoutGrid, LogOut, BarChart2, Compass, FlaskConical, Plug } from 'lucide-react';
 
 type AuthShape = { required: boolean; authenticated: boolean } | null;
 
@@ -135,6 +135,13 @@ export const NavAvatar: React.FC<NavAvatarProps> = ({ authStatus, onLogout, curr
             >
               <FlaskConical className="w-4 h-4 text-gray-400" />
               Helix Configurator Demo
+            </a>
+            <a
+              href="/connections"
+              className={`${itemBase} ${itemIdle}`}
+            >
+              <Plug className="w-4 h-4 text-gray-400" />
+              Manage Connections
             </a>
 
             <div className="border-t border-gray-800 mt-1 pt-1">
