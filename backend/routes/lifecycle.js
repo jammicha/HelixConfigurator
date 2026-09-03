@@ -674,10 +674,23 @@ function register(app, { docker, configPath, otelStore, store }) {
     const mode = computeResetMode(req.body && req.body.connectionIds, state.connections.map((c) => c.id));
 
     if (mode === 'partial') {
+      // Report only the ids that actually named a real connection, not the
+      // raw request payload verbatim (a stale id in the request should not
+      // show up in the response as "deleted").
+      const beforeIds = new Set(state.connections.map((c) => c.id));
+      const deleted = req.body.connectionIds.filter((id) => beforeIds.has(id));
+
+      let afterState;
       try {
-        await store.remove(req.body.connectionIds);
-        const after = await store.getState();
-        const enabled = after.connections.filter((c) => c.enabled).map((c) => ({ id: c.id, signals: c.signals }));
+        afterState = await store.remove(req.body.connectionIds);
+      } catch (e) {
+        console.warn('reset-onboarding: partial remove failed:', e.message);
+        errorLog.push('reset-onboarding.partial.remove', e.message);
+        return res.status(500).json({ error: 'Partial reset failed', details: e.message });
+      }
+
+      try {
+        const enabled = afterState.connections.filter((c) => c.enabled).map((c) => ({ id: c.id, signals: c.signals }));
         const before = await fsp.readFile(configPath, 'utf8');
         const rewritten = syncManagedExporters(before, enabled);
         const envVars = {};
@@ -689,14 +702,35 @@ function register(app, { docker, configPath, otelStore, store }) {
         });
         verifyManagedYaml(rewritten, enabled, envVars);
         await fsp.writeFile(configPath, rewritten, 'utf8');
+      } catch (e) {
+        // The connection removal above already committed to connections.json
+        // and .env, so this is not a total failure from the caller's point of
+        // view - say so, rather than reporting a plain 500 that implies
+        // nothing happened.
+        console.warn('reset-onboarding: partial yaml rewrite failed:', e.message);
+        errorLog.push('reset-onboarding.partial.yaml', e.message);
+        return res.status(500).json({
+          error: 'Connections removed but collector config rewrite failed',
+          details: e.message,
+          deleted,
+          activeId: afterState.activeId,
+        });
+      }
+
+      // A recreate failure here mirrors full mode: the store and yaml writes
+      // already committed, so this is best-effort, not a failure of the
+      // reset itself. Report it alongside a 200 so the caller knows to
+      // restart the gateway manually if needed.
+      let recreateError = null;
+      try {
         await recreateGateway(docker, sidecarName);
       } catch (e) {
-        console.warn('reset-onboarding: partial reset failed:', e.message);
-        errorLog.push('reset-onboarding.partial', e.message);
-        return res.status(500).json({ error: 'Partial reset failed', details: e.message });
+        recreateError = e.message;
+        console.warn('reset-onboarding: partial recreate failed:', e.message);
+        errorLog.push('reset-onboarding.partial.recreate', e.message);
       }
-      const finalState = await store.getState();
-      return res.json({ mode: 'partial', deleted: req.body.connectionIds, activeId: finalState.activeId });
+
+      return res.json({ mode: 'partial', deleted, activeId: afterState.activeId, recreateError });
     }
 
     const WIZARD_KEYS = ['HELIX_ENDPOINT', 'HELIX_API_KEY', 'X_SOURCE', 'BUSINESS_SERVICE_KEY', 'HELIX_EVENTS_ENDPOINT'];
