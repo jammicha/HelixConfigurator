@@ -5,7 +5,8 @@ const path = require('path');
 const Docker = require('dockerode');
 const { OtelStore } = require('./otelStore');
 const { makeContainerLogs, IS_CONTAINERIZED } = require('./util');
-require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
+const { resolveDataDir, resolveEnvPath, resolveConfigPath } = require('./statePaths');
+require('dotenv').config({ path: resolveEnvPath({ backendDir: __dirname }), quiet: true });
 
 const VERSION = require('./package.json').version;
 
@@ -27,7 +28,7 @@ const port = resolvePort(process.env);
 const explicitHost = resolveHost(process.env);
 const app = express();
 
-const CONFIG_PATH = path.join(__dirname, '../helix-otel-collector.yaml');
+const CONFIG_PATH = resolveConfigPath({ backendDir: __dirname });
 const TEMPLATES_DIR = path.join(__dirname, '../templates');
 
 app.use(cors({ credentials: true }));
@@ -83,7 +84,6 @@ require('./routes/update').registerPublicRoutes(app, {});
 // --- OTel trace store (local fan-out from helix-gateway) -----------------
 // SQLite lives in a mounted volume so traces survive container restarts.
 // Outside Docker we fall back to backend/data so dev is self-contained.
-const { resolveDataDir } = require('./statePaths');
 const DATA_DIR = resolveDataDir({ appDirExists: IS_CONTAINERIZED, backendDir: __dirname });
 const OTEL_DB_PATH = process.env.OTEL_DB_PATH || path.join(DATA_DIR, 'otel-store.db');
 const otelStore = new OtelStore({ dbPath: OTEL_DB_PATH });
@@ -94,7 +94,7 @@ console.log(`OTel trace store: ${OTEL_DB_PATH}`);
 // substituted values are projected into the repo-root .env, which is the
 // same file env.js and lifecycle.js have always used.
 const { createConnectionsStore } = require('./connectionsStore');
-const ENV_PATH = path.join(__dirname, '..', '.env');
+const ENV_PATH = resolveEnvPath({ backendDir: __dirname });
 const CONNECTIONS_PATH = path.join(DATA_DIR, 'connections.json');
 const connectionsStore = createConnectionsStore({ connectionsPath: CONNECTIONS_PATH, envPath: ENV_PATH });
 
