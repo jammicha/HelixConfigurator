@@ -63,6 +63,12 @@ export const AppHeader = ({
       >
         View OTel Data
       </a>
+      <a
+        href="/connections"
+        className="hover:text-white transition-colors"
+      >
+        Manage Connections
+      </a>
     </nav>
     <div className="ml-auto flex items-center gap-2">
       {isSetupComplete && (

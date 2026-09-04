@@ -222,9 +222,25 @@ export const ManageConnectionsPage: React.FC = () => {
         )}
 
         {!loading && !error && connections.length === 0 && (
-          <div className="adapt-card text-center py-10 space-y-2">
+          <div className="adapt-card text-center py-10 space-y-3">
             <p className="text-gray-300">No connections configured yet.</p>
-            <p className="text-tiny text-gray-500">Add a connection to start sending telemetry to Helix.</p>
+            <p className="text-tiny text-gray-500">
+              New here? Start with Onboarding to configure your first Helix connection and stand up the gateway.
+            </p>
+            <div className="flex items-center justify-center gap-3 pt-1">
+              <a
+                href="/?view=onboarding"
+                className="bg-primary hover:bg-[#3006c2] text-white px-4 py-1.5 rounded text-sm font-semibold transition-colors"
+              >
+                Go to Onboarding
+              </a>
+              <button
+                onClick={openCreate}
+                className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-4 py-1.5 rounded text-sm font-semibold transition-colors"
+              >
+                Add a connection
+              </button>
+            </div>
           </div>
         )}
 

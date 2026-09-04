@@ -1090,6 +1090,9 @@ export const OtelDataPage: React.FC = () => {
           <span className="text-white font-semibold border-b-2 border-primary pb-0.5">
             View OTel Data
           </span>
+          <a href="/connections" className="hover:text-white transition-colors">
+            Manage Connections
+          </a>
         </nav>
         <div className="ml-auto">
           <HeaderUserMenu />

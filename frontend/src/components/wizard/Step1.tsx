@@ -115,6 +115,7 @@ export const Step1: React.FC<Props> = ({
           onToggleApiKey={() => setShowApiKey(s => !s)}
           hideName
           hideSignals
+          hideAdvanced
         />
       </div>
 

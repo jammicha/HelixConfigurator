@@ -47,6 +47,12 @@ type Props = {
   // false so existing callers (ManageConnectionsPage) are unaffected.
   hideName?: boolean;
   hideSignals?: boolean;
+  // Business Service Key and Events Endpoint are advanced, optional fields
+  // that most tenants never set (Events Endpoint auto-derives from the Helix
+  // Endpoint). They live in a collapsed "Advanced" section here; the wizard's
+  // Step 1 hides them entirely so onboarding stays to the three fields that
+  // matter. Defaults false so existing callers are unaffected.
+  hideAdvanced?: boolean;
 };
 
 // Controlled connection fields, extracted from wizard/Step1.tsx so every
@@ -54,7 +60,7 @@ type Props = {
 // validation-error display. Per-field errors follow Step1's convention:
 // shown only once the field has content, so a pristine "Required" error
 // doesn't greet the user before they've typed anything.
-export const ConnectionForm: React.FC<Props> = ({ value, onChange, errors, showApiKey, onToggleApiKey, hideName = false, hideSignals = false }) => {
+export const ConnectionForm: React.FC<Props> = ({ value, onChange, errors, showApiKey, onToggleApiKey, hideName = false, hideSignals = false, hideAdvanced = false }) => {
   const set = (patch: Partial<ConnectionFormValue>) => onChange({ ...value, ...patch });
   const setSignal = (key: keyof Signals, checked: boolean) => set({ signals: { ...value.signals, [key]: checked } });
 
@@ -177,33 +183,43 @@ export const ConnectionForm: React.FC<Props> = ({ value, onChange, errors, showA
         )}
       </div>
 
-      <div className="space-y-1">
-        <label htmlFor="conn-form-bskey" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          AIOps Business Service Key (optional)
-        </label>
-        <input
-          id="conn-form-bskey"
-          type="text"
-          value={value.businessServiceKey}
-          onChange={(e) => set({ businessServiceKey: extractServiceKey(e.target.value) })}
-          className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
-          placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
-        />
-      </div>
+      {!hideAdvanced && (
+      <details className="border border-gray-800 rounded bg-gray-1000/40">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-300">
+          Advanced (optional)
+        </summary>
+        <div className="px-3 pb-3 pt-1 space-y-3">
+          <div className="space-y-1">
+            <label htmlFor="conn-form-bskey" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              AIOps Business Service Key
+            </label>
+            <input
+              id="conn-form-bskey"
+              type="text"
+              value={value.businessServiceKey}
+              onChange={(e) => set({ businessServiceKey: extractServiceKey(e.target.value) })}
+              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all font-mono text-sm"
+              placeholder="e.g. LYVlMZN2grhnvxM4uik8s5PmVpJNidFS, or paste the full AIOps service URL"
+            />
+          </div>
 
-      <div className="space-y-1">
-        <label htmlFor="conn-form-events-endpoint" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          AIOps Events Endpoint (optional)
-        </label>
-        <input
-          id="conn-form-events-endpoint"
-          type="text"
-          value={value.eventsEndpoint}
-          onChange={(e) => set({ eventsEndpoint: e.target.value })}
-          className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
-          placeholder="Falls back to the Helix Endpoint above when unset"
-        />
-      </div>
+          <div className="space-y-1">
+            <label htmlFor="conn-form-events-endpoint" className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              AIOps Events Endpoint
+            </label>
+            <input
+              id="conn-form-events-endpoint"
+              type="text"
+              value={value.eventsEndpoint}
+              onChange={(e) => set({ eventsEndpoint: e.target.value })}
+              className="w-full bg-gray-1000 border border-gray-800 rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-link focus:shadow-[0_0_0_2px_rgba(165,186,255,0.55)] transition-all text-sm"
+              placeholder="Leave blank to derive from the Helix Endpoint"
+            />
+            <p className="text-tiny text-gray-500">Only needed when your Helix events service is on a different host than the Helix Endpoint. Powers the AIOps Situations features; leave blank and it is derived from the Helix Endpoint automatically.</p>
+          </div>
+        </div>
+      </details>
+      )}
 
       {!hideSignals && (
       <div className="space-y-1">
