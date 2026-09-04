@@ -1,6 +1,7 @@
 // desktop/main.js
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const fs = require('fs');
+const path = require('path');
 const { startBackend } = require('./backend');
 const { stateDir } = require('./paths');
 
@@ -26,14 +27,34 @@ function createWindow(url) {
     width: 1400,
     height: 900,
     show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
+    },
   });
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.loadURL(url);
+
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    shell.openExternal(targetUrl);
+    return { action: 'deny' };
+  });
 }
 
 async function main() {
   fs.mkdirSync(stateDir(), { recursive: true });
+
+  ipcMain.handle('helix:open-data-folder', () => shell.openPath(stateDir()));
+  ipcMain.handle('helix:save-file', async (_evt, { suggestedName, data }) => {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: suggestedName,
+    });
+    if (canceled || !filePath) return { saved: false };
+    fs.writeFileSync(filePath, data);
+    return { saved: true, filePath };
+  });
+
   try {
     backend = await startBackend();
   } catch (err) {
