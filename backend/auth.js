@@ -4,7 +4,6 @@
 // wanting real SSO should put a proxy in front.
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
 const Docker = require('dockerode');
 
 const UI_AUTH_REQUIRED = !!process.env.UI_AUTH_PASSWORD;
