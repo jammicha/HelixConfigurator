@@ -22,8 +22,9 @@ const { requireAuth, registerAuthRoutes } = require('./auth');
 const { errorHandler } = require('./errorHandler');
 const { classifyPortOwnership, reportPortOwnership } = require('./preflight');
 
-const { resolvePort } = require('./portConfig');
+const { resolvePort, resolveHost } = require('./portConfig');
 const port = resolvePort(process.env);
+const explicitHost = resolveHost(process.env);
 const app = express();
 
 const CONFIG_PATH = path.join(__dirname, '../helix-otel-collector.yaml');
@@ -165,24 +166,25 @@ const servers = [];
 let ipv4Bound = false;
 
 const start = async () => {
-  // IPv6 first, and ipv6Only so it cannot claim the v4 wildcard implicitly.
-  try {
-    servers.push(await listenOn({ port, host: '::', ipv6Only: true }));
-  } catch (e) {
-    // A host with no IPv6 at all is fine; we fall through to the v4 bind.
-    if (e.code !== 'EADDRINUSE' && e.code !== 'EAFNOSUPPORT' && e.code !== 'EADDRNOTAVAIL') throw e;
-  }
-
-  try {
-    servers.push(await listenOn({ port, host: '0.0.0.0' }));
+  if (explicitHost) {
+    // Desktop mode: bind exactly one host (loopback) and skip the dual-stack dance.
+    servers.push(await listenOn({ port, host: explicitHost }));
     ipv4Bound = true;
-  } catch (e) {
-    // EADDRINUSE is the expected squatter case; the preflight below explains
-    // it. Any other IPv4 bind error is logged and tolerated as long as IPv6
-    // is already up — exiting is only correct when neither stack bound.
-    if (e.code !== 'EADDRINUSE') {
-      if (servers.length === 0) throw e;
-      console.error(`IPv4 bind on port ${port} failed:`, e);
+  } else {
+    // IPv6 first, and ipv6Only so it cannot claim the v4 wildcard implicitly.
+    try {
+      servers.push(await listenOn({ port, host: '::', ipv6Only: true }));
+    } catch (e) {
+      if (e.code !== 'EADDRINUSE' && e.code !== 'EAFNOSUPPORT' && e.code !== 'EADDRNOTAVAIL') throw e;
+    }
+    try {
+      servers.push(await listenOn({ port, host: '0.0.0.0' }));
+      ipv4Bound = true;
+    } catch (e) {
+      if (e.code !== 'EADDRINUSE') {
+        if (servers.length === 0) throw e;
+        console.error(`IPv4 bind on port ${port} failed:`, e);
+      }
     }
   }
 
