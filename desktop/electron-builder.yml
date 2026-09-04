@@ -17,13 +17,13 @@ files:
 extraResources:
   # Ship the backend and built frontend unpacked under Resources/app so the
   # utilityProcess runs a real file and better-sqlite3's .node loads normally.
-  - from: ../backend
+  # The backend comes from a production-only staged copy (see
+  # scripts/stage-backend.js, run automatically via the predist script)
+  # because the live backend/node_modules carries devDependency native
+  # binaries that break the macOS universal (arm64+x64) merge.
+  - from: .backend-stage
     to: app/backend
-    filter:
-      - "**/*"
-      - "!__tests__/**"
-      - "!**/*.test.js"
-  - from: ../frontend-dist
+  - from: ../frontend/dist
     to: app/frontend-dist
   - from: ../templates
     to: app/templates
