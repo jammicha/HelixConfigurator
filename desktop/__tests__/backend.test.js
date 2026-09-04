@@ -1,6 +1,8 @@
 // desktop/__tests__/backend.test.js
-const { describe, it, expect, vi } = require('vitest');
-const { waitForHealth } = require('../backend');
+import { describe, it, expect } from 'vitest';
+import backend from '../backend.js';
+
+const { waitForHealth } = backend;
 
 function fakeFetch(sequence) {
   let i = 0;
