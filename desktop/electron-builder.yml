@@ -1,0 +1,48 @@
+appId: com.bmc.helix.otel-configurator
+productName: Helix OTel Configurator
+directories:
+  output: dist
+  buildResources: resources
+# The whole repo root is the build context; only what we list is included.
+files:
+  - main.js
+  - backend.js
+  - paths.js
+  - preload.js
+  - menu.js
+  - tray.js
+  - updater.js
+  - package.json
+  - node_modules/**/*
+extraResources:
+  # Ship the backend and built frontend unpacked under Resources/app so the
+  # utilityProcess runs a real file and better-sqlite3's .node loads normally.
+  - from: ../backend
+    to: app/backend
+    filter:
+      - "**/*"
+      - "!__tests__/**"
+      - "!**/*.test.js"
+  - from: ../frontend-dist
+    to: app/frontend-dist
+  - from: ../templates
+    to: app/templates
+asar: true
+mac:
+  target:
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
+  category: public.app-category.developer-tools
+  icon: resources/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: resources/icon.ico
+nsis:
+  oneClick: true
+  perMachine: false
