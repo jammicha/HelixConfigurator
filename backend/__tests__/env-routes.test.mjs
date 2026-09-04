@@ -8,11 +8,16 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const envRoutes = require('../routes/env.js');
+const { createConnectionsStore } = require('../connectionsStore.js');
+
+let connectionsPath;
 
 function makeApp(envPath) {
+  connectionsPath = `${envPath}.connections.json`;
+  const store = createConnectionsStore({ connectionsPath, envPath });
   const app = express();
   app.use(express.json());
-  envRoutes.register(app, { envPath });
+  envRoutes.register(app, { envPath, store });
   return app;
 }
 
@@ -20,11 +25,12 @@ describe('/api/env', () => {
   let envPath;
 
   beforeEach(() => {
-    envPath = path.join(os.tmpdir(), `helix-env-route-${process.pid}-${Date.now()}`);
+    envPath = path.join(os.tmpdir(), `helix-env-route-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   });
 
   afterEach(() => {
     try { fs.unlinkSync(envPath); } catch { /* ignore */ }
+    try { fs.unlinkSync(connectionsPath); } catch { /* ignore */ }
   });
 
   it('GET returns empty defaults when .env is missing (fresh native install)', async () => {
@@ -77,5 +83,15 @@ describe('/api/env', () => {
     else process.env.HELIX_ENDPOINT = prev.HELIX_ENDPOINT;
     if (prev.X_SOURCE === undefined) delete process.env.X_SOURCE;
     else process.env.X_SOURCE = prev.X_SOURCE;
+  });
+
+  it('POST then GET round-trips through the active connection', async () => {
+    const app = makeApp(envPath);
+    await request(app).post('/api/env').send({
+      HELIX_ENDPOINT: 'https://t.onbmc.com', HELIX_API_KEY: 'T::A::S', X_SOURCE: 'checkout',
+    });
+    const res = await request(app).get('/api/env');
+    expect(res.body.HELIX_ENDPOINT).toBe('https://t.onbmc.com');
+    expect(res.body.X_SOURCE).toBe('checkout');
   });
 });

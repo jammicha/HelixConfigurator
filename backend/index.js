@@ -56,6 +56,11 @@ app.get(/^\/dashboard-mockup(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
 });
 
+// SPA fallback for the connections management route.
+app.get(/^\/connections(\/.*)?$/, (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend-dist/index.html'));
+});
+
 // Auth endpoints (must register BEFORE the requireAuth middleware so the
 // login / logout / status routes themselves are reachable when auth is on).
 registerAuthRoutes(app);
@@ -83,6 +88,15 @@ const OTEL_DB_PATH = process.env.OTEL_DB_PATH || path.join(DATA_DIR, 'otel-store
 const otelStore = new OtelStore({ dbPath: OTEL_DB_PATH });
 console.log(`OTel trace store: ${OTEL_DB_PATH}`);
 
+// --- Connections store (multi-connection management) ---------------------
+// Structure lives in data/connections.json; secrets and the collector's
+// substituted values are projected into the repo-root .env, which is the
+// same file env.js and lifecycle.js have always used.
+const { createConnectionsStore } = require('./connectionsStore');
+const ENV_PATH = path.join(__dirname, '..', '.env');
+const CONNECTIONS_PATH = path.join(DATA_DIR, 'connections.json');
+const connectionsStore = createConnectionsStore({ connectionsPath: CONNECTIONS_PATH, envPath: ENV_PATH });
+
 require('./routes/otlp').register(app, { otelStore });
 
 // Gate everything else under /api/*
@@ -93,10 +107,18 @@ require('./routes/situations').register(app, { otelStore });
 require('./routes/business-service').register(app, { otelStore });
 require('./routes/discovery').register(app, { docker });
 require('./routes/containers').register(app, { docker });
-require('./routes/lifecycle').register(app, { docker, configPath: CONFIG_PATH, otelStore });
+require('./routes/lifecycle').register(app, { docker, configPath: CONFIG_PATH, otelStore, store: connectionsStore });
 require('./routes/step-zero/synthetic').register(app, { docker });
 require('./routes/step-zero/instrument').register(app);
-require('./routes/env').register(app);
+require('./routes/env').register(app, { envPath: ENV_PATH, store: connectionsStore });
+require('./routes/connections').register(app, {
+  docker,
+  containerLogs,
+  configPath: CONFIG_PATH,
+  connectionsPath: CONNECTIONS_PATH,
+  envPath: ENV_PATH,
+  store: connectionsStore,
+});
 require('./routes/k8s').register(app, {
   configPath: CONFIG_PATH,
   projectRoot: path.resolve(__dirname, '..'),

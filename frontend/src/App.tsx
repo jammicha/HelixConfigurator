@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { Loader2 } from 'lucide-react';
 import { useEscClose } from './hooks/useEscClose';
@@ -43,6 +43,7 @@ import { SystemHealthPanel } from './components/dashboard/SystemHealthPanel';
 import { PipelineStatusBanner } from './components/dashboard/PipelineStatusBanner';
 import { QuickActions } from './components/dashboard/QuickActions';
 import { HelixConnectionSettingsDrawer } from './components/dashboard/HelixConnectionSettingsDrawer';
+import { ResetConnectionsModal } from './components/dashboard/ResetConnectionsModal';
 import { SetPasswordModal, type SetPasswordMode } from './components/dashboard/SetPasswordModal';
 import { AppHeader } from './components/AppHeader';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -51,6 +52,7 @@ import { DiagnosticChecksGrid } from './components/dashboard/DiagnosticChecksGri
 import { computeViewerFanoutCellState, type VerifyFanoutResponse } from './components/dashboard/viewerFanoutVerdict';
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
 import { GatewayConfigEditor } from './components/dashboard/GatewayConfigEditor';
+import { ActiveConnectionSwitcher } from './components/dashboard/ActiveConnectionSwitcher';
 
 const App = () => {
   const monaco = useMonaco();
@@ -140,6 +142,10 @@ const App = () => {
   const [isYamlOpen, setIsYamlOpen] = useState(true);
   const [showApiKey, setShowApiKey] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmRequest | null>(null);
+  // Bumped after a partial reset (some connections removed, some survive) so
+  // components that hold their own connection list (ActiveConnectionSwitcher,
+  // ResetConnectionsModal) remount and refetch instead of showing stale data.
+  const [connectionsVersion, setConnectionsVersion] = useState(0);
   // Result of Step 1's recreate call. Used only to surface a recreate
   // failure on Step 3/4 ("env changes may not have taken effect"). Network
   // wiring is Step 3's job now and no longer flows through this state.
@@ -215,6 +221,20 @@ const App = () => {
 
   const { testConnectionResult, testingConnection, handleTestConnection } =
     useTestConnection(envVars.HELIX_ENDPOINT, envVars.HELIX_API_KEY);
+
+  // Re-fetch /api/env only (no wizard/onboarding side effects) so the
+  // dashboard's env-derived values (external deep links, settings drawer)
+  // pick up the newly-active connection right after a switch, without
+  // reworking the larger auth-gated fetch effect below.
+  const refreshEnvVars = useCallback(() => {
+    fetch('/api/env')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data || typeof data !== 'object' || 'error' in data) return;
+        setEnvVars(data);
+      })
+      .catch((err) => console.error('Failed to refresh env vars', err));
+  }, []);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const metricsIntervalRef = useRef<any>(null);
@@ -978,46 +998,79 @@ const App = () => {
   // then resets every piece of React state the wizard relies on, drops
   // localStorage keys, and lands the user back on Step 1.
   const [resetting, setResetting] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
   const requestResetOnboarding = () => {
     if (resetting) return;
-    setConfirmDialog({
-      title: 'Reset onboarding and start over?',
-      message: 'This clears your Helix endpoint, API key, X-Source, and Business Service key from .env, drops any bridged networks the gateway is on, and recreates the gateway with empty values. The OTel trace store and your gateway YAML config are left alone. You\'ll land back on Step 1.',
-      confirmLabel: 'Reset',
-      onConfirm: async () => {
-        setResetting(true);
-        try {
-          const res = await fetch('/api/lifecycle/reset-onboarding', { method: 'POST' });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            console.warn('reset-onboarding failed:', data);
-          }
-        } catch (e) {
-          console.warn('reset-onboarding threw:', e);
-        }
-        // Clear UI state regardless of backend outcome — the user explicitly
-        // asked to start over, so a backend partial failure shouldn't strand
-        // them on a half-cleared page.
-        setEnvVars({ HELIX_ENDPOINT: '', HELIX_API_KEY: '', X_SOURCE: '', BUSINESS_SERVICE_KEY: '' });
-        setBridgeStatus(null);
-        setAttachResult(null);
-        // The backend just dropped the gateway's bridged networks. Clear the
-        // stale list so Step 3 doesn't show the old collector as "Attached",
-        // then force a cache-bypassing refresh so the repopulated list (and the
-        // 60s discovery cache) reflect the now-disconnected state.
-        setDetectedCollectors([]);
-        refreshDetectedCollectors(true);
-        setStep3Tab('detected');
-        setK8sApplyResult(null);
-        setSetupError('');
-        setIsSetupComplete(false);
-        setSetupStep(1);
-        setTarget(null);
-        localStorage.removeItem('helix-configurator.onboarded');
-        localStorage.removeItem('helix-configurator.setupStep');
-        setResetting(false);
-      },
-    });
+    setResetModalOpen(true);
+  };
+
+  // Called with the connection ids the user checked in ResetConnectionsModal.
+  // The backend decides full vs partial from the same selection (mirrored
+  // client-side by computeResetMode for the modal's warning copy) and tells
+  // us which one happened via data.mode; we branch on that rather than
+  // re-deriving it, so the UI always matches what the backend actually did.
+  const handleConfirmResetOnboarding = async (selectedIds: string[]) => {
+    if (resetting) return;
+    setResetting(true);
+    let ok = false;
+    let data: any = {};
+    try {
+      const res = await fetch('/api/lifecycle/reset-onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionIds: selectedIds }),
+      });
+      data = await res.json().catch(() => ({}));
+      ok = res.ok;
+    } catch (e) {
+      console.warn('reset-onboarding threw:', e);
+    }
+
+    if (!ok) {
+      // Errored request (thrown or non-ok): don't wipe anything, full or
+      // partial. Surface the failure and leave the modal open so the user
+      // can retry or cancel.
+      console.warn('reset-onboarding failed:', data);
+      showToastMsg(data.error || 'Failed to reset onboarding', 'error');
+      setResetting(false);
+      return;
+    }
+
+    setResetModalOpen(false);
+
+    if (data.mode === 'full') {
+      // Existing full-reset teardown, unchanged from the previous
+      // single-button behavior. The user explicitly asked to start over,
+      // and the backend confirmed a full reset happened, so wipe every
+      // piece of wizard state and land back on Step 1.
+      setEnvVars({ HELIX_ENDPOINT: '', HELIX_API_KEY: '', X_SOURCE: '', BUSINESS_SERVICE_KEY: '' });
+      setBridgeStatus(null);
+      setAttachResult(null);
+      // The backend just dropped the gateway's bridged networks. Clear the
+      // stale list so Step 3 doesn't show the old collector as "Attached",
+      // then force a cache-bypassing refresh so the repopulated list (and the
+      // 60s discovery cache) reflect the now-disconnected state.
+      setDetectedCollectors([]);
+      refreshDetectedCollectors(true);
+      setStep3Tab('detected');
+      setK8sApplyResult(null);
+      setSetupError('');
+      setIsSetupComplete(false);
+      setSetupStep(1);
+      setTarget(null);
+      localStorage.removeItem('helix-configurator.onboarded');
+      localStorage.removeItem('helix-configurator.setupStep');
+    } else {
+      // Partial reset: only the selected connections were removed. Leave
+      // wizard state untouched (the surviving connections keep working)
+      // and just refresh connection-derived UI (the active-connection
+      // switcher, and env vars in case activation moved to a new connection).
+      setConnectionsVersion((v) => v + 1);
+      refreshEnvVars();
+      showToastMsg('Selected connections removed', 'success');
+    }
+
+    setResetting(false);
   };
 
   // Step 3 — apply the K8s Attribute Enrichment template via the existing
@@ -1542,6 +1595,15 @@ const App = () => {
             )
           ) : (
             <>
+              {/* Active-connection switcher: invisible for single-tenant
+                  setups (0-1 connections), a header-style control once a
+                  second connection exists. Reads as a header control for
+                  the dashboard even though it sits above the status
+                  banner, since it's the thing everything below applies to. */}
+              <div className="flex justify-end">
+                <ActiveConnectionSwitcher key={connectionsVersion} onActivated={refreshEnvVars} />
+              </div>
+
               {/* Pipeline status banner — "is this thing working?" at the top.
                   K8s/operator targets judge by received telemetry, not by the
                   (intentionally unused) local Docker gateway. */}
@@ -1660,6 +1722,14 @@ const App = () => {
       </div>
 
       <ConfirmDialog request={confirmDialog} onCancel={() => setConfirmDialog(null)} />
+
+      <ResetConnectionsModal
+        key={connectionsVersion}
+        isOpen={resetModalOpen}
+        onClose={() => { if (!resetting) setResetModalOpen(false); }}
+        onConfirm={handleConfirmResetOnboarding}
+        resetting={resetting}
+      />
 
       <HelixConnectionSettingsDrawer
         open={isSettingsOpen}

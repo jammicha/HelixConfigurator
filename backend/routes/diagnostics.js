@@ -39,19 +39,76 @@ const closeActiveLogProcesses = () => {
 // Sum a Prometheus `<baseName>_total` counter across every label permutation
 // in a /metrics scrape. Prometheus emits float64, so parseFloat keeps
 // "1.234e+05" from truncating. When exporterFilter is set, only lines
-// carrying exporter="<filter>" count — used to isolate the bmchelix exporter
-// from the local-viewer fan-out so "sent" reflects Helix delivery alone.
-const sumPromCounter = (metricsText, baseName, { exporterFilter } = {}) => {
+// carrying exporter="<filter>" count, which is used to isolate the local-
+// viewer exporter from the managed exporters so "sent" reflects that sink
+// alone.
+// exporterMatch is the predicate form of the same idea: it receives the
+// exporter name and decides inclusion, which is what lets a single filter
+// match every managed exporter (otlphttp/bmchelix_<id>) after the Task 3
+// rename made the exact-string exporterFilter unable to match them all.
+const sumPromCounter = (metricsText, baseName, { exporterFilter, exporterMatch } = {}) => {
   const name = baseName + '_total';
   let sum = 0;
   for (const line of metricsText.split('\n')) {
     if (!line.startsWith(name)) continue;
     if (exporterFilter && !line.includes(`exporter="${exporterFilter}"`)) continue;
+    if (exporterMatch) {
+      const m = line.match(/exporter="([^"]+)"/);
+      if (!m || !exporterMatch(m[1])) continue;
+    }
     const parts = line.trim().split(/\s+/);
     const val = parseFloat(parts[parts.length - 1]);
     if (!isNaN(val)) sum += val;
   }
   return Math.round(sum);
+};
+
+// Prefix shared by every managed (BMC Helix) exporter after the Task 3
+// rename (otlphttp/bmchelix -> otlphttp/bmchelix_<id>). Used wherever code
+// needs to recognize "any managed exporter" rather than one exact name.
+const MANAGED_EXPORTER_PREFIX = 'otlphttp/bmchelix_';
+
+// Exact name of the pre-Task-3 exporter. An upgraded single-tenant install's
+// collector YAML is not rewritten by migration (readState only synthesizes a
+// `default` connection in connections.json/.env, and the /api/env save path
+// doesn't resync the YAML either), so that install keeps shipping telemetry
+// through this bare exporter indefinitely. Any code that recognizes "managed
+// exporter" by prefix alone misses it and reports sent = 0 for a healthy
+// install.
+const LEGACY_MANAGED_EXPORTER_NAME = 'otlphttp/bmchelix';
+
+// True for either shape of a managed exporter: the exact legacy name, or any
+// prefixed per-connection name.
+const isManagedExporterName = (n) => n === LEGACY_MANAGED_EXPORTER_NAME || n.startsWith(MANAGED_EXPORTER_PREFIX);
+
+// Per-managed-exporter sent/failed summed across all three signals. Lets a
+// dead tenant surface even when another tenant is healthy (a global sum hides
+// it because overall sent > 0).
+const perExporterCounters = (metricsText) => {
+  const out = {};
+  const bump = (kind, base) => {
+    for (const line of metricsText.split('\n')) {
+      if (!line.startsWith(base + '_total')) continue;
+      const m = line.match(/exporter="([^"]+)"/);
+      if (!m || !isManagedExporterName(m[1])) continue;
+      const val = parseFloat(line.trim().split(/\s+/).pop());
+      if (isNaN(val)) continue;
+      out[m[1]] = out[m[1]] || { sent: 0, failed: 0 };
+      out[m[1]][kind] += Math.round(val);
+    }
+  };
+  ['otelcol_exporter_sent_spans', 'otelcol_exporter_sent_metric_points', 'otelcol_exporter_sent_log_records'].forEach((b) => bump('sent', b));
+  ['otelcol_exporter_send_failed_spans', 'otelcol_exporter_send_failed_metric_points', 'otelcol_exporter_send_failed_log_records'].forEach((b) => bump('failed', b));
+  return out;
+};
+
+// Verdict for a single exporter's { sent, failed } pair. failing means
+// failures with zero successes (strong signal something is broken, not just
+// flaky); idle means no traffic has been seen either way.
+const exporterVerdict = ({ sent, failed } = { sent: 0, failed: 0 }) => {
+  if (failed > 0 && sent === 0) return 'failing';
+  if (sent === 0 && failed === 0) return 'idle';
+  return 'healthy';
 };
 
 // The collector self-telemetry metrics block in the modern (otelcol 0.123+)
@@ -70,11 +127,15 @@ const fetchCounters = async () => {
   const response = await axios.get(url, { timeout: 2000 });
   const metrics = response.data;
 
-  // Exporter counters are scoped to the bmchelix exporter so the local-viewer
-  // fan-out doesn't inflate "sent"; receiver counters sum across all labels.
+  // Exporter counters are scoped to the managed exporters (any name starting
+  // with MANAGED_EXPORTER_PREFIX) so the local-viewer fan-out doesn't inflate
+  // "sent", and so this survives the Task 3 per-connection exporter rename;
+  // receiver counters sum across all labels.
   const extractSum = (baseName) =>
     sumPromCounter(metrics, baseName,
-      baseName.includes('exporter') ? { exporterFilter: 'otlphttp/bmchelix' } : {});
+      baseName.includes('exporter')
+        ? { exporterMatch: isManagedExporterName }
+        : {});
 
   return {
     received:
@@ -1100,4 +1161,4 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   });
 }
 
-module.exports = { register, closeActiveLogProcesses, runOtlpProbe, parseViewerCounters };
+module.exports = { register, closeActiveLogProcesses, runOtlpProbe, parseViewerCounters, sumPromCounter, perExporterCounters, exporterVerdict, isManagedExporterName, LEGACY_MANAGED_EXPORTER_NAME };

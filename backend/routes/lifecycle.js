@@ -15,6 +15,7 @@ const {
 } = require('../util');
 const { clearActiveRun: clearSyntheticRun } = require('./step-zero/synthetic');
 const errorLog = require('../errorLog');
+const { syncManagedExporters, verifyManagedYaml } = require('../collectorConnections');
 
 const { buildGatewayCreateSpec, GATEWAY_IMAGE } = require('./gatewaySpec');
 const { preferredViewerEndpoint, viewerCandidates } = require('../viewerEndpoint');
@@ -334,6 +335,16 @@ const readEnvAsArray = async () => {
   }
 };
 
+// Decide whether a reset-onboarding request is a full wipe or a scoped
+// (partial) removal. Empty/absent selection means full, for back-compat with
+// callers that send no body. A selection covering every existing connection
+// is treated as full too, since removing them all leaves nothing scoped.
+const computeResetMode = (connectionIds, allIds) => {
+  if (!connectionIds || connectionIds.length === 0) return 'full';
+  const set = new Set(connectionIds);
+  return allIds.every((id) => set.has(id)) ? 'full' : 'partial';
+};
+
 // Stop + remove + recreate the gateway container, preserving its image,
 // HostConfig (binds, ports, restart policy, network mode), labels, and
 // network memberships — only the Env is refreshed from .env on disk.
@@ -430,7 +441,7 @@ const createGatewayIfMissing = async (docker, name, configPath) => {
   }
 };
 
-function register(app, { docker, configPath, otelStore }) {
+function register(app, { docker, configPath, otelStore, store }) {
   // POST restart the configured target container. Recreates rather than
   // plain-restarts so updated .env values load (see recreateGateway above
   // for the env_file-at-create-time rationale).
@@ -639,14 +650,89 @@ function register(app, { docker, configPath, otelStore }) {
     }
   });
 
-  // POST wipe wizard state and start fresh. Clears the configurator-managed
-  // .env values, drops the bridged-networks persistence, and recreates the
-  // gateway with a clean environment. Does NOT touch deployment config like
-  // UI_AUTH_PASSWORD (not wizard state) and does NOT wipe the OTel trace store
-  // (separate concern; users can reset that from the dashboard if they need a
-  // clean data slate too).
+  // POST wipe wizard state and start fresh, or scope the wipe to a chosen
+  // subset of connections. Mode is computed server-side from the request
+  // body's connectionIds against the connections currently on record:
+  //
+  // - full (connectionIds empty/absent, or covering every connection):
+  //   clears the configurator-managed .env values, drops the
+  //   bridged-networks persistence, clears the synthetic run, empties
+  //   connections.json via the store, and recreates the gateway with a
+  //   clean environment. Does NOT touch deployment config like
+  //   UI_AUTH_PASSWORD (not wizard state) and does NOT wipe the OTel trace
+  //   store (separate concern; users can reset that from the dashboard if
+  //   they need a clean data slate too).
+  //
+  // - partial (a strict subset of connections is named): removes only
+  //   those connections from the store, rewrites the managed exporter YAML
+  //   from what remains, and recreates the gateway. Leaves bridged
+  //   networks, the synthetic run, and WIZARD_KEYS untouched, since those
+  //   are full-reset concerns, not scoped to a connection subset.
   app.post('/api/lifecycle/reset-onboarding', async (req, res) => {
     const sidecarName = TARGET_CONTAINER();
+    const state = await store.getState();
+    const mode = computeResetMode(req.body && req.body.connectionIds, state.connections.map((c) => c.id));
+
+    if (mode === 'partial') {
+      // Report only the ids that actually named a real connection, not the
+      // raw request payload verbatim (a stale id in the request should not
+      // show up in the response as "deleted").
+      const beforeIds = new Set(state.connections.map((c) => c.id));
+      const deleted = req.body.connectionIds.filter((id) => beforeIds.has(id));
+
+      let afterState;
+      try {
+        afterState = await store.remove(req.body.connectionIds);
+      } catch (e) {
+        console.warn('reset-onboarding: partial remove failed:', e.message);
+        errorLog.push('reset-onboarding.partial.remove', e.message);
+        return res.status(500).json({ error: 'Partial reset failed', details: e.message });
+      }
+
+      try {
+        const enabled = afterState.connections.filter((c) => c.enabled).map((c) => ({ id: c.id, signals: c.signals }));
+        const before = await fsp.readFile(configPath, 'utf8');
+        const rewritten = syncManagedExporters(before, enabled);
+        const envVars = {};
+        (await fsp.readFile(ENV_PATH, 'utf8').catch(() => '')).split('\n').forEach((line) => {
+          if (!line || line.startsWith('#')) return;
+          const i = line.indexOf('=');
+          if (i < 0) return;
+          envVars[line.slice(0, i).trim()] = line.slice(i + 1);
+        });
+        verifyManagedYaml(rewritten, enabled, envVars);
+        await fsp.writeFile(configPath, rewritten, 'utf8');
+      } catch (e) {
+        // The connection removal above already committed to connections.json
+        // and .env, so this is not a total failure from the caller's point of
+        // view - say so, rather than reporting a plain 500 that implies
+        // nothing happened.
+        console.warn('reset-onboarding: partial yaml rewrite failed:', e.message);
+        errorLog.push('reset-onboarding.partial.yaml', e.message);
+        return res.status(500).json({
+          error: 'Connections removed but collector config rewrite failed',
+          details: e.message,
+          deleted,
+          activeId: afterState.activeId,
+        });
+      }
+
+      // A recreate failure here mirrors full mode: the store and yaml writes
+      // already committed, so this is best-effort, not a failure of the
+      // reset itself. Report it alongside a 200 so the caller knows to
+      // restart the gateway manually if needed.
+      let recreateError = null;
+      try {
+        await recreateGateway(docker, sidecarName);
+      } catch (e) {
+        recreateError = e.message;
+        console.warn('reset-onboarding: partial recreate failed:', e.message);
+        errorLog.push('reset-onboarding.partial.recreate', e.message);
+      }
+
+      return res.json({ mode: 'partial', deleted, activeId: afterState.activeId, recreateError });
+    }
+
     const WIZARD_KEYS = ['HELIX_ENDPOINT', 'HELIX_API_KEY', 'X_SOURCE', 'BUSINESS_SERVICE_KEY', 'HELIX_EVENTS_ENDPOINT'];
 
     // 0. Halt any in-flight Step 0 Layer 2 synthetic run and wipe its record
@@ -680,7 +766,14 @@ function register(app, { docker, configPath, otelStore }) {
     const bridgedToDrop = await loadBridgedNetworks();
     await saveBridgedNetworks([]);
 
-    // 3. Recreate the gateway with the cleared environment, explicitly NOT
+    // 3. Empty connections.json (and its namespaced/mirror .env keys) via the
+    //    store, so a full reset also clears the multi-connection state, not
+    //    just the legacy bare wizard keys.
+    if (state.connections.length) {
+      await store.remove(state.connections.map((c) => c.id));
+    }
+
+    // 4. Recreate the gateway with the cleared environment, explicitly NOT
     //    carrying over the runtime-bridged networks. recreateGateway re-attaches
     //    every network the live container is on, so without dropNetworks the
     //    fresh gateway comes back still bridged to the customer's collector —
@@ -697,6 +790,9 @@ function register(app, { docker, configPath, otelStore }) {
     }
 
     res.json({
+      mode: 'full',
+      deleted: state.connections.map((c) => c.id),
+      activeId: null,
       message: 'Onboarding reset',
       clearedKeys: WIZARD_KEYS,
       recreateError,
@@ -819,4 +915,4 @@ function register(app, { docker, configPath, otelStore }) {
   }
 }
 
-module.exports = { register, createGatewayFromScratch };
+module.exports = { register, createGatewayFromScratch, recreateGateway, readEnvAsArray, computeResetMode };
