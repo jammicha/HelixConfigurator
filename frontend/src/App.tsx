@@ -769,6 +769,13 @@ const App = () => {
       showToastMsg('Settings saved. Restarting gateway...');
       const restartRes = await fetch('/api/lifecycle/restart', { method: 'POST' });
       if (!restartRes.ok) {
+        if (restartRes.status === 503) {
+          const body = await restartRes.json().catch(() => null);
+          if (body?.error === 'docker-unavailable') {
+            showToastMsg(body.message || 'Docker Desktop is not running. Start it and try again.', 'error');
+            return;
+          }
+        }
         showToastMsg('Settings saved, but gateway restart failed', 'error');
         return;
       }
@@ -1117,7 +1124,13 @@ const App = () => {
     setRestartingGateway(true);
     setGatewayStatus('restarting');
     try {
-      await fetch('/api/lifecycle/restart', { method: 'POST' });
+      const res = await fetch('/api/lifecycle/restart', { method: 'POST' });
+      if (res.status === 503) {
+        const body = await res.json().catch(() => null);
+        if (body?.error === 'docker-unavailable') {
+          showToastMsg(body.message || 'Docker Desktop is not running. Start it and try again.', 'error');
+        }
+      }
     } catch { /* tick will surface the failure state */ }
     finally { setRestartingGateway(false); }
   };

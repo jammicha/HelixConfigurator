@@ -441,6 +441,21 @@ const createGatewayIfMissing = async (docker, name, configPath) => {
   }
 };
 
+// Fail fast with a clear, contextual error when the Docker daemon is not
+// reachable, so a Docker-target action can surface "start Docker Desktop"
+// instead of a raw dockerode failure. Only the Docker onboarding path calls
+// this; the Kubernetes generate-only path never touches the daemon.
+async function assertDockerUp(docker) {
+  try {
+    await docker.ping();
+  } catch {
+    const err = new Error('Docker Desktop is not running. Start it and try again.');
+    err.statusCode = 503;
+    err.code = 'docker-unavailable';
+    throw err;
+  }
+}
+
 function register(app, { docker, configPath, otelStore, store }) {
   // POST restart the configured target container. Recreates rather than
   // plain-restarts so updated .env values load (see recreateGateway above
@@ -448,6 +463,7 @@ function register(app, { docker, configPath, otelStore, store }) {
   app.post('/api/lifecycle/restart', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
     try {
+      await assertDockerUp(docker);
       const created = await createGatewayIfMissing(docker, targetContainer, configPath);
       if (created) {
         return res.json({ message: `Container ${targetContainer} created successfully` });
@@ -455,6 +471,7 @@ function register(app, { docker, configPath, otelStore, store }) {
       await recreateGateway(docker, targetContainer);
       res.json({ message: `Container ${targetContainer} restarted successfully` });
     } catch (e) {
+      if (e.code === 'docker-unavailable') return res.status(503).json({ error: 'docker-unavailable', message: e.message });
       res.status(500).json({ error: 'Failed to restart container', details: e.message });
     }
   });
@@ -463,9 +480,11 @@ function register(app, { docker, configPath, otelStore, store }) {
   app.post('/api/lifecycle/start', async (req, res) => {
     const targetContainer = TARGET_CONTAINER();
     try {
+      await assertDockerUp(docker);
       await withDockerTimeout(docker.getContainer(targetContainer).start(), 'container.start');
       res.json({ message: `Container ${targetContainer} started successfully` });
     } catch (e) {
+      if (e.code === 'docker-unavailable') return res.status(503).json({ error: 'docker-unavailable', message: e.message });
       // Already-running is a 304 from the API — treat as success.
       if (e.statusCode === 304) return res.json({ message: `Container ${targetContainer} already running` });
       if (e.statusCode === 404) {
@@ -915,4 +934,6 @@ function register(app, { docker, configPath, otelStore, store }) {
   }
 }
 
-module.exports = { register, createGatewayFromScratch, recreateGateway, readEnvAsArray, computeResetMode };
+module.exports = {
+  register, createGatewayFromScratch, recreateGateway, readEnvAsArray, computeResetMode, assertDockerUp,
+};
