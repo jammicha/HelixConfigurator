@@ -33,6 +33,7 @@ publish:
   provider: github
   owner: jammicha
   repo: HelixConfigurator
+afterSign: notarize.js
 mac:
   target:
     - target: dmg
@@ -43,6 +44,8 @@ mac:
   icon: resources/icon.icns
   hardenedRuntime: true
   gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
 win:
   target:
     - target: nsis
