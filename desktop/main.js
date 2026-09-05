@@ -67,6 +67,11 @@ async function main() {
   const devUrl = process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl;
   createWindow(devUrl);
 
+  const { initUpdater } = require('./updater');
+  const updater = initUpdater({ onStatus: (s) => console.log(`[updater] ${s}`) });
+  // keep `updater` for the menu item in Task 11
+  global.helixUpdater = updater;
+
   backend.child.on('exit', (code) => {
     if (quitting) return;
     const choice = dialog.showMessageBoxSync({

@@ -28,6 +28,10 @@ extraResources:
   - from: ../templates
     to: app/templates
 asar: true
+publish:
+  provider: github
+  owner: jammicha
+  repo: HelixConfigurator
 mac:
   target:
     - target: dmg
