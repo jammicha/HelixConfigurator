@@ -9,6 +9,7 @@ let mainWindow = null;
 let backend = null;
 let quitting = false;
 let tray = null;
+let restarting = false;
 
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
@@ -52,8 +53,12 @@ async function main() {
       defaultPath: suggestedName,
     });
     if (canceled || !filePath) return { saved: false };
-    fs.writeFileSync(filePath, data);
-    return { saved: true, filePath };
+    try {
+      fs.writeFileSync(filePath, data);
+      return { saved: true, filePath };
+    } catch (err) {
+      return { saved: false, error: err.message };
+    }
   });
 
   try {
@@ -81,15 +86,25 @@ async function main() {
   buildMenu({
     window: mainWindow,
     onRestartBackend: async () => {
-      if (backend) await backend.stop();
-      backend = await startBackend();
-      mainWindow.loadURL(process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl);
-      tray?.setStatus('running');
+      restarting = true;
+      try {
+        if (backend) await backend.stop();
+        backend = await startBackend();
+        attachExitHandler(backend.child);
+        mainWindow.loadURL(process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl);
+        tray?.setStatus('running');
+      } finally {
+        restarting = false;
+      }
     },
   });
 
-  backend.child.on('exit', (code) => {
-    if (quitting) return;
+  attachExitHandler(backend.child);
+}
+
+function attachExitHandler(child) {
+  child.on('exit', (code) => {
+    if (quitting || restarting) return;
     tray?.setStatus('stopped');
     const choice = dialog.showMessageBoxSync({
       type: 'error',
@@ -98,6 +113,7 @@ async function main() {
       message: 'The Helix Configurator backend stopped unexpectedly.',
       detail: `Exit code: ${code}`,
     });
+    quitting = true;
     if (choice === 0) app.relaunch();
     app.quit();
   });
