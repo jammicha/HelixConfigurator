@@ -72,6 +72,16 @@ async function main() {
   // keep `updater` for the menu item in Task 11
   global.helixUpdater = updater;
 
+  const { buildMenu } = require('./menu');
+  buildMenu({
+    window: mainWindow,
+    onRestartBackend: async () => {
+      if (backend) await backend.stop();
+      backend = await startBackend();
+      mainWindow.loadURL(process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl);
+    },
+  });
+
   backend.child.on('exit', (code) => {
     if (quitting) return;
     const choice = dialog.showMessageBoxSync({
