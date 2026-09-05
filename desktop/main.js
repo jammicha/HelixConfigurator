@@ -8,6 +8,7 @@ const { stateDir } = require('./paths');
 let mainWindow = null;
 let backend = null;
 let quitting = false;
+let tray = null;
 
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
@@ -67,6 +68,10 @@ async function main() {
   const devUrl = process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl;
   createWindow(devUrl);
 
+  const { createTray } = require('./tray');
+  tray = createTray({ window: mainWindow });
+  tray.setStatus('running');
+
   const { initUpdater } = require('./updater');
   const updater = initUpdater({ onStatus: (s) => console.log(`[updater] ${s}`) });
   // keep `updater` for the menu item in Task 11
@@ -79,11 +84,13 @@ async function main() {
       if (backend) await backend.stop();
       backend = await startBackend();
       mainWindow.loadURL(process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl);
+      tray?.setStatus('running');
     },
   });
 
   backend.child.on('exit', (code) => {
     if (quitting) return;
+    tray?.setStatus('stopped');
     const choice = dialog.showMessageBoxSync({
       type: 'error',
       buttons: ['Restart backend', 'Quit'],

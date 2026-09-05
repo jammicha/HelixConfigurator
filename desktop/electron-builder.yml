@@ -14,6 +14,7 @@ files:
   - updater.js
   - package.json
   - node_modules/**/*
+  - resources/trayTemplate.png
 extraResources:
   # Ship the backend and built frontend unpacked under Resources/app so the
   # utilityProcess runs a real file and better-sqlite3's .node loads normally.
