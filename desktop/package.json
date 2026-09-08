@@ -5,7 +5,7 @@
   "description": "Electron desktop wrapper for the Helix OTel Configurator",
   "main": "main.js",
   "scripts": {
-    "rebuild:backend": "electron-rebuild -m ../backend -o better-sqlite3",
+    "rebuild:backend": "electron-rebuild -f -m ../backend -o better-sqlite3",
     "prestart": "npm run rebuild:backend",
     "start": "electron .",
     "predev": "npm run rebuild:backend",
