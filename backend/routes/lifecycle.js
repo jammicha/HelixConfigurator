@@ -24,7 +24,12 @@ const { readLocalViewerEndpoint } = require('../collectorFanout');
 const { runViewerCanary } = require('../viewerCanary');
 
 const TARGET_CONTAINER = () => process.env.TARGET_CONTAINER_NAME || 'helix-gateway';
-const ENV_PATH = path.join(__dirname, '..', '..', '.env');
+const { resolveEnvPath } = require('../statePaths');
+// Honor HELIX_ENV_PATH so the gateway container gets its projected endpoint and
+// key vars from the same .env the connections store writes. In desktop mode
+// that file lives in the OS userData dir; unset, this resolves to the repo-root
+// .env exactly as before.
+const ENV_PATH = resolveEnvPath({ backendDir: path.join(__dirname, '..') });
 
 // Pull an image and wait for completion. dockerode's pull is callback+stream
 // based; followProgress resolves when the layered pull finishes.

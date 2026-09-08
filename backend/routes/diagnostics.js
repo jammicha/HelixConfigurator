@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+const { resolveEnvPath } = require('../statePaths');
 const axios = require('axios');
 const crypto = require('crypto');
 const { PassThrough } = require('stream');
@@ -1080,7 +1081,7 @@ function register(app, { docker, containerLogs, configPath, otelStore }) {
   // GET detailed API key diagnostics.
   app.get('/api/diagnostics/apikey', async (req, res) => {
     try {
-      const envPath = path.join(__dirname, '../../.env');
+      const envPath = resolveEnvPath({ backendDir: path.join(__dirname, '..') });
       const envContent = fs.readFileSync(envPath, 'utf8');
       const vars = {};
       envContent.split('\n').forEach(line => {

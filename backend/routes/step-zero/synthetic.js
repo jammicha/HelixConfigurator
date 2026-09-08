@@ -6,6 +6,7 @@ const axios = require('axios');
 const { buildHelixServiceMapLink } = require('./helix-link');
 const { generateTrace } = require('./synthetic-scenario');
 const { resolveGatewayOtlpBase } = require('../../util');
+const { resolveEnvPath } = require('../../statePaths');
 
 const DEFAULT_DURATION_S = 60;
 const DEFAULT_TRACES_PER_S = 8;
@@ -65,7 +66,7 @@ const defaultProbeGateway = async () => {
 };
 
 const defaultReadEnv = () => {
-  const envPath = path.join(__dirname, '../../../.env');
+  const envPath = resolveEnvPath({ backendDir: path.join(__dirname, '..', '..') });
   try {
     const txt = fs.readFileSync(envPath, 'utf8');
     const out = {};
