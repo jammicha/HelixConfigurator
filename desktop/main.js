@@ -44,6 +44,15 @@ function createWindow(url) {
   });
 }
 
+// In desktop dev the Vite dev server proxies /api to a fixed port, so the
+// supervised backend must bind that same port rather than a random one.
+// dev:desktop sets HELIX_DESKTOP_DEV_BACKEND_PORT for both halves. Unset (the
+// packaged app), the backend takes a random free loopback port as before.
+function desktopDevPort() {
+  const p = Number(process.env.HELIX_DESKTOP_DEV_BACKEND_PORT);
+  return Number.isFinite(p) && p > 0 ? p : undefined;
+}
+
 async function main() {
   fs.mkdirSync(stateDir(), { recursive: true });
 
@@ -62,7 +71,7 @@ async function main() {
   });
 
   try {
-    backend = await startBackend();
+    backend = await startBackend({ freePort: desktopDevPort() });
   } catch (err) {
     dialog.showErrorBox('Helix Configurator', `The backend did not start:\n\n${err.message}`);
     app.quit();
@@ -89,7 +98,7 @@ async function main() {
       restarting = true;
       try {
         if (backend) await backend.stop();
-        backend = await startBackend();
+        backend = await startBackend({ freePort: desktopDevPort() });
         attachExitHandler(backend.child);
         mainWindow.loadURL(process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl);
         tray?.setStatus('running');
