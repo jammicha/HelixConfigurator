@@ -5,7 +5,7 @@ const path = require('path');
 const Docker = require('dockerode');
 const { OtelStore } = require('./otelStore');
 const { makeContainerLogs, IS_CONTAINERIZED } = require('./util');
-const { resolveDataDir, resolveEnvPath, resolveConfigPath } = require('./statePaths');
+const { resolveDataDir, resolveEnvPath, resolveConfigPath, ensureConfigSeeded } = require('./statePaths');
 require('dotenv').config({ path: resolveEnvPath({ backendDir: __dirname }), quiet: true });
 
 const VERSION = require('./package.json').version;
@@ -29,6 +29,10 @@ const explicitHost = resolveHost(process.env);
 const app = express();
 
 const CONFIG_PATH = resolveConfigPath({ backendDir: __dirname });
+// Desktop mode relocates the config into userData, which ships no config, so
+// seed it from the base config (and repair a stray auto-created directory)
+// before any route reads, rewrites, or bind-mounts it. No-op for native/Docker.
+ensureConfigSeeded({ backendDir: __dirname, configPath: CONFIG_PATH });
 const TEMPLATES_DIR = path.join(__dirname, '../templates');
 
 app.use(cors({ credentials: true }));

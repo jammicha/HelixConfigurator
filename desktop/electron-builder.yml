@@ -28,6 +28,10 @@ extraResources:
     to: app/frontend-dist
   - from: ../templates
     to: app/templates
+  # Base collector config. Desktop seeds its userData copy from this on first
+  # run; it must sit beside app/backend so resolveConfigPath's base resolves.
+  - from: ../helix-otel-collector.yaml
+    to: app/helix-otel-collector.yaml
 asar: true
 publish:
   provider: github
