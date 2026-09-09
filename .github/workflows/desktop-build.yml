@@ -22,6 +22,9 @@ permissions:
 jobs:
   build:
     strategy:
+      # Keep building every OS even if one fails, so a macOS problem does not
+      # cancel the Windows installer (and vice versa).
+      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}

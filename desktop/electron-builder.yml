@@ -39,11 +39,16 @@ publish:
   repo: HelixConfigurator
 afterSign: notarize.js
 mac:
+  # Separate arm64 and x64 artifacts rather than a single universal binary.
+  # The universal build merges two per-arch app trees with @electron/universal,
+  # which is fragile around the native better-sqlite3 shipped under Resources.
+  # Per-arch builds sidestep that merge; each ships the fat better-sqlite3 the
+  # stage produces, which is valid for its slice.
   target:
     - target: dmg
-      arch: universal
+      arch: [arm64, x64]
     - target: zip
-      arch: universal
+      arch: [arm64, x64]
   category: public.app-category.developer-tools
   icon: resources/icon.icns
   hardenedRuntime: true
