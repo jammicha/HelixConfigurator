@@ -1,6 +1,6 @@
 {
   "name": "helix-configurator-desktop",
-  "version": "1.6.1",
+  "version": "2.0.0",
   "private": true,
   "description": "Electron desktop wrapper for the Helix OTel Configurator",
   "main": "main.js",
