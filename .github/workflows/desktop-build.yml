@@ -12,7 +12,10 @@ name: desktop-build
 on:
   workflow_dispatch:
   push:
-    tags: ['v*']
+    # Official release tags (vX.Y.Z) get the installers attached to the same
+    # full release the native-release and docker-publish workflows create.
+    # desktop-v* tags are throwaway desktop-only prerelease test builds.
+    tags: ['v*', 'desktop-v*']
 
 # Needed so a tag build can create and upload assets to a GitHub Release
 # using the built-in GITHUB_TOKEN.
@@ -76,14 +79,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --prerelease \
-            --title "Desktop build $GITHUB_REF_NAME" \
-            --notes "Unsigned desktop build for testing. Windows: SmartScreen -> More info -> Run anyway. macOS: right-click the app -> Open the first time." \
-            || echo "release already exists, continuing"
+          tag="$GITHUB_REF_NAME"
+          notes="Windows: SmartScreen -> More info -> Run anyway. macOS: right-click the app -> Open the first time (unsigned build)."
+          if [[ "$tag" == desktop-* ]]; then
+            # Desktop-only test build: this workflow owns a throwaway prerelease.
+            gh release create "$tag" --prerelease \
+              --title "Desktop test build $tag" --notes "$notes" \
+              || echo "release already exists, continuing"
+          else
+            # Official vX.Y.Z tag: the native-release workflow owns the release
+            # (metadata + prerelease flag). Just make sure it exists so we can
+            # add the installers; do not fight it over its settings.
+            gh release create "$tag" --title "$tag" --notes "$notes" \
+              || echo "release already exists, continuing"
+          fi
           shopt -s nullglob
           files=(desktop/dist/*.exe desktop/dist/*.dmg desktop/dist/*.zip)
           if [ ${#files[@]} -gt 0 ]; then
-            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            gh release upload "$tag" "${files[@]}" --clobber
           else
             echo "no installer artifacts found to upload"; exit 1
           fi

@@ -12,19 +12,49 @@ The Helix Configurator is a local diagnostic and management tool that simplifies
 
 ## Distribution
 
-The configurator ships as a **pre-built native package** — no Docker Desktop or
-Docker Compose required to run the configurator itself.
+The configurator ships three ways. The **desktop app** is the primary,
+double-clickable product. The native package zip and the Docker image remain as
+backups, so nothing that worked before goes away.
 
-**Primary path — native package (recommended)**
+**Primary path: desktop app (recommended)**
+
+A real installable app for **macOS and Windows** (in the Dock / Start menu, no
+terminal, no stray browser tab). It bundles the same backend and UI and
+supervises them for you: on launch it starts its own backend on a private
+loopback port and opens the window on the onboarding wizard.
+
+1. Download the installer for your platform from **GitHub Releases**:
+   - **Windows:** `Helix OTel Configurator Setup <version>.exe` (one-click installer).
+   - **macOS, Apple Silicon:** `Helix OTel Configurator-<version>-arm64.dmg`.
+   - **macOS, Intel:** `Helix OTel Configurator-<version>.dmg`.
+2. Run it. There is no `.env` file to create, no launcher script, and no sign-in
+   by default. Everything is configured in the UI, and the app keeps its state
+   (projected config, credentials, and the local trace store) in the OS
+   application-data directory, so the read-only app bundle stays untouched.
+3. **Unsigned for now.** Signing and notarization are not enabled yet, so the
+   first launch is flagged. On **Windows**, SmartScreen shows a warning: click
+   **More info**, then **Run anyway**. On **macOS**, right-click the app and
+   choose **Open** the first time (or clear quarantine as noted in the native
+   section below).
+
+No Docker is needed to run the app. Docker Engine is needed only when you pick
+the **Docker** onboarding target for your apps, so the app can create and manage
+the `helix-gateway` collector container. The **Kubernetes** (generate-only)
+target needs no Docker at all.
+
+**Backup path: native package (zip)**
+
+The pre-built platform zip runs the same backend from a bundled Node runtime,
+driven by a start script. Use it when you cannot install the desktop app.
 
 1. Download the platform zip from **GitHub Releases**
    (`helix-configurator-darwin-arm64.zip`, `linux-amd64`, or `windows-amd64`).
-   Intel Macs: use the Docker image path below — GitHub retired its Intel-Mac
-   runners, so no `darwin-amd64` zip is built.
+   Intel Macs: use the desktop `.dmg` above or the Docker image path below.
+   GitHub retired its Intel-Mac runners, so no `darwin-amd64` zip is built.
 
-   **macOS tip — download from Terminal to skip Gatekeeper:** browser downloads
+   **macOS tip, download from Terminal to skip Gatekeeper:** browser downloads
    are stamped with Apple's quarantine flag and macOS may block `start.command`
-   on first launch (often with only "Move to Trash" / "Done" — no override).
+   on first launch (often with only "Move to Trash" / "Done" and no override).
    Downloads via `curl` or `gh` are not quarantined, so you can double-click the
    launcher immediately after extracting:
 
@@ -56,20 +86,15 @@ Docker Compose required to run the configurator itself.
    Gatekeeper may block the first launch. If Terminal download isn't an option,
    clear the quarantine flag after extracting:
    `xattr -dr com.apple.quarantine helix-configurator/`.
-   Right-click → **Open** sometimes works on older macOS releases but often
+   Right-click, then **Open** sometimes works on older macOS releases but often
    does not on current ones.
 
    **After the first install:** use the in-app **Update available** banner to
-   upgrade — the configurator downloads updates itself (no browser quarantine).
+   upgrade. The configurator downloads updates itself (no browser quarantine).
    For a manual reinstall, prefer the `curl` / `gh` commands above over a
    browser download.
 
-No Docker is needed to run the configurator. Docker Engine (not necessarily
-Docker Desktop) is needed only when you choose the **Docker** onboarding target
-for your apps — so the configurator can create and manage the `helix-gateway`
-collector container.
-
-**Secondary path — Docker image (GHCR)**
+**Backup path: Docker image (GHCR)**
 
 The container image (`ghcr.io/jammicha/helixconfigurator`) is published on
 every merge to `main` and on version tags. **Cloning this repo** and running
@@ -85,6 +110,11 @@ and set `image: ghcr.io/jammicha/helixconfigurator:latest` on the
 ---
 
 ## Getting Started
+
+> **Desktop app users:** skip steps 1 and 2 below. The app has no `.env` file
+> and no launcher. Install it, open it, and configure everything in the
+> onboarding wizard (step 3 onward). The `.env` and launcher instructions here
+> apply to the native zip and Docker backup paths.
 
 ### 1. Configure environment variables
 
@@ -140,7 +170,10 @@ Notes:
 
 ### 2. Start the configurator
 
-**Native package (primary):** run the launcher from the extracted directory:
+**Desktop app (primary):** launch it from the Dock or Start menu. It starts its
+own backend and opens the window automatically. Nothing to run in a terminal.
+
+**Native package (backup):** run the launcher from the extracted directory:
 
 ```bash
 ./start.sh          # Linux
@@ -151,7 +184,7 @@ start.bat           # Windows
 The launcher runs `./node backend/index.js`, waits for `:8765/api/health`, then
 opens the browser automatically.
 
-**Docker image (secondary):**
+**Docker image (backup):**
 
 ```bash
 docker-compose up -d
