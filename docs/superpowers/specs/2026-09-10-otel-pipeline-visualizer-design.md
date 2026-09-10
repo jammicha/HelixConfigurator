@@ -109,15 +109,24 @@ type PipelineGraph = {
 - **Source pseudo-node** ("Your apps") is prepended to every lane whose receivers
   include `otlp`; its `detail` reflects which protocols the otlp receiver enables
   (gRPC `:4317`, HTTP `:4318`).
-- **Sink pseudo-node** ("BMC Helix tenant") is appended to every lane whose exporters
-  include `bmchelix`; its `detail` is the exporter endpoint host if present.
+- **Sink classification is by exporter name, not base type.** The real Helix config
+  uses `otlphttp/bmchelix` (Helix tenant egress) and `otlphttp/helix_local_viewer`
+  (fan-out that feeds the local View OTel Data page); both share the base type
+  `otlphttp`. An exporter whose name contains `bmchelix` gets a **"BMC Helix tenant"**
+  sink appended to its lanes; one whose name contains `helix_local_viewer` gets a
+  **"Local viewer (this app)"** sink. Any other exporter appends a generic
+  **"External endpoint"** sink. `detail` is the exporter's `endpoint` host when present.
 - **Missing nodes:** a pipeline referencing a component absent from the top-level map
   yields a `missing: true` node (mirrors `validateConfig`'s "undefined pipeline
   reference" finding, computed locally for positioning).
 
 ### 2.2 `componentDocs.ts` (static content map)
 
-**What it does:** maps a `componentType` to teaching content. Pure data, in-bundle.
+**What it does:** maps a component identity (exporter/receiver name, then base type) to
+teaching content. Pure data, in-bundle. Base types covered by the shipped templates:
+`otlp`, `otlphttp`, `prometheus`, `batch`, `memory_limiter`, `resource`,
+`k8sattributes`, `tail_sampling`; plus name-based entries for `otlphttp/bmchelix` and
+`otlphttp/helix_local_viewer`.
 
 ```
 type ComponentDoc = {
@@ -134,10 +143,15 @@ Anchoring of the concept explainers the initiative calls for:
   exists).
 - `resource`, `k8sattributes` -> **resource attributes and semantic conventions**.
 - `batch`, `memory_limiter` -> role and why-it-matters (no deep card needed).
-- `bmchelix` -> the Helix egress: what it sends and to which tenant.
+- `prometheus` (receiver) -> role and why-it-matters.
+- `otlphttp` / `otlp` (exporter) -> what an OTLP exporter ships and where.
 
-Unknown component types fall back to a generic "custom component" doc plus a link to
-the OpenTelemetry registry. The content is authored for a newcomer, not a reference.
+Docs resolve by exporter/receiver **name first, then base type**: `otlphttp/bmchelix`
+resolves to a Helix-egress doc ("what it sends and to which tenant"),
+`otlphttp/helix_local_viewer` to a doc explaining the local fan-out that powers View
+OTel Data, and anything else falls back to the base-type doc. Unknown base types fall
+back to a generic "custom component" doc plus a link to the OpenTelemetry registry. The
+content is authored for a newcomer, not a reference.
 
 ### 2.3 `PipelineDiagram.tsx` (presentational)
 
