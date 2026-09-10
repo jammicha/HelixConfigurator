@@ -124,11 +124,26 @@ export function buildPipelineGraph(yamlText: string): GraphResult {
       nodeIds.push(sink.id);
     }
 
-    // Edges: source -> each receiver; then chain the ordered stages; exporter -> its sink.
+    // Edges: source -> each receiver; fan-in/fan-out through processors; exporter -> its sink.
     const src = nodeIds.find(id => nodes[id].kind === 'source');
     if (src) for (const r of recIds) edges.push([src, r]);
-    const chain = [...recIds, ...procIds, ...expIds];
-    for (let i = 0; i < chain.length - 1; i++) edges.push([chain[i], chain[i + 1]]);
+
+    if (procIds.length > 0) {
+      // Each receiver fans in to the first processor.
+      for (const r of recIds) edges.push([r, procIds[0]]);
+      // Chain processors: proc[i] -> proc[i+1].
+      for (let i = 0; i < procIds.length - 1; i++) {
+        edges.push([procIds[i], procIds[i + 1]]);
+      }
+      // Last processor fans out to each exporter.
+      for (const e of expIds) edges.push([procIds[procIds.length - 1], e]);
+    } else {
+      // No processors: each receiver fans out to each exporter.
+      for (const r of recIds) {
+        for (const e of expIds) edges.push([r, e]);
+      }
+    }
+
     for (const name of expNames) edges.push([`exporter:${name}`, `sink:${name}`]);
 
     lanes.push({ signal, nodeIds, edges });
