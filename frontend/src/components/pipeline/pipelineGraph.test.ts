@@ -131,3 +131,65 @@ service:
     expect(edgeSet.has('exporter:otlphttp/endpoint1->exporter:otlphttp/endpoint2')).toBe(false);
   });
 });
+
+describe('buildPipelineGraph (edge cases)', () => {
+  it('returns ok:false with a 1-based line on invalid YAML', () => {
+    const res = buildPipelineGraph('receivers:\n  otlp:\n   protocols: [unclosed');
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(typeof res.error).toBe('string');
+  });
+
+  it('flags an undefined pipeline reference as a missing node', () => {
+    const res = buildPipelineGraph(`
+receivers:
+  otlp: { protocols: { grpc: {} } }
+exporters:
+  otlphttp/bmchelix: { endpoint: x }
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/bmchelix]
+`);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const batch = res.graph.nodes['processor:batch'];
+    expect(batch.missing).toBe(true);
+    expect(batch.kind).toBe('missing');
+  });
+
+  it('reports hasServiceBlock=false when service is absent', () => {
+    const res = buildPipelineGraph('receivers:\n  otlp: {}\n');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.graph.hasServiceBlock).toBe(false);
+    expect(res.graph.lanes).toHaveLength(0);
+  });
+
+  it('handles an empty document', () => {
+    const res = buildPipelineGraph('');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.graph.lanes).toHaveLength(0);
+    expect(res.graph.hasServiceBlock).toBe(false);
+  });
+
+  it('treats named instances by their base type', () => {
+    const res = buildPipelineGraph(`
+receivers:
+  otlp/internal: { protocols: { http: {} } }
+exporters:
+  otlphttp/bmchelix: { endpoint: x }
+service:
+  pipelines:
+    logs:
+      receivers: [otlp/internal]
+      exporters: [otlphttp/bmchelix]
+`);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.graph.nodes['receiver:otlp/internal'].componentType).toBe('otlp');
+  });
+});
