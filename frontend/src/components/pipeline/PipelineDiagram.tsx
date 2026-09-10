@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { AlertTriangle, ArrowRight, ExternalLink } from 'lucide-react';
 import type { PipelineGraph, GraphNode } from './pipelineGraph';
 import { diagramState, layoutLanes, panelContent } from './diagramLayout';
@@ -101,9 +101,20 @@ const ErrorBanner: React.FC<{ parseError: { error: string; line?: number } }> = 
 export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ graph, parseError }) => {
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const state = diagramState(graph, !!parseError);
-  const lanes = layoutLanes(graph);
+
+  // Retain the last graph that was not in an error state, so a transient
+  // parse error (e.g. a mid-keystroke YAML syntax error) can still show the
+  // last-good diagram dimmed under the error banner. The caller may pass an
+  // empty graph on every parse error, so this component cannot trust the
+  // incoming `graph` prop while state === 'error'.
+  const lastGoodGraphRef = useRef<PipelineGraph | null>(null);
+  if (state !== 'error') {
+    lastGoodGraphRef.current = graph;
+  }
 
   if (state === 'error') {
+    const lastGoodGraph = lastGoodGraphRef.current;
+    const lanes = lastGoodGraph ? layoutLanes(lastGoodGraph) : [];
     return (
       <div className="flex flex-col gap-3">
         <ErrorBanner parseError={parseError!} />
@@ -119,6 +130,8 @@ export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ graph, parseEr
   if (state === 'empty') {
     return <EmptyState />;
   }
+
+  const lanes = layoutLanes(graph);
 
   return (
     <div className="flex gap-6">
