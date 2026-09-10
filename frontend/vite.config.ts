@@ -10,9 +10,13 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        // The backend binds PORT (default 8765); the dev proxy follows that
-        // default so `npm run dev` on both halves works with no env var.
-        target: 'http://localhost:8765',
+        // Standalone `npm run dev` targets the backend's default port 8765.
+        // In the desktop dev flow the Electron supervisor binds a dedicated
+        // loopback port and exports HELIX_DESKTOP_DEV_BACKEND_PORT for both
+        // halves, so the proxy follows it there instead of the fixed default.
+        target: process.env.HELIX_DESKTOP_DEV_BACKEND_PORT
+          ? `http://127.0.0.1:${process.env.HELIX_DESKTOP_DEV_BACKEND_PORT}`
+          : 'http://localhost:8765',
         changeOrigin: true,
       }
     }

@@ -11,6 +11,21 @@ type Deps = {
   pushTimelineEvent: (kind: 'restart', message: string) => void;
 };
 
+// When a Docker-target action fails because the daemon is down, the backend
+// returns 503 with { error: 'docker-unavailable', message }. Surface that
+// contextual message so the user knows to start Docker Desktop and try again,
+// instead of a generic failure toast.
+async function dockerUnavailableMessage(res: Response): Promise<string | null> {
+  if (res.status !== 503) return null;
+  try {
+    const body = await res.json();
+    if (body?.error === 'docker-unavailable') return body.message as string;
+  } catch {
+    // Non-JSON body; fall through to the generic message.
+  }
+  return null;
+}
+
 // Gateway start/stop/restart actions plus the shared actionLoading guard.
 // start/stop share one shape; restart additionally flips the status pill to
 // "restarting", records a timeline event, polls until the gateway settles,
@@ -31,7 +46,12 @@ export const useGatewayActions = ({
     setActionLoading(action);
     try {
       const res = await fetch(`/api/lifecycle/${action}`, { method: 'POST' });
-      showToast(res.ok ? messages.ok : messages.fail, res.ok ? 'success' : 'error');
+      if (res.ok) {
+        showToast(messages.ok, 'success');
+      } else {
+        const dockerMsg = await dockerUnavailableMessage(res);
+        showToast(dockerMsg ?? messages.fail, 'error');
+      }
     } catch (e) {
       showToast(messages.err, 'error');
     } finally {
@@ -61,7 +81,8 @@ export const useGatewayActions = ({
         const collectorStatus = await fetch('/api/diagnostics/collector').then(r => r.json());
         setCollectorDiag(collectorStatus);
       } else {
-        showToast('Failed to restart gateway', 'error');
+        const dockerMsg = await dockerUnavailableMessage(res);
+        showToast(dockerMsg ?? 'Failed to restart gateway', 'error');
       }
     } catch (e) {
       showToast('Error restarting gateway', 'error');

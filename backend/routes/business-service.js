@@ -5,11 +5,12 @@
 const path = require('path');
 const { buildBindInstructions, extractServiceKey, collapseNamespaces } = require('../business-service-payloads');
 const { upsertEnvVar } = require('../envFile');
+const { resolveEnvPath } = require('../statePaths');
 
 function register(app, {
   otelStore,
   env = process.env,
-  envPath = path.join(__dirname, '..', '..', '.env'),
+  envPath = resolveEnvPath({ backendDir: path.join(__dirname, '..') }),
 } = {}) {
   const tenantId = () => String((env.HELIX_API_KEY || '').split('::')[0] || '').trim();
 

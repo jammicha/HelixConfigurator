@@ -37,4 +37,12 @@ function resolvePublishedPort(env, { containerized = false } = {}) {
   return DEFAULT_PORT;
 }
 
-module.exports = { resolvePort, resolvePublishedPort, DEFAULT_PORT };
+// A desktop (Electron) install pins HOST=127.0.0.1 so the API is never exposed
+// to the LAN. Docker and native-script installs leave HOST unset and keep the
+// existing dual-stack bind.
+function resolveHost(env) {
+  const h = typeof env.HOST === 'string' ? env.HOST.trim() : '';
+  return h.length > 0 ? h : null;
+}
+
+module.exports = { resolvePort, resolvePublishedPort, resolveHost, DEFAULT_PORT };

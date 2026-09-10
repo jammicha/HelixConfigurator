@@ -1,0 +1,141 @@
+// desktop/main.js
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const fs = require('fs');
+const path = require('path');
+const { startBackend } = require('./backend');
+const { stateDir } = require('./paths');
+
+let mainWindow = null;
+let backend = null;
+let quitting = false;
+let tray = null;
+let restarting = false;
+
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+  app.whenReady().then(main);
+}
+
+function createWindow(url) {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.loadURL(url);
+
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    shell.openExternal(targetUrl);
+    return { action: 'deny' };
+  });
+}
+
+// In desktop dev the Vite dev server proxies /api to a fixed port, so the
+// supervised backend must bind that same port rather than a random one.
+// dev:desktop sets HELIX_DESKTOP_DEV_BACKEND_PORT for both halves. Unset (the
+// packaged app), the backend takes a random free loopback port as before.
+function desktopDevPort() {
+  const p = Number(process.env.HELIX_DESKTOP_DEV_BACKEND_PORT);
+  return Number.isFinite(p) && p > 0 ? p : undefined;
+}
+
+async function main() {
+  fs.mkdirSync(stateDir(), { recursive: true });
+
+  ipcMain.handle('helix:open-data-folder', () => shell.openPath(stateDir()));
+  ipcMain.handle('helix:save-file', async (_evt, { suggestedName, data }) => {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: suggestedName,
+    });
+    if (canceled || !filePath) return { saved: false };
+    try {
+      fs.writeFileSync(filePath, data);
+      return { saved: true, filePath };
+    } catch (err) {
+      return { saved: false, error: err.message };
+    }
+  });
+
+  try {
+    backend = await startBackend({ freePort: desktopDevPort() });
+  } catch (err) {
+    dialog.showErrorBox('Helix Configurator', `The backend did not start:\n\n${err.message}`);
+    app.quit();
+    return;
+  }
+
+  // In dev, load the Vite dev server (HMR); in prod, load the backend-served UI.
+  const devUrl = process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl;
+  createWindow(devUrl);
+
+  const { createTray } = require('./tray');
+  tray = createTray({ window: mainWindow });
+  tray.setStatus('running');
+
+  const { initUpdater } = require('./updater');
+  const updater = initUpdater({ onStatus: (s) => console.log(`[updater] ${s}`) });
+  // keep `updater` for the menu item in Task 11
+  global.helixUpdater = updater;
+
+  const { buildMenu } = require('./menu');
+  buildMenu({
+    window: mainWindow,
+    onRestartBackend: async () => {
+      restarting = true;
+      try {
+        if (backend) await backend.stop();
+        backend = await startBackend({ freePort: desktopDevPort() });
+        attachExitHandler(backend.child);
+        mainWindow.loadURL(process.env.HELIX_DESKTOP_DEV ? 'http://127.0.0.1:3000' : backend.baseUrl);
+        tray?.setStatus('running');
+      } finally {
+        restarting = false;
+      }
+    },
+  });
+
+  attachExitHandler(backend.child);
+}
+
+function attachExitHandler(child) {
+  child.on('exit', (code) => {
+    if (quitting || restarting) return;
+    tray?.setStatus('stopped');
+    const choice = dialog.showMessageBoxSync({
+      type: 'error',
+      buttons: ['Restart backend', 'Quit'],
+      defaultId: 0,
+      message: 'The Helix Configurator backend stopped unexpectedly.',
+      detail: `Exit code: ${code}`,
+    });
+    quitting = true;
+    if (choice === 0) app.relaunch();
+    app.quit();
+  });
+}
+
+app.on('before-quit', async (e) => {
+  if (quitting || !backend) return;
+  e.preventDefault();
+  quitting = true;
+  await backend.stop();
+  app.quit();
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});

@@ -4,12 +4,12 @@
 // wanting real SSO should put a proxy in front.
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
 const Docker = require('dockerode');
 
 const UI_AUTH_REQUIRED = !!process.env.UI_AUTH_PASSWORD;
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24h
-const ENV_PATH = path.join(__dirname, '..', '.env');
+const { resolveEnvPath } = require('./statePaths');
+const ENV_PATH = resolveEnvPath({ backendDir: __dirname });
 // The configurator's own container name. Override via SELF_CONTAINER_NAME if
 // the compose service is renamed; default matches the shipped compose file.
 const SELF_CONTAINER = () => process.env.SELF_CONTAINER_NAME || 'helix-configurator';

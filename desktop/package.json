@@ -1,0 +1,30 @@
+{
+  "name": "helix-configurator-desktop",
+  "version": "1.6.1",
+  "private": true,
+  "description": "Electron desktop wrapper for the Helix OTel Configurator",
+  "main": "main.js",
+  "scripts": {
+    "rebuild:backend": "electron-rebuild -f -m ../backend -o better-sqlite3",
+    "prestart": "npm run rebuild:backend",
+    "start": "electron .",
+    "predev": "npm run rebuild:backend",
+    "dev": "cross-env HELIX_DESKTOP_DEV=1 electron .",
+    "test": "vitest run",
+    "predist": "node scripts/stage-backend.js",
+    "dist": "electron-builder --publish never",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "@electron/notarize": "^3.1.1",
+    "@electron/rebuild": "^3.6.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "get-port": "^5.1.1"
+  }
+}

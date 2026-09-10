@@ -5,7 +5,8 @@ const path = require('path');
 const Docker = require('dockerode');
 const { OtelStore } = require('./otelStore');
 const { makeContainerLogs, IS_CONTAINERIZED } = require('./util');
-require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
+const { resolveDataDir, resolveEnvPath, resolveConfigPath, ensureConfigSeeded } = require('./statePaths');
+require('dotenv').config({ path: resolveEnvPath({ backendDir: __dirname }), quiet: true });
 
 const VERSION = require('./package.json').version;
 
@@ -22,11 +23,16 @@ const { requireAuth, registerAuthRoutes } = require('./auth');
 const { errorHandler } = require('./errorHandler');
 const { classifyPortOwnership, reportPortOwnership } = require('./preflight');
 
-const { resolvePort } = require('./portConfig');
+const { resolvePort, resolveHost } = require('./portConfig');
 const port = resolvePort(process.env);
+const explicitHost = resolveHost(process.env);
 const app = express();
 
-const CONFIG_PATH = path.join(__dirname, '../helix-otel-collector.yaml');
+const CONFIG_PATH = resolveConfigPath({ backendDir: __dirname });
+// Desktop mode relocates the config into userData, which ships no config, so
+// seed it from the base config (and repair a stray auto-created directory)
+// before any route reads, rewrites, or bind-mounts it. No-op for native/Docker.
+ensureConfigSeeded({ backendDir: __dirname, configPath: CONFIG_PATH });
 const TEMPLATES_DIR = path.join(__dirname, '../templates');
 
 app.use(cors({ credentials: true }));
@@ -82,7 +88,6 @@ require('./routes/update').registerPublicRoutes(app, {});
 // --- OTel trace store (local fan-out from helix-gateway) -----------------
 // SQLite lives in a mounted volume so traces survive container restarts.
 // Outside Docker we fall back to backend/data so dev is self-contained.
-const { resolveDataDir } = require('./statePaths');
 const DATA_DIR = resolveDataDir({ appDirExists: IS_CONTAINERIZED, backendDir: __dirname });
 const OTEL_DB_PATH = process.env.OTEL_DB_PATH || path.join(DATA_DIR, 'otel-store.db');
 const otelStore = new OtelStore({ dbPath: OTEL_DB_PATH });
@@ -93,7 +98,7 @@ console.log(`OTel trace store: ${OTEL_DB_PATH}`);
 // substituted values are projected into the repo-root .env, which is the
 // same file env.js and lifecycle.js have always used.
 const { createConnectionsStore } = require('./connectionsStore');
-const ENV_PATH = path.join(__dirname, '..', '.env');
+const ENV_PATH = resolveEnvPath({ backendDir: __dirname });
 const CONNECTIONS_PATH = path.join(DATA_DIR, 'connections.json');
 const connectionsStore = createConnectionsStore({ connectionsPath: CONNECTIONS_PATH, envPath: ENV_PATH });
 
@@ -165,24 +170,25 @@ const servers = [];
 let ipv4Bound = false;
 
 const start = async () => {
-  // IPv6 first, and ipv6Only so it cannot claim the v4 wildcard implicitly.
-  try {
-    servers.push(await listenOn({ port, host: '::', ipv6Only: true }));
-  } catch (e) {
-    // A host with no IPv6 at all is fine; we fall through to the v4 bind.
-    if (e.code !== 'EADDRINUSE' && e.code !== 'EAFNOSUPPORT' && e.code !== 'EADDRNOTAVAIL') throw e;
-  }
-
-  try {
-    servers.push(await listenOn({ port, host: '0.0.0.0' }));
+  if (explicitHost) {
+    // Desktop mode: bind exactly one host (loopback) and skip the dual-stack dance.
+    servers.push(await listenOn({ port, host: explicitHost }));
     ipv4Bound = true;
-  } catch (e) {
-    // EADDRINUSE is the expected squatter case; the preflight below explains
-    // it. Any other IPv4 bind error is logged and tolerated as long as IPv6
-    // is already up — exiting is only correct when neither stack bound.
-    if (e.code !== 'EADDRINUSE') {
-      if (servers.length === 0) throw e;
-      console.error(`IPv4 bind on port ${port} failed:`, e);
+  } else {
+    // IPv6 first, and ipv6Only so it cannot claim the v4 wildcard implicitly.
+    try {
+      servers.push(await listenOn({ port, host: '::', ipv6Only: true }));
+    } catch (e) {
+      if (e.code !== 'EADDRINUSE' && e.code !== 'EAFNOSUPPORT' && e.code !== 'EADDRNOTAVAIL') throw e;
+    }
+    try {
+      servers.push(await listenOn({ port, host: '0.0.0.0' }));
+      ipv4Bound = true;
+    } catch (e) {
+      if (e.code !== 'EADDRINUSE') {
+        if (servers.length === 0) throw e;
+        console.error(`IPv4 bind on port ${port} failed:`, e);
+      }
     }
   }
 

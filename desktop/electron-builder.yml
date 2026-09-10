@@ -1,0 +1,65 @@
+appId: com.bmc.helix.otel-configurator
+productName: Helix OTel Configurator
+directories:
+  output: dist
+  buildResources: resources
+# The whole repo root is the build context; only what we list is included.
+files:
+  - main.js
+  - backend.js
+  - paths.js
+  - preload.js
+  - menu.js
+  - tray.js
+  - updater.js
+  - package.json
+  - node_modules/**/*
+  - resources/trayTemplate.png
+extraResources:
+  # Ship the backend and built frontend unpacked under Resources/app so the
+  # utilityProcess runs a real file and better-sqlite3's .node loads normally.
+  # The backend comes from a production-only staged copy (see
+  # scripts/stage-backend.js, run automatically via the predist script)
+  # because the live backend/node_modules carries devDependency native
+  # binaries that break the macOS universal (arm64+x64) merge.
+  - from: .backend-stage
+    to: app/backend
+  - from: ../frontend/dist
+    to: app/frontend-dist
+  - from: ../templates
+    to: app/templates
+  # Base collector config. Desktop seeds its userData copy from this on first
+  # run; it must sit beside app/backend so resolveConfigPath's base resolves.
+  - from: ../helix-otel-collector.yaml
+    to: app/helix-otel-collector.yaml
+asar: true
+publish:
+  provider: github
+  owner: jammicha
+  repo: HelixConfigurator
+afterSign: notarize.js
+mac:
+  # Separate arm64 and x64 artifacts rather than a single universal binary.
+  # The universal build merges two per-arch app trees with @electron/universal,
+  # which is fragile around the native better-sqlite3 shipped under Resources.
+  # Per-arch builds sidestep that merge; each ships the fat better-sqlite3 the
+  # stage produces, which is valid for its slice.
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  icon: resources/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: resources/icon.ico
+nsis:
+  oneClick: true
+  perMachine: false

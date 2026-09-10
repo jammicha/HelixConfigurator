@@ -12,6 +12,13 @@
     "lint:frontend": "npm --prefix frontend run lint",
     "build": "npm --prefix frontend run build",
     "dev:backend": "npm --prefix backend start",
-    "dev:frontend": "npm --prefix frontend run dev"
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:desktop": "cross-env HELIX_DESKTOP_DEV_BACKEND_PORT=8799 concurrently -k \"npm --prefix frontend run dev\" \"npm --prefix desktop run dev\"",
+    "build:desktop": "npm run build && npm --prefix desktop run dist",
+    "dist": "npm run build:desktop"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "cross-env": "^7.0.3"
   }
 }

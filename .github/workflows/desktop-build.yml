@@ -1,0 +1,89 @@
+name: desktop-build
+
+# Builds the Helix OTel Configurator desktop app on macOS and Windows and
+# uploads the packaged artifacts. Signing stays off here: it is env-driven
+# (Task 15) and the notarize afterSign hook self-skips without APPLE_* env,
+# so unsigned artifacts come out clean until signing secrets are added.
+#
+# A full headless GUI launch assertion is a follow-up (see Task 16 brief,
+# Step 2). Until that lands, the gate is the manual packaged smoke test
+# (macOS Task 8 Step 4, Windows Task 9 Step 3) plus the desktop supervisor
+# unit test, which this workflow runs in CI below.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+# Needed so a tag build can create and upload assets to a GitHub Release
+# using the built-in GITHUB_TOKEN.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      # Keep building every OS even if one fails, so a macOS problem does not
+      # cancel the Windows installer (and vice versa).
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22, not 20: @electron/notarize@3 wants node>=22.12, and 22 is
+      # compatible with electron 33 / electron-builder / better-sqlite3.
+      # This keeps the runner ready for signing once secrets land, without
+      # changing anything about today's unsigned build.
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm ci --prefix desktop
+
+      # Cheap regression gate: the desktop supervisor unit test.
+      - run: npm --prefix desktop test
+
+      # Must run before `desktop run dist`: packaging ships frontend/dist,
+      # so the frontend has to be built first.
+      - run: npm run build
+
+      # predist (scripts/stage-backend.js) stages a production-only backend
+      # copy and rebuilds better-sqlite3 for the Electron ABI: universal
+      # (both arches, lipo'd together) on macOS, host arch on Windows. Both
+      # fetch prebuilds over the network, which GitHub-hosted runners allow
+      # by default. electron-builder then packages: macOS produces a
+      # universal dmg + zip, Windows produces the nsis installer.
+      - run: npm --prefix desktop run dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helix-desktop-${{ matrix.os }}
+          path: desktop/dist/*
+
+      # On a version tag push, attach the installers to a GitHub Release so
+      # they can be downloaded on any machine (cleaner than digging an Actions
+      # artifact out of the run). Unsigned build: on Windows, SmartScreen needs
+      # "More info" then "Run anyway"; on macOS, right-click the app and choose
+      # Open the first time. Both matrix legs target the same release: whichever
+      # runs first creates it, the other adds its own OS's files. nullglob stops
+      # a non-matching pattern (for example *.exe on macOS) from uploading as a
+      # literal filename.
+      - name: Attach installers to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --prerelease \
+            --title "Desktop build $GITHUB_REF_NAME" \
+            --notes "Unsigned desktop build for testing. Windows: SmartScreen -> More info -> Run anyway. macOS: right-click the app -> Open the first time." \
+            || echo "release already exists, continuing"
+          shopt -s nullglob
+          files=(desktop/dist/*.exe desktop/dist/*.dmg desktop/dist/*.zip)
+          if [ ${#files[@]} -gt 0 ]; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            echo "no installer artifacts found to upload"; exit 1
+          fi
