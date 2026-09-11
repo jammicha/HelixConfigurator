@@ -53,10 +53,22 @@ import { computeViewerFanoutCellState, type VerifyFanoutResponse } from './compo
 import { DiagnosticLogPanel } from './components/dashboard/DiagnosticLogPanel';
 import { GatewayConfigEditor } from './components/dashboard/GatewayConfigEditor';
 import { ActiveConnectionSwitcher } from './components/dashboard/ActiveConnectionSwitcher';
+import { buildPipelineGraph } from './components/pipeline/pipelineGraph';
 
 const App = () => {
   const monaco = useMonaco();
   const [config, setConfig] = useState('');
+  // Diagram | YAML toggle for the Gateway Config card. Default 'yaml' keeps
+  // the existing editor as the first thing a user sees.
+  const [configView, setConfigView] = useState<'yaml' | 'diagram'>('yaml');
+  // Debounced copy of `config` so the diagram does not re-parse on every
+  // keystroke; the pipeline graph is derived from this instead of `config`.
+  const [debouncedConfig, setDebouncedConfig] = useState(config);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedConfig(config), 350);
+    return () => clearTimeout(t);
+  }, [config]);
+  const pipelineGraphResult = useMemo(() => buildPipelineGraph(debouncedConfig), [debouncedConfig]);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   // Persist mid-wizard step so a browser refresh doesn't send the user back
@@ -1728,6 +1740,10 @@ const App = () => {
                 onConfigChange={(v) => { setConfig(v); clearEditorMarkers(); }}
                 editorRef={editorRef}
                 onSaveShortcut={() => handleUpdateConfigRef.current()}
+                view={configView}
+                onViewChange={setConfigView}
+                diagramGraph={pipelineGraphResult.ok ? pipelineGraphResult.graph : { nodes: {}, lanes: [], hasServiceBlock: false }}
+                diagramParseError={pipelineGraphResult.ok ? undefined : { error: pipelineGraphResult.error, line: pipelineGraphResult.line }}
               />
             </>
           )}
